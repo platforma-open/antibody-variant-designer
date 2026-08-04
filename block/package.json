@@ -1,0 +1,71 @@
+{
+  "name": "@platforma-open/milaboratories.antibody-variant-designer.block",
+  "version": "1.0.0",
+  "files": [
+    "dist",
+    "block-pack"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "sources": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "ts-builder build --target block-facade && block-tools pack",
+    "check": "ts-builder type-check --target block-facade",
+    "prepublishOnly": "block-tools publish -r s3://milab-euce1-prod-pkgs-s3-block-registry/pub/releases/?region=eu-central-1 --registry-serve-url https://blocks.pl-open.science",
+    "do-pack": "shx rm -f package.tgz && pnpm pack && shx mv *.tgz package.tgz"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@milaboratories/ts-builder": "catalog:",
+    "@milaboratories/ts-configs": "catalog:",
+    "@platforma-open/milaboratories.antibody-variant-designer.model": "workspace:*",
+    "@platforma-open/milaboratories.antibody-variant-designer.ui": "workspace:*",
+    "@platforma-open/milaboratories.antibody-variant-designer.workflow": "workspace:*",
+    "@platforma-sdk/block-tools": "catalog:",
+    "@platforma-sdk/model": "catalog:",
+    "shx": "catalog:",
+    "typescript": "catalog:"
+  },
+  "block": {
+    "components": {
+      "workflow": "@platforma-open/milaboratories.antibody-variant-designer.workflow/dist/tengo/tpl/main.plj.gz",
+      "model": "@platforma-open/milaboratories.antibody-variant-designer.model/dist/model.json",
+      "ui": "@platforma-open/milaboratories.antibody-variant-designer.ui/dist"
+    },
+    "meta": {
+      "title": "Antibody Variant Designer",
+      "description": "Ranked antibody variant hypotheses that remove chemical liabilities.",
+      "longDescription": "file:../docs/description.md",
+      "changelog": "file:../CHANGELOG.md",
+      "logo": "file:logos/block-logo.png",
+      "url": "https://github.com/platforma-open/antibody-variant-designer",
+      "support": "mailto:support@milaboratories.com",
+      "tags": [
+        "antibody",
+        "developability",
+        "liabilities",
+        "protein-design"
+      ],
+      "organization": {
+        "name": "MiLaboratories Inc",
+        "url": "https://milaboratories.com/",
+        "logo": "file:logos/organization-logo.png"
+      },
+      "supportedPlatforms": [
+        "linux-x64",
+        "linux-aarch64",
+        "macosx-x64",
+        "macosx-aarch64",
+        "windows-x64"
+      ]
+    }
+  }
+}
