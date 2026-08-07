@@ -60,6 +60,7 @@ def write_triaged(path: str, triaged_list: list[triage.Triaged]) -> None:
             "site": [r.to_json() for r in t.site],
             "verdict": t.verdict,
             "lowConfidence": t.low_confidence,
+            "confidenceAngstroms": t.confidence_angstroms,
             "rsasa": t.rsasa,
         }
         for t in triaged_list
@@ -78,6 +79,7 @@ def read_triaged(path: str) -> list[triage.Triaged]:
             site=[residue_store.Residue.from_json(r) for r in row["site"]],
             verdict=row["verdict"],
             low_confidence=row["lowConfidence"],
+            confidence_angstroms=row["confidenceAngstroms"],
             rsasa=row["rsasa"],
         )
         for row in rows

@@ -21,7 +21,7 @@ def _residue(chain, offset, imgt=None, region="CDR1"):
     )
 
 
-def _triaged(site, verdict="exposed", low_confidence=False, rsasa=0.5):
+def _triaged(site, verdict="exposed", low_confidence=False, confidence_angstroms=3.0, rsasa=0.5):
     return triage.Triaged(
         definition_id="deamidation_ng",
         liability_type="deamidation",
@@ -30,6 +30,7 @@ def _triaged(site, verdict="exposed", low_confidence=False, rsasa=0.5):
         site=site,
         verdict=verdict,
         low_confidence=low_confidence,
+        confidence_angstroms=confidence_angstroms,
         rsasa=rsasa,
     )
 

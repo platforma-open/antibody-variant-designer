@@ -27,6 +27,7 @@ class Triaged:
     site: list[residue_store.Residue]
     verdict: str  # "exposed" | "buried" | "fixability-declined"
     low_confidence: bool
+    confidence_angstroms: float | None
     rsasa: float | None
 
 
@@ -95,6 +96,22 @@ def _low_confidence_for(
     return False
 
 
+def _worst_confidence_for(
+    hit,
+    confidence_lookup: dict[tuple[str, str], float | None],
+) -> float | None:
+    """The worst (highest-error, in ångström) measured confidence over
+    `hit.site`, or `None` when every residue in the span is unmeasured.
+    Independent of any threshold — `_low_confidence_for` turns the same
+    lookup into a pass/fail warning; this is the raw value a later step
+    displays as-is."""
+    measured = [
+        confidence_lookup.get((residue.chain, residue.imgt)) for residue in hit.site
+    ]
+    measured = [c for c in measured if c is not None]
+    return max(measured) if measured else None
+
+
 def verdict_for(
     hits: list,
     rsasa_lookup: dict[tuple[str, str], float | None],
@@ -117,6 +134,7 @@ def verdict_for(
         low_confidence = _low_confidence_for(
             hit, confidence_lookup, fr_confidence_threshold, cdr_confidence_threshold
         )
+        confidence_angstroms = _worst_confidence_for(hit, confidence_lookup)
         triaged.append(
             Triaged(
                 definition_id=hit.definition_id,
@@ -126,6 +144,7 @@ def verdict_for(
                 site=hit.site,
                 verdict=verdict,
                 low_confidence=low_confidence,
+                confidence_angstroms=confidence_angstroms,
                 rsasa=rsasa,
             )
         )

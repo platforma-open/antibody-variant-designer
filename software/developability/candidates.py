@@ -19,6 +19,16 @@ before the re-scan even runs.
 a region's full residue list, not to a bare site; re-scanning a cysteine
 candidate over its own (shorter) site is an approximation this entrypoint
 accepts because, again, the full region is not something it can see.
+
+A surviving candidate's `tolerance` is the worst (lowest) AntiFold
+perplexity among its edited positions — a property of the position itself,
+independent of which amino acid was substituted there, unlike the
+per-amino-acid log-probability `_top_substitutions` ranks by. `region`,
+`low_confidence` and `worst_confidence_angstroms` ride along unchanged from
+the triaged liability; `addressed_target` and `changed_positions` are
+built here, from the taxonomy's own label and the fixed
+`<chain>:<wt><imgtLabel><mut>` rendering, so `ranking.py` never has to
+re-read `triaged.json` or the taxonomy to report either one.
 """
 
 import argparse
@@ -67,6 +77,25 @@ def _rescan_clears(mutated_site: list, taxonomy: list[dict]) -> bool:
     return not hits
 
 
+def _changed_positions(edits: tuple) -> str:
+    """The fixed CSV-contract spelling: `<chain>:<wt><imgtLabel><mut>`,
+    comma-separated, one entry per edit in site order."""
+    return ", ".join(f"{e.chain}:{e.wild_type}{e.imgt}{e.to}" for e in edits)
+
+
+def _addressed_target(definition_id: str, site: list, taxonomy_by_id: dict) -> str:
+    """A human-readable label for the liability this candidate was built
+    to clear — the taxonomy's own name plus where it sits, since neither
+    `triage.Triaged` nor `candidate_store.Candidate` carries a display
+    string on its own."""
+    definition = taxonomy_by_id.get(definition_id, {})
+    name = definition.get("name") or definition_id
+    start = site[0]
+    if start.region:
+        return f"{name} @ {start.region} {start.chain}:{start.imgt}"
+    return f"{name} @ {start.chain}:{start.imgt}"
+
+
 def build_candidates(
     triaged_list: list,
     tolerance_lookup: dict,
@@ -80,6 +109,7 @@ def build_candidates(
     `max_edits_per_variant` is skipped, and a site with no admissible
     substitution at any of its positions is skipped, both before the
     re-scan runs at all."""
+    taxonomy_by_id = {d["id"]: d for d in taxonomy}
     candidates: list[candidate_store.Candidate] = []
     for triaged in triaged_list:
         site = triaged.site
@@ -91,6 +121,14 @@ def build_candidates(
         ]
         if any(len(options) == 0 for options in per_position_options):
             continue
+
+        # A property of the positions themselves, the same for every
+        # combination substituted there — computed once per liability
+        # rather than once per candidate.
+        structural_tolerance = min(
+            tolerance_lookup[(residue.chain, residue.imgt)]["perplexity"] for residue in site
+        )
+        addressed_target = _addressed_target(triaged.definition_id, site, taxonomy_by_id)
 
         for combo in itertools.product(*per_position_options):
             mutated_site = [
@@ -110,13 +148,16 @@ def build_candidates(
                 )
                 for residue, to_aa in zip(site, combo, strict=True)
             )
-            tolerance = min(
-                tolerance_lookup[(residue.chain, residue.imgt)]["logProbs"][to_aa]
-                for residue, to_aa in zip(site, combo, strict=True)
-            )
             candidates.append(
                 candidate_store.Candidate(
-                    target_definition_id=triaged.definition_id, edits=edits, tolerance=tolerance
+                    target_definition_id=triaged.definition_id,
+                    edits=edits,
+                    tolerance=structural_tolerance,
+                    region=site[0].region,
+                    low_confidence=triaged.low_confidence,
+                    worst_confidence_angstroms=triaged.confidence_angstroms,
+                    addressed_target=addressed_target,
+                    changed_positions=_changed_positions(edits),
                 )
             )
     return candidates

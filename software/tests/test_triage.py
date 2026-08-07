@@ -87,6 +87,37 @@ class TestLowConfidenceIsOrthogonalToVerdict:
         assert triaged.low_confidence is True
 
 
+class TestConfidenceAngstromsIsTheRawWorstValue:
+    def test_worst_value_over_a_multi_residue_site_is_the_maximum(self):
+        site = [_residue("H", 0), _residue("H", 1, "G")]
+        hit = _motif(site)
+        rsasa_lookup = {("H", "1"): 0.9}
+        confidence_lookup = {("H", "1"): 3.0, ("H", "2"): 7.5}
+
+        [triaged] = verdict_for([hit], rsasa_lookup, confidence_lookup, RSASA_BURIED_CUTOFF)
+
+        assert triaged.confidence_angstroms == 7.5
+
+    def test_a_site_with_no_measured_residue_is_none(self):
+        site = [_residue("H", 0)]
+        hit = _motif(site)
+        rsasa_lookup = {("H", "1"): 0.9}
+
+        [triaged] = verdict_for([hit], rsasa_lookup, {}, RSASA_BURIED_CUTOFF)
+
+        assert triaged.confidence_angstroms is None
+
+    def test_an_unmeasured_residue_beside_a_measured_one_does_not_win_the_max(self):
+        site = [_residue("H", 0), _residue("H", 1, "G")]
+        hit = _motif(site)
+        rsasa_lookup = {("H", "1"): 0.9}
+        confidence_lookup = {("H", "1"): 4.2}  # ("H", "2") stays unmeasured
+
+        [triaged] = verdict_for([hit], rsasa_lookup, confidence_lookup, RSASA_BURIED_CUTOFF)
+
+        assert triaged.confidence_angstroms == 4.2
+
+
 class TestRsasaRoundTrips:
     def test_rsasa_field_carries_the_value_used_to_gate_the_verdict(self):
         site = [_residue("H", 0)]
