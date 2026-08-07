@@ -1,0 +1,26 @@
+# Heavy-atom-only Ala-X-Ala reference SASAs, Yang & Blundell 1996.
+# Computed with FreeSASA + Shrake-Rupley (1.4 A probe), matching the
+# runtime's algorithm so rSASA = SASA / ref stays consistent.
+# Re-derived via software/scripts/derive_ala_x_ala_refs.py.
+# residue, total (A^2), sidechain (A^2)
+residue	total	sidechain
+ALA	110.5765	67.597
+ARG	253.0982	211.4707
+ASN	163.0673	121.6017
+ASP	157.7214	116.0938
+CYS	139.9171	96.9376
+GLN	185.3045	145.0289
+GLU	186.4684	143.8415
+GLY	81.8339	0.0
+HIS	191.5515	151.0853
+ILE	185.8127	156.8251
+LEU	174.6896	136.546
+LYS	212.0959	170.4683
+MET	196.9515	155.324
+PHE	212.9487	172.4825
+PRO	138.9795	105.4514
+SER	125.9763	81.9974
+THR	141.8812	107.5729
+TRP	260.3585	221.2442
+TYR	224.7471	184.2808
+VAL	162.3029	121.6746
