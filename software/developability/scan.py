@@ -1,19 +1,26 @@
-"""Total liability scan and non-destructive triage, the entrypoint that
-writes `triaged.json` and `liabilities.tsv`.
+"""Residue indexing, total liability scan and non-destructive triage — the
+`index-and-scan` entrypoint, which writes the residue index, one
+`triaged.json` per antibody and the dataset-wide `liabilities.tsv`.
 
-Fused on purpose: exposure, detection and triage all read the same residue
-table, and a verdict needs exposure and detection at once, so no earlier
-boundary inside this step can attribute a skip. `exposure.py`, `motifs.py`,
-`cysteine.py` and `triage.py` stay separate modules; only the step itself is
-one exec.
+Four phases, one exec, because they are one deployment unit and nothing
+between them is read by anything else. `structure.py` indexes; `exposure.py`,
+`motifs.py`, `cysteine.py` and `triage.py` do the rest. They stay separate
+modules — only the exec is one. A verdict needs exposure and detection at
+once, so no boundary inside the scan could attribute a skip anyway.
 
-Writes two artifacts. `--out-triaged` carries only the liabilities this run
-may act on — verdict `"exposed"` — the exact set `candidates.py` reads.
-`--out-liabilities` carries every triaged liability,
-including the ones triage declined, because the Parents page has no other
-source for a `buried` or `fixability-declined` row. Both are written even
-when nothing survives triage, so an antibody with zero variants still has
-data for the Parents page.
+**One reason per antibody.** The index phase short-circuits the scan phase,
+so a structure that cannot be indexed is named by the index phase alone. And
+every output file is written only for the antibodies that got that far: a
+skipped antibody leaves no `residues.json` and no `triaged.json`, which is
+what lets a later step read absence as "already named". An empty placeholder
+would make that check a no-op and the antibody would be counted twice.
+
+`--out-triaged-dir` carries only the liabilities this run may act on —
+verdict `"exposed"` — the exact set the re-scan gate reads.
+`--out-liabilities` carries every triaged liability, including the ones
+triage declined, because the Parents page has no other source for a `buried`
+or `fixability-declined` row. It is appended for every antibody that reached
+triage at all, so an antibody with zero variants still has data there.
 """
 
 import argparse
@@ -28,6 +35,7 @@ import liability_store
 import motifs
 import residue_store
 import roster
+import structure
 import triage
 
 DEFAULT_RSASA_BURIED_CUTOFF = 0.075
@@ -80,7 +88,7 @@ def _confidence_lookup(
 
 def process_one(
     pdb_path: str,
-    residues_path: str,
+    out_residues: str,
     out_triaged: str,
     taxonomy: list[dict],
     confidence_sidecar: str | None,
@@ -89,11 +97,20 @@ def process_one(
     cdr_confidence_threshold: float,
     act_on_fixability: list[str],
 ) -> tuple[str, list[triage.Triaged]]:
-    """Scan and triage one antibody. Returns its skip reason (`""` on pass)
-    and every triaged liability, whatever its verdict — the caller appends
-    those to the run's one `liabilities.tsv`, because the Parents page needs
-    the declined ones too."""
-    residues = residue_store.read_residues(residues_path)
+    """Index, then scan and triage, one antibody. Returns **one** skip reason
+    (`""` on pass) and every triaged liability, whatever its verdict — the
+    caller appends those to the run's one `liabilities.tsv`, because the
+    Parents page needs the declined ones too.
+
+    The index phase short-circuits the scan phase: an antibody that cannot be
+    indexed carries the index phase's reason and nothing else, so a
+    non-IMGT structure is named once rather than reported again as having no
+    surviving liability."""
+    index_reason = structure.index_one(pdb_path, out_residues)
+    if index_reason:
+        return index_reason, []
+
+    residues = residue_store.read_residues(out_residues)
 
     rsasa_lookup = exposure.annotate(residues, pdb_path)
     confidence_lookup = _confidence_lookup(residues, confidence_sidecar)
@@ -119,9 +136,13 @@ def main(argv: list[str] | None = None) -> int:
         description="Scan every staged antibody's liabilities and triage each hit, "
         "non-destructively."
     )
-    parser.add_argument("--pdb-dir", required=True, help="the same staged blobs structure.py read")
-    parser.add_argument("--residues-dir", required=True, help="structure.py's output directory")
+    parser.add_argument(
+        "--pdb-dir",
+        required=True,
+        help="the staged blobs — the index phase parses them and freesasa reads them again",
+    )
     parser.add_argument("--pdb-index", required=True, help="the roster")
+    parser.add_argument("--out-residues-dir", required=True)
     parser.add_argument(
         "--definitions", required=True, help="taxonomy JSON from the shared package"
     )
@@ -147,19 +168,20 @@ def main(argv: list[str] | None = None) -> int:
     act_on_fixability = [v for v in args.act_on_fixability.split(",") if v]
 
     pdb_dir = Path(args.pdb_dir)
-    residues_dir = Path(args.residues_dir)
     confidence_dir = Path(args.confidence_dir) if args.confidence_dir else None
+    residues_dir = Path(args.out_residues_dir)
+    residues_dir.mkdir(parents=True, exist_ok=True)
     out_dir = Path(args.out_triaged_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     liability_store.write_liabilities_header(args.out_liabilities)
 
     def one(entry: roster.Entry) -> str | None:
-        residues_path = residues_dir / f"{entry.stem}.json"
         pdb_path = pdb_dir / entry.filename
-        # structure.py already named this antibody's reason; a second row
-        # here would count it twice in the run-level reduce.
-        if not residues_path.is_file() or not pdb_path.is_file():
-            return None
+        # A clonotype the upstream block failed for has no staged blob at
+        # all — never a null one — so absence is this step's own named
+        # reason rather than an error.
+        if not pdb_path.is_file():
+            return "no-structure"
         sidecar = None
         if confidence_dir is not None:
             candidate = confidence_dir / f"{entry.stem}.json"
@@ -167,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
 
         reason, triaged = process_one(
             str(pdb_path),
-            str(residues_path),
+            str(residues_dir / f"{entry.stem}.json"),
             str(out_dir / f"{entry.stem}.json"),
             taxonomy,
             sidecar,

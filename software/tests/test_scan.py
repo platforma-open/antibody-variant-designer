@@ -42,14 +42,9 @@ def remarks(role, chain):
 
 
 def _stage(batch, clonotype_key, pdb_text, stem=None):
-    """Stage one antibody's PDB and its already-computed residue index, the
-    way `structure.py` would have left them."""
-    entry = batch.add(clonotype_key, pdb_text, stem=stem)
-    residues_dir = Path(batch.dir("residues"))
-    (residues_dir / f"{entry.stem}.json").write_text(
-        json.dumps([r.to_json() for r in _index(pdb_text)])
-    )
-    return entry
+    """Stage one antibody's PDB. The residue index is no longer staged: the
+    entrypoint's own index phase produces it in the same process."""
+    return batch.add(clonotype_key, pdb_text, stem=stem)
 
 
 def _run(batch, extra_args=None):
@@ -64,8 +59,8 @@ def _run(batch, extra_args=None):
     rc = scan.main(
         [
             "--pdb-dir", str(batch.pdb_dir),
-            "--residues-dir", batch.dir("residues"),
             "--pdb-index", batch.index,
+            "--out-residues-dir", batch.dir("residues"),
             "--definitions", definitions_path,
             "--out-triaged-dir", triaged_dir,
             "--out-liabilities", out_liabilities,
@@ -226,16 +221,42 @@ class TestBatchCli:
         keys = [(r["clonotypeKey"], r["liabilityKey"]) for r in rows]
         assert len(set(keys)) == len(rows)
 
-    def test_a_clonotype_step_one_already_skipped_gets_no_second_row(self, batch):
-        # structure.py named this one's reason and left no residues file.
-        # A row here would count it twice in the run-level reduce.
+    def test_an_unindexable_antibody_carries_exactly_one_reason(self, batch):
+        # The index phase short-circuits the scan phase, so this antibody is
+        # named `structure-not-imgt` and NOT also reported as having no
+        # surviving liability. Before the fusion the index step wrote an
+        # empty residues file, the scan step's absence guard could never
+        # fire, and the antibody collected a reason in two skip files.
         _stage(batch, "indexed", self._actionable())
-        batch.add("skipped-earlier", "")
+        _stage(batch, "not-imgt", make_pdb(v_domain("H")[:5]))  # never reaches IMGT 10
 
         skips, _, out_liabilities = _run(batch)
 
-        assert skips == [("indexed", "")]
+        assert skips == [("indexed", ""), ("not-imgt", "structure-not-imgt")]
+        assert [reason for _, reason in skips].count("no-liability-survived-triage") == 0
+        # It never reached triage, so it contributes no Parents-page rows
+        # either — the liabilities TSV holds only what was actually scanned.
         assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"indexed"}
+
+    def test_an_unindexable_antibody_leaves_no_residues_or_triaged_file(self, batch):
+        # Absence is what a later step reads as "already named"; an empty
+        # placeholder would make its guard a no-op.
+        _stage(batch, "not-imgt", make_pdb(v_domain("H")[:5]))
+
+        _, triaged_dir, _ = _run(batch)
+
+        assert not Path(batch.dir("residues"), "not-imgt.json").exists()
+        assert not Path(triaged_dir, "not-imgt.json").exists()
+
+    def test_a_rostered_clonotype_with_no_staged_blob_is_no_structure(self, batch):
+        # A clonotype the upstream block failed for has no ResourceMap entry
+        # at all, so its blob is simply absent — never a null one.
+        _stage(batch, "present", self._actionable())
+        batch.add_without_blob("absent")
+
+        skips, _, _ = _run(batch)
+
+        assert skips == [("present", ""), ("absent", "no-structure")]
 
     def test_an_empty_roster_leaves_a_header_only_liabilities_tsv(self, batch):
         skips, _, out_liabilities = _run(batch)

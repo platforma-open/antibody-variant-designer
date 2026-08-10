@@ -38,16 +38,7 @@
       }
     },
     "entrypoints": {
-      "index-structure": {
-        "binary": {
-          "artifact": "design-script",
-          "cmd": [
-            "python",
-            "{pkg}/structure.py"
-          ]
-        }
-      },
-      "scan-liabilities": {
+      "index-and-scan": {
         "binary": {
           "artifact": "design-script",
           "cmd": [

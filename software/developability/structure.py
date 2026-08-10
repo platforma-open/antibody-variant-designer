@@ -1,5 +1,8 @@
-"""Residue-index construction from a PDB's own ATOM records, the entrypoint
-that writes `residues.json`.
+"""Residue-index construction from a PDB's own ATOM records.
+
+A module, not an entrypoint: `scan.py` runs this as its index phase and then
+scans in the same exec, because the two share one deployment unit and the
+index is read by nothing between them.
 
 Parses `(chain, resSeq, insertionCode, resName, bFactor)` straight off the
 ATOM records, builds the `(chain, offset)` spine from the order those
@@ -14,15 +17,11 @@ The parsing shape below (`Atom`, `Residue`, `ParsedPdb`, `parse_pdb`, the
 proven against ImmuneBuilder output, rather than re-derived.
 """
 
-import argparse
 import re
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import batch
 import residue_store
-import roster
 
 # ---------------------------------------------------------------------------
 # Section 1: PDB parsing
@@ -362,69 +361,37 @@ def index_residues(parsed: ParsedPdb) -> list[residue_store.Residue]:
 
 
 # ---------------------------------------------------------------------------
-# Section 3: CLI
+# Section 3: the index phase
 # ---------------------------------------------------------------------------
 
 
-def process_one(pdb_path: str, out_residues: str) -> str:
+def index_one(pdb_path: str, out_residues: str) -> str:
     """Index one antibody, or name why it cannot be indexed. Returns that
     antibody's skip reason, or `""` when it passed.
 
-    A skipped antibody still gets an empty `residues.json`, so a later step
-    reading the directory finds a well-formed file rather than a missing
-    one."""
+    `out_residues` is written **only on success**. A skipped antibody leaves
+    no file at all, which is what lets a later reader treat absence as "an
+    earlier phase already named this one" — an empty file would make that
+    check a no-op and the antibody would be counted twice.
+    """
     parsed = parse_pdb(Path(pdb_path).read_text())
     if not parsed.chain_order:
-        residue_store.write_residues(out_residues, [])
         return "no-structure"
 
     if not is_imgt_numbered(parsed):
-        residue_store.write_residues(out_residues, [])
         return "structure-not-imgt"
 
     if multi_domain_chain(parsed) is not None:
-        residue_store.write_residues(out_residues, [])
         return "structure-multi-domain-chain"
 
     residues = index_residues(parsed)
     # The index stays total — a constant-domain, antigen or second-arm
     # residue is written out so exposure and AntiFold still see it. The
     # skip fires only when nothing at all is researchable, so a file of
-    # pure constant region never reaches `scan.py` as a silent empty scan.
+    # pure constant region never reaches the scan phase as a silent empty
+    # scan.
     if not any(r.in_scope for r in residues):
-        residue_store.write_residues(out_residues, [])
         return "no-researchable-residue"
 
     residue_store.write_residues(out_residues, residues)
     return ""
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Index every staged antibody's residues from its PDB's own ATOM records."
-    )
-    parser.add_argument("--pdb-dir", required=True, help="the staged PDB blobs")
-    parser.add_argument("--pdb-index", required=True, help="the roster")
-    parser.add_argument("--out-residues-dir", required=True)
-    parser.add_argument("--out-skip", required=True)
-    args = parser.parse_args(argv)
-
-    pdb_dir = Path(args.pdb_dir)
-    out_dir = Path(args.out_residues_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    def one(entry: roster.Entry) -> str:
-        pdb_path = pdb_dir / entry.filename
-        # A clonotype the upstream block failed for has no staged blob at
-        # all — never a null one — so absence is this step's own named
-        # reason rather than an error.
-        if not pdb_path.is_file():
-            residue_store.write_residues(str(out_dir / f"{entry.stem}.json"), [])
-            return "no-structure"
-        return process_one(str(pdb_path), str(out_dir / f"{entry.stem}.json"))
-
-    return batch.run(roster.read_roster(args.pdb_index), one, args.out_skip)
-
-
-if __name__ == "__main__":
-    sys.exit(main())

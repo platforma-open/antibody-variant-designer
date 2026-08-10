@@ -1,9 +1,8 @@
 """One test per target antibody format — the cases `CLAUDE.md` names.
 
-Each test runs `structure.py`'s CLI end to end and asserts the two things a
-format decides: the skip reason, and which residues came out researchable. A
-format that is not in `CLAUDE.md` must reach a named skip here, never a
-partial index.
+Each test runs the index phase and asserts the two things a format decides:
+the skip reason, and which residues came out researchable. A format that is
+not in `CLAUDE.md` must reach a named skip here, never a partial index.
 """
 
 import json
@@ -12,9 +11,8 @@ from pathlib import Path
 import cysteine
 import motifs
 import residue_store
-import skip_store
 from pdb_fixtures import make_pdb, platforma_cdr_remark
-from structure import main
+from structure import index_one
 
 TAXONOMY = [
     {"id": "deamidation_ng", "name": "Deamidation (N[GS])",
@@ -63,22 +61,22 @@ def remarks(role, chain):
 
 
 def run_structure(batch, text):
-    """Run the batch CLI over a one-antibody roster carrying `text`.
-    Returns `(skip_reason, residues)` for that antibody."""
+    """Run the index phase over one antibody's `text`. Returns
+    `(skip_reason, residues)`.
+
+    Calls `index_one` rather than the `index-and-scan` CLI because these
+    cases assert the index phase's own contract — which reason a format gets
+    and which residues come out researchable — not how a later phase reads
+    it. `residues` is empty when the phase skipped, because a skipped
+    antibody deliberately leaves no file."""
     entry = batch.add("clonotype-1", text)
-    out_residues_dir = batch.dir("residues")
-    out_skip = batch.path("skip.tsv")
+    out_residues = Path(batch.dir("residues"), f"{entry.stem}.json")
 
-    rc = main([
-        "--pdb-dir", str(batch.pdb_dir),
-        "--pdb-index", batch.index,
-        "--out-residues-dir", out_residues_dir,
-        "--out-skip", out_skip,
-    ])
+    reason = index_one(str(Path(batch.pdb_dir, entry.filename)), str(out_residues))
 
-    assert rc == 0
-    [(_, reason)] = skip_store.read_skips(out_skip)
-    residues = residue_store.read_residues(f"{out_residues_dir}/{entry.stem}.json")
+    residues = (
+        residue_store.read_residues(str(out_residues)) if out_residues.is_file() else []
+    )
     return reason, residues
 
 
