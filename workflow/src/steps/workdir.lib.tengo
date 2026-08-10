@@ -1,7 +1,8 @@
-// Shared helpers for the three step templates.
+// How a step's workdir is laid out — shared by the three step templates.
 //
-// Every step runs one exec over the whole dataset and every step reads the
-// roster, so the roster's TSV rendering lives here rather than three times.
+// Every step runs one exec over the whole dataset, stages the same roster and
+// moves the same per-clonotype directories, so the two things that decide
+// those paths live here rather than three times over.
 //
 // **A directory crossing a step boundary is a file set.** The SDK has no
 // directory primitive: no `addDir`, no file-set *input* type, and an exec's
