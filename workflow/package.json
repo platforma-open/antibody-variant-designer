@@ -12,6 +12,7 @@
   "dependencies": {
     "@platforma-open/milaboratories.antibody-variant-designer.software": "workspace:*",
     "@platforma-open/milaboratories.antifold-weights-assets": "^1.0.0",
+    "@platforma-open/milaboratories.software-liability-definitions": "^1.1.0",
     "@platforma-sdk/workflow-tengo": "catalog:"
   },
   "devDependencies": {
