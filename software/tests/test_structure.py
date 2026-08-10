@@ -2,6 +2,7 @@
 `(chain, offset)` residue index, and the CLI."""
 
 import residue_store
+import skip_store
 from pdb_fixtures import make_chain, make_pdb, platforma_cdr_remark
 from structure import (
     AA_THREE_TO_ONE,
@@ -151,69 +152,111 @@ class TestArtifactsRoundTrip:
         assert read_back[0].imgt == "111A"
 
 
+def _researchable_pdb(length: int = 20) -> str:
+    """A chain H whose REMARK records give it a role — a role is half the
+    scope rule, so without them every residue is out of scope and the CLI
+    reaches `no-researchable-residue` instead of succeeding."""
+    return (
+        platforma_cdr_remark("H", 1, "H", 27, 38)
+        + "\n"
+        + platforma_cdr_remark("H", 2, "H", 56, 65)
+        + "\n"
+        + platforma_cdr_remark("H", 3, "H", 105, 117)
+        + "\n"
+        + make_pdb(make_chain("H", length))
+    )
+
+
+def _run(batch, out_dir="residues"):
+    """Run the batch CLI over whatever `batch` holds. Returns
+    `(skips, residues_dir)`."""
+    residues_dir = batch.dir(out_dir)
+    out_skip = batch.path("skip.tsv")
+
+    rc = main([
+        "--pdb-dir", str(batch.pdb_dir),
+        "--pdb-index", batch.index,
+        "--out-residues-dir", residues_dir,
+        "--out-skip", out_skip,
+    ])
+
+    assert rc == 0
+    return skip_store.read_skips(out_skip), residues_dir
+
+
 class TestCli:
-    def _write(self, tmp_path, name: str, text: str):
-        path = tmp_path / name
-        path.write_text(text)
-        return str(path)
+    def test_happy_path_writes_residues_and_empty_skip(self, batch):
+        entry = batch.add("clonotype-1", _researchable_pdb())
 
-    def test_happy_path_writes_residues_and_empty_skip(self, tmp_path):
-        # The REMARK is what gives chain H a role, and a role is half the
-        # scope rule — without it every residue is out of scope and the CLI
-        # skips with `no-researchable-residue` instead of succeeding.
-        pdb_path = self._write(
-            tmp_path,
-            "input.pdb",
-            platforma_cdr_remark("H", 1, "H", 27, 38)
-            + "\n"
-            + platforma_cdr_remark("H", 2, "H", 56, 65)
-            + "\n"
-            + platforma_cdr_remark("H", 3, "H", 105, 117)
-            + "\n"
-            + make_pdb(make_chain("H", 20)),
-        )
-        out_residues = str(tmp_path / "residues.json")
-        out_skip = str(tmp_path / "skip.txt")
+        skips, residues_dir = _run(batch)
 
-        rc = main([
-            "--pdb", pdb_path,
-            "--clonotype-key", "clonotype-1",
-            "--out-residues", out_residues,
-            "--out-skip", out_skip,
-        ])
+        assert skips == [("clonotype-1", "")]
+        assert residue_store.read_residues(f"{residues_dir}/{entry.stem}.json")
 
-        assert rc == 0
-        assert residue_store.read_residues(out_residues)
-        assert (tmp_path / "skip.txt").read_text() == ""
+    def test_no_atom_records_writes_no_structure_skip(self, batch):
+        entry = batch.add("clonotype-1", "")
 
-    def test_no_atom_records_writes_no_structure_skip(self, tmp_path):
-        pdb_path = self._write(tmp_path, "input.pdb", "")
-        out_residues = str(tmp_path / "residues.json")
-        out_skip = str(tmp_path / "skip.txt")
+        skips, residues_dir = _run(batch)
 
-        rc = main([
-            "--pdb", pdb_path,
-            "--clonotype-key", "clonotype-1",
-            "--out-residues", out_residues,
-            "--out-skip", out_skip,
-        ])
+        assert skips == [("clonotype-1", "no-structure")]
+        assert residue_store.read_residues(f"{residues_dir}/{entry.stem}.json") == []
 
-        assert rc == 0
-        assert residue_store.read_residues(out_residues) == []
-        assert (tmp_path / "skip.txt").read_text() == "no-structure"
+    def test_non_imgt_structure_writes_structure_not_imgt_skip(self, batch):
+        entry = batch.add("clonotype-1", make_pdb(make_chain("H", 5)))
 
-    def test_non_imgt_structure_writes_structure_not_imgt_skip(self, tmp_path):
-        pdb_path = self._write(tmp_path, "input.pdb", make_pdb(make_chain("H", 5)))
-        out_residues = str(tmp_path / "residues.json")
-        out_skip = str(tmp_path / "skip.txt")
+        skips, residues_dir = _run(batch)
 
-        rc = main([
-            "--pdb", pdb_path,
-            "--clonotype-key", "clonotype-1",
-            "--out-residues", out_residues,
-            "--out-skip", out_skip,
-        ])
+        assert skips == [("clonotype-1", "structure-not-imgt")]
+        assert residue_store.read_residues(f"{residues_dir}/{entry.stem}.json") == []
 
-        assert rc == 0
-        assert residue_store.read_residues(out_residues) == []
-        assert (tmp_path / "skip.txt").read_text() == "structure-not-imgt"
+
+class TestBatchCli:
+    """The failure modes one-exec-per-antibody could not have."""
+
+    def test_one_bad_antibody_does_not_stop_the_others(self, batch):
+        batch.add("good-1", _researchable_pdb())
+        batch.add("bad", make_pdb(make_chain("H", 5)))  # not IMGT-numbered
+        batch.add("good-2", _researchable_pdb())
+
+        skips, residues_dir = _run(batch)
+
+        assert skips == [
+            ("good-1", ""),
+            ("bad", "structure-not-imgt"),
+            ("good-2", ""),
+        ]
+        assert residue_store.read_residues(f"{residues_dir}/good-1.json")
+        assert residue_store.read_residues(f"{residues_dir}/good-2.json")
+
+    def test_a_rostered_clonotype_with_no_staged_blob_is_no_structure(self, batch):
+        # A clonotype the upstream block failed for has no ResourceMap entry
+        # at all, so its blob is simply absent — never a null one.
+        batch.add("present", _researchable_pdb())
+        batch.add_without_blob("absent")
+
+        skips, _ = _run(batch)
+
+        assert skips == [("present", ""), ("absent", "no-structure")]
+
+    def test_an_empty_roster_exits_zero_with_a_header_only_skip_tsv(self, batch):
+        skips, _ = _run(batch)
+
+        assert skips == []
+
+    def test_a_clonotype_key_holding_json_punctuation_names_its_file_by_stem(self, batch):
+        batch.add('["clone/1"]', _researchable_pdb(), stem="antibody-01")
+
+        skips, residues_dir = _run(batch)
+
+        assert skips == [('["clone/1"]', "")]
+        assert residue_store.read_residues(f"{residues_dir}/antibody-01.json")
+
+    def test_roster_order_does_not_change_the_per_antibody_result(self, batch):
+        batch.add("a", _researchable_pdb())
+        batch.add("b", make_pdb(make_chain("H", 5)))
+        forward, _ = _run(batch, out_dir="residues-forward")
+
+        batch.entries.reverse()
+        reversed_skips, _ = _run(batch, out_dir="residues-reversed")
+
+        assert dict(forward) == dict(reversed_skips)

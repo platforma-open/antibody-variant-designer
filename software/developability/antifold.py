@@ -1,13 +1,18 @@
-"""AntiFold tolerance read, the entrypoint that writes `tolerance.tsv`.
+"""AntiFold tolerance read, the entrypoint that writes one
+`tolerance.tsv` per antibody.
 
 Calls AntiFold as a library, never its own CLI or subprocess:
 `_load_IF1_local()` builds the architecture, `load_IF1_checkpoint` loads the
 mounted weights, and `get_pdbs_logits(..., save_flag=False)` returns raw
-logits per position, never a CSV on disk. Any exception from torch or from
-AntiFold itself propagates out of this process uncaught — a per-antibody
-backend fault becomes a failed exec, which the workflow, not this script,
-turns into a `backend-failed` record for that one parent, without stopping
-the run for the others.
+logits per position, never a CSV on disk.
+
+The checkpoint is loaded **once per process**, before the batch loop —
+that single load is the whole reason one exec covers the dataset rather
+than one exec per antibody. A missing checkpoint therefore fails the run
+outright, while a fault raised *by* one antibody's model call is caught
+inside the loop and recorded as `backend-failed` against that antibody
+alone. AntiFold swallows its own exceptions and exits 0, so the loop is
+the only place such a fault can still be named after its cause.
 
 The vendored `antifold` package under `vendor/AntiFold` shares this file's
 own name, so the vendor directory is pushed to the front of `sys.path`
@@ -36,16 +41,14 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+import batch
 import residue_store
+import roster
 import tolerance_store
 
 _VENDOR_DIR = str(Path(__file__).parent / "vendor" / "AntiFold")
 
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
-
-
-def _write_skip(path: str, reason: str) -> None:
-    Path(path).write_text(reason)
 
 
 def pick_chains(
@@ -140,24 +143,38 @@ def _block_network():
         socket.socket = original_socket
 
 
-def _run_model(
-    pdb_path: str, weights_path: str, h_chain: str, l_chain: str | None, nanobody_mode: bool
-) -> list[dict]:
-    """The only function that touches torch or the vendored AntiFold
-    package. Builds AntiFold's one-row `pdb, Hchain, Lchain` frame for this
-    single antibody and reads its `df_logits` back into plain dicts, so
-    every function above this one stays pandas- and torch-free."""
+def load_model(weights_path: str):
+    """Build the architecture and load the mounted checkpoint — **once per
+    process**, before the batch loop. The 540.6 MiB load is the whole reason
+    one exec covers the dataset instead of one per antibody, so it must not
+    be reachable from inside the loop."""
     if _VENDOR_DIR not in sys.path:
         sys.path.insert(0, _VENDOR_DIR)
     import antifold.antiscripts as antiscripts
     import antifold.esm.pretrained as pretrained
-    import pandas as pd
 
     with _block_network():
         model, _ = pretrained._load_IF1_local()
         model = antiscripts.load_IF1_checkpoint(model, weights_path)
-        model = model.eval()
+        return model.eval()
 
+
+def _run_model(
+    model, pdb_path: str, h_chain: str, l_chain: str | None, nanobody_mode: bool
+) -> list[dict]:
+    """The only function that touches torch or the vendored AntiFold
+    package. Builds AntiFold's one-row `pdb, Hchain, Lchain` frame for this
+    single antibody and reads its `df_logits` back into plain dicts, so
+    every function above this one stays pandas- and torch-free.
+
+    Takes an already-loaded `model` so the checkpoint is read once per
+    process rather than once per antibody."""
+    if _VENDOR_DIR not in sys.path:
+        sys.path.insert(0, _VENDOR_DIR)
+    import antifold.antiscripts as antiscripts
+    import pandas as pd
+
+    with _block_network():
         pdb = Path(pdb_path)
         row = {"pdb": pdb.stem, "Hchain": h_chain}
         if l_chain is not None:
@@ -179,30 +196,67 @@ def _run_model(
     ]
 
 
+def process_one(model, pdb_path: str, residues_path: str, out_tolerance: str) -> str:
+    """Read one antibody's tolerance matrix. Nanobody mode is decided here,
+    from this antibody's own parsed chain count — one batch may legally mix
+    VHH and paired structures, so it can never be a run-level flag."""
+    residues = residue_store.read_residues(residues_path)
+    h_chain, l_chain, nanobody_mode = pick_chains(residues)
+
+    logits_rows = _run_model(model, pdb_path, h_chain, l_chain, nanobody_mode)
+    rows = build_tolerance_rows(residues, logits_rows)
+
+    tolerance_store.write_tolerance_tsv(out_tolerance, rows)
+    return ""
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Read AntiFold's per-position tolerance for one antibody."
+        description="Read AntiFold's per-position tolerance for every staged antibody."
     )
-    parser.add_argument("--pdb", required=True)
-    parser.add_argument("--residues", required=True, help="structure.py's output")
+    parser.add_argument("--pdb-dir", required=True)
+    parser.add_argument("--residues-dir", required=True, help="structure.py's output directory")
+    parser.add_argument("--pdb-index", required=True, help="the roster")
     parser.add_argument("--weights", required=True, help="mounted models/model.pt")
-    parser.add_argument("--out-tolerance", required=True)
+    parser.add_argument("--out-tolerance-dir", required=True)
     parser.add_argument("--out-skip", required=True)
     args = parser.parse_args(argv)
 
+    # Asserted and loaded before the loop, and deliberately outside the
+    # per-antibody `try` below: a missing or unreadable checkpoint is a
+    # broken run, and must never degrade into N `backend-failed` rows that
+    # read as N bad antibodies.
     weights_path = Path(args.weights)
     if not weights_path.is_file():
         raise SystemExit(f"--weights does not exist: {weights_path}")
 
-    residues = residue_store.read_residues(args.residues)
-    h_chain, l_chain, nanobody_mode = pick_chains(residues)
+    pdb_dir = Path(args.pdb_dir)
+    residues_dir = Path(args.residues_dir)
+    out_dir = Path(args.out_tolerance_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    logits_rows = _run_model(args.pdb, str(weights_path), h_chain, l_chain, nanobody_mode)
-    rows = build_tolerance_rows(residues, logits_rows)
+    entries = roster.read_roster(args.pdb_index)
+    runnable = [
+        e
+        for e in entries
+        if (residues_dir / f"{e.stem}.json").is_file() and (pdb_dir / e.filename).is_file()
+    ]
+    # Nothing runnable means nothing to score, and loading the checkpoint
+    # would buy a model no antibody uses.
+    model = load_model(str(weights_path)) if runnable else None
 
-    tolerance_store.write_tolerance_tsv(args.out_tolerance, rows)
-    _write_skip(args.out_skip, "")
-    return 0
+    def one(entry: roster.Entry) -> str:
+        return process_one(
+            model,
+            str(pdb_dir / entry.filename),
+            str(residues_dir / f"{entry.stem}.json"),
+            str(out_dir / f"{entry.stem}.tsv"),
+        )
+
+    # `error_reason` is passed here and nowhere else: AntiFold swallows its
+    # own exceptions and exits 0, so this loop is the only place a backend
+    # fault can still be attributed to the antibody that caused it.
+    return batch.run(runnable, one, args.out_skip, error_reason="backend-failed")
 
 
 if __name__ == "__main__":

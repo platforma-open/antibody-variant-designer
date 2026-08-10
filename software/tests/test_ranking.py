@@ -1,10 +1,14 @@
 """Unit tests for `ranking.py`: binding-risk banding, sequence rendering,
 and the rank/truncate/epistasis-rescore pipeline."""
 
+from pathlib import Path
+
 import candidate_store
 import pytest
 import ranking
 import residue_store
+import skip_store
+import variant_store
 
 
 def _candidate(
@@ -191,52 +195,110 @@ class TestRankVariantsOrderingAndTruncation:
         assert variant.structural_tolerance == pytest.approx(5.5)
 
 
-class TestMainRequiresItsPredecessorsOutput:
-    def test_a_missing_candidates_file_is_a_readable_non_zero_exit(self, tmp_path):
-        missing_candidates = tmp_path / "candidates.json"
-        residues_path = tmp_path / "residues.json"
-        residue_store.write_residues(str(residues_path), [])
+BLOCK_ID = "block-abc"
 
-        with pytest.raises(SystemExit, match=str(missing_candidates)):
-            ranking.main(
-                [
-                    "--candidates", str(missing_candidates),
-                    "--residues", str(residues_path),
-                    "--out-variants", str(tmp_path / "variants.tsv"),
-                ]
-            )
+
+def _stage(batch, clonotype_key, candidate_list=None):
+    """Stage one antibody's `candidates.json` and `residues.json`, the way
+    candidates.py and structure.py would have left them."""
+    entry = batch.add(clonotype_key)
+    residue_store.write_residues(
+        str(Path(batch.dir("residues"), f"{entry.stem}.json")),
+        [_residue("H", 0, "N", role="H"), _residue("H", 1, "G", role="H")],
+    )
+    candidate_store.write_candidates(
+        str(Path(batch.dir("candidates"), f"{entry.stem}.json")),
+        candidate_list
+        if candidate_list is not None
+        else [
+            _candidate(region="FR1", tolerance=10.0, changed_positions="H:N1D"),
+            _candidate(region="CDR3", tolerance=1.0, changed_positions="H:N2D"),
+        ],
+    )
+    return entry
+
+
+def _run(batch, extra_args=None):
+    out_variants = batch.path("variants.tsv")
+    out_skip = batch.path("skip.tsv")
+
+    rc = ranking.main(
+        [
+            "--candidates-dir", batch.dir("candidates"),
+            "--residues-dir", batch.dir("residues"),
+            "--pdb-index", batch.index,
+            "--block-id", BLOCK_ID,
+            "--out-variants", out_variants,
+            "--out-skip", out_skip,
+        ]
+        + (extra_args or [])
+    )
+
+    assert rc == 0
+    return skip_store.read_skips(out_skip), variant_store.read_variants_tsv(out_variants)
 
 
 class TestMainWiresRankingAndWritesTheTsv:
-    def test_a_successful_run_writes_one_row_per_candidate(self, tmp_path):
-        residues = [
-            _residue("H", 0, "N", role="H"),
-            _residue("H", 1, "G", role="H"),
-        ]
-        residues_path = tmp_path / "residues.json"
-        residue_store.write_residues(str(residues_path), residues)
+    def test_a_successful_run_writes_one_row_per_candidate(self, batch):
+        _stage(batch, "clone-1")
 
-        candidates_path = tmp_path / "candidates.json"
-        candidate_store.write_candidates(
-            str(candidates_path),
-            [
-                _candidate(region="FR1", tolerance=10.0, changed_positions="H:N1D"),
-                _candidate(region="CDR3", tolerance=1.0, changed_positions="H:N2D"),
-            ],
-        )
-        out_variants = tmp_path / "variants.tsv"
+        skips, written = _run(batch)
 
-        rc = ranking.main(
-            [
-                "--candidates", str(candidates_path),
-                "--residues", str(residues_path),
-                "--out-variants", str(out_variants),
-            ]
-        )
-
-        assert rc == 0
-        import variant_store
-
-        written = variant_store.read_variants_tsv(str(out_variants))
+        assert skips == [("clone-1", "")]
         assert len(written) == 2
-        assert [v.status for v in written] == ["unvalidated-hypothesis"] * 2
+        assert [v.status for _, _, v in written] == ["unvalidated-hypothesis"] * 2
+
+
+class TestBatchCli:
+    def test_one_variants_file_holds_every_parent_with_ranks_restarting(self, batch):
+        _stage(batch, "clone-1")
+        _stage(batch, "clone-2")
+
+        skips, written = _run(batch)
+
+        assert skips == [("clone-1", ""), ("clone-2", "")]
+        assert [key for key, _, _ in written] == ["clone-1", "clone-1", "clone-2", "clone-2"]
+        assert [v.rank for _, _, v in written] == [1, 2, 1, 2]
+
+    def test_clonotype_key_and_variant_key_are_unique_across_the_file(self, batch):
+        _stage(batch, "clone-1")
+        _stage(batch, "clone-2")
+
+        _, written = _run(batch)
+
+        keys = [(clonotype, variant) for clonotype, variant, _ in written]
+        assert len(set(keys)) == len(written) == 4
+
+    def test_two_parents_sharing_an_edit_string_get_different_variant_keys(self, batch):
+        one_candidate = [_candidate(region="FR1", tolerance=10.0, changed_positions="H:N1D")]
+        _stage(batch, "clone-1", one_candidate)
+        _stage(batch, "clone-2", one_candidate)
+
+        _, written = _run(batch)
+
+        assert [v.changed_positions for _, _, v in written] == ["H:N1D", "H:N1D"]
+        assert len({variant for _, variant, _ in written}) == 2
+
+    def test_variants_per_parent_truncates_within_each_parent(self, batch):
+        _stage(batch, "clone-1")
+        _stage(batch, "clone-2")
+
+        _, written = _run(batch, ["--variants-per-parent", "1"])
+
+        assert [key for key, _, _ in written] == ["clone-1", "clone-2"]
+        assert [v.rank for _, _, v in written] == [1, 1]
+
+    def test_an_antibody_missing_its_candidates_file_gets_no_row(self, batch):
+        _stage(batch, "cleared")
+        batch.add("no-candidates")
+
+        skips, written = _run(batch)
+
+        assert skips == [("cleared", "")]
+        assert {key for key, _, _ in written} == {"cleared"}
+
+    def test_an_empty_roster_leaves_a_header_only_variants_tsv(self, batch):
+        skips, written = _run(batch)
+
+        assert skips == []
+        assert written == []

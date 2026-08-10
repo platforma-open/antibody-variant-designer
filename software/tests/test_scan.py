@@ -4,9 +4,11 @@ exec, writing both `--out-triaged` and `--out-liabilities`."""
 import csv
 import io
 import json
+from pathlib import Path
 
 import liability_store
 import scan
+import skip_store
 from pdb_fixtures import make_pdb, platforma_cdr_remark
 
 TAXONOMY = [
@@ -39,37 +41,53 @@ def remarks(role, chain):
     )
 
 
-def _write(tmp_path, name, text):
-    path = tmp_path / name
-    path.write_text(text)
-    return str(path)
-
-
-def _run_scan(tmp_path, pdb_text, residues, extra_args=None):
-    pdb_path = _write(tmp_path, "input.pdb", pdb_text)
-    residues_path = _write(
-        tmp_path, "residues.json", json.dumps([r.to_json() for r in residues])
+def _stage(batch, clonotype_key, pdb_text, stem=None):
+    """Stage one antibody's PDB and its already-computed residue index, the
+    way `structure.py` would have left them."""
+    entry = batch.add(clonotype_key, pdb_text, stem=stem)
+    residues_dir = Path(batch.dir("residues"))
+    (residues_dir / f"{entry.stem}.json").write_text(
+        json.dumps([r.to_json() for r in _index(pdb_text)])
     )
-    definitions_path = _write(tmp_path, "definitions.json", json.dumps(TAXONOMY))
-    out_triaged = tmp_path / "triaged.json"
-    out_liabilities = tmp_path / "liabilities.tsv"
-    out_skip = tmp_path / "skip.txt"
+    return entry
+
+
+def _run(batch, extra_args=None):
+    """Run the batch CLI over whatever `batch` holds. Returns
+    `(skips, triaged_dir, liabilities_path)`."""
+    definitions_path = batch.path("definitions.json")
+    Path(definitions_path).write_text(json.dumps(TAXONOMY))
+    triaged_dir = batch.dir("triaged")
+    out_liabilities = batch.path("liabilities.tsv")
+    out_skip = batch.path("skip.tsv")
 
     rc = scan.main(
         [
-            "--pdb", pdb_path,
-            "--residues", residues_path,
-            "--clonotype-key", "clonotype-1",
+            "--pdb-dir", str(batch.pdb_dir),
+            "--residues-dir", batch.dir("residues"),
+            "--pdb-index", batch.index,
             "--definitions", definitions_path,
-            "--out-triaged", str(out_triaged),
-            "--out-liabilities", str(out_liabilities),
-            "--out-skip", str(out_skip),
+            "--out-triaged-dir", triaged_dir,
+            "--out-liabilities", out_liabilities,
+            "--out-skip", out_skip,
         ]
         + (extra_args or [])
     )
 
     assert rc == 0
-    return out_skip.read_text(), out_triaged, out_liabilities
+    return skip_store.read_skips(out_skip), triaged_dir, Path(out_liabilities)
+
+
+def _run_scan(batch, pdb_text, extra_args=None):
+    """The one-antibody case, which most of these tests are."""
+    entry = _stage(batch, "clonotype-1", pdb_text)
+    skips, triaged_dir, out_liabilities = _run(batch, extra_args)
+    [(_, reason)] = skips
+    return reason, Path(triaged_dir, f"{entry.stem}.json"), out_liabilities
+
+
+def _rows_of(path):
+    return list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
 
 
 def _index(pdb_text, role="H", chain="H"):
@@ -81,7 +99,7 @@ def _index(pdb_text, role="H", chain="H"):
 
 
 class TestActionableOnlyReachesTriagedJson:
-    def test_exposed_fixable_motif_generates_declined_cysteine_does_not(self, tmp_path):
+    def test_exposed_fixable_motif_generates_declined_cysteine_does_not(self, batch):
         # A CDR1 `NG` hit (fixable, and this flat chain reads as exposed —
         # see exposure.py) alongside a missing FR1 cysteine (structural,
         # never in the default `act_on_fixability` set).
@@ -89,36 +107,34 @@ class TestActionableOnlyReachesTriagedJson:
             remarks("H", "H") + "\n"
             + make_pdb(v_domain("H", cys_at=(104,), overrides={30: "ASN", 31: "GLY"}))
         )
-        residues = _index(pdb_text)
-        skip, out_triaged, out_liabilities = _run_scan(tmp_path, pdb_text, residues)
+        skip, out_triaged, out_liabilities = _run_scan(batch, pdb_text)
 
         assert skip == ""
         [actionable] = liability_store.read_triaged(str(out_triaged))
         assert actionable.definition_id == "deamidation_ng"
 
-        rows = list(csv.DictReader(io.StringIO(out_liabilities.read_text()), delimiter="\t"))
+        rows = _rows_of(out_liabilities)
         ids_by_type = {r["liabilityType"]: r["verdict"] for r in rows}
         assert ids_by_type["deamidation"] == "exposed"
         assert ids_by_type["cysteine"] == "fixability-declined"
 
 
 class TestSkipWhenNothingSurvivesTriage:
-    def test_declined_liability_still_writes_both_files(self, tmp_path):
+    def test_declined_liability_still_writes_both_files(self, batch):
         # A canonical V domain except FR1's conserved cysteine is missing —
         # one declined liability, no motif hit, nothing actionable.
         pdb_text = remarks("H", "H") + "\n" + make_pdb(v_domain("H", cys_at=(104,)))
-        residues = _index(pdb_text)
-        skip, out_triaged, out_liabilities = _run_scan(tmp_path, pdb_text, residues)
+        skip, out_triaged, out_liabilities = _run_scan(batch, pdb_text)
 
         assert skip == "no-liability-survived-triage"
         assert liability_store.read_triaged(str(out_triaged)) == []
-        rows = list(csv.DictReader(io.StringIO(out_liabilities.read_text()), delimiter="\t"))
+        rows = _rows_of(out_liabilities)
         assert len(rows) == 1
         assert rows[0]["liabilityType"] == "cysteine"
 
 
 class TestLowConfidenceFallsBackToBFactor:
-    def test_high_b_factor_flags_low_confidence_with_no_sidecar(self, tmp_path):
+    def test_high_b_factor_flags_low_confidence_with_no_sidecar(self, batch):
         pdb_text = (
             remarks("H", "H") + "\n"
             + make_pdb(
@@ -128,13 +144,12 @@ class TestLowConfidenceFallsBackToBFactor:
                 )
             )
         )
-        residues = _index(pdb_text)
-        _, out_triaged, _ = _run_scan(tmp_path, pdb_text, residues)
+        _, out_triaged, _ = _run_scan(batch, pdb_text)
 
         [hit] = liability_store.read_triaged(str(out_triaged))
         assert hit.low_confidence is True
 
-    def test_sidecar_confidence_overrides_the_b_factor_fallback(self, tmp_path):
+    def test_sidecar_confidence_overrides_the_b_factor_fallback(self, batch):
         pdb_text = (
             remarks("H", "H") + "\n"
             + make_pdb(
@@ -144,43 +159,87 @@ class TestLowConfidenceFallsBackToBFactor:
                 )
             )
         )
-        residues = _index(pdb_text)
+        entry = _stage(batch, "clonotype-1", pdb_text)
         sidecar = [
             {"pos": r.imgt, "chain": r.chain, "errorAngstroms": 0.1}
-            for r in residues if r.in_scope
+            for r in _index(pdb_text) if r.in_scope
         ]
-        sidecar_path = _write(tmp_path, "confidence.json", json.dumps(sidecar))
+        confidence_dir = Path(batch.dir("confidence"))
+        (confidence_dir / f"{entry.stem}.json").write_text(json.dumps(sidecar))
 
-        _, out_triaged, _ = _run_scan(
-            tmp_path, pdb_text, residues,
-            extra_args=["--per-residue-confidence", sidecar_path],
-        )
+        skips, triaged_dir, _ = _run(batch, ["--confidence-dir", str(confidence_dir)])
 
-        [hit] = liability_store.read_triaged(str(out_triaged))
+        assert skips == [("clonotype-1", "")]
+        [hit] = liability_store.read_triaged(str(Path(triaged_dir, f"{entry.stem}.json")))
         assert hit.low_confidence is False
 
-    def test_missing_sidecar_path_falls_back_without_error(self, tmp_path):
+    def test_a_clonotype_with_no_sidecar_file_falls_back_to_its_b_factor(self, batch):
+        # The sidecar is per clonotype, so one antibody missing its file must
+        # fall back on its own rather than disabling the sidecar for the run.
         pdb_text = remarks("H", "H") + "\n" + make_pdb(v_domain("H"))
-        residues = _index(pdb_text)
+        _stage(batch, "clonotype-1", pdb_text)
 
-        skip, _, _ = _run_scan(
-            tmp_path, pdb_text, residues,
-            extra_args=["--per-residue-confidence", str(tmp_path / "absent.json")],
-        )
+        skips, _, _ = _run(batch, ["--confidence-dir", batch.dir("confidence")])
 
-        assert skip == "no-liability-survived-triage"
+        assert skips == [("clonotype-1", "no-liability-survived-triage")]
 
 
 class TestActOnFixabilityIsWired:
-    def test_structural_liability_generates_once_admitted(self, tmp_path):
+    def test_structural_liability_generates_once_admitted(self, batch):
         pdb_text = remarks("H", "H") + "\n" + make_pdb(v_domain("H", cys_at=(104,)))
-        residues = _index(pdb_text)
 
         skip, out_triaged, _ = _run_scan(
-            tmp_path, pdb_text, residues,
+            batch, pdb_text,
             extra_args=["--act-on-fixability", "structural"],
         )
 
         assert skip == ""
         [actionable] = liability_store.read_triaged(str(out_triaged))
         assert actionable.definition_id == "missing_cysteines"
+
+
+class TestBatchCli:
+    def _actionable(self):
+        return (
+            remarks("H", "H") + "\n"
+            + make_pdb(v_domain("H", cys_at=(104,), overrides={30: "ASN", 31: "GLY"}))
+        )
+
+    def test_one_liabilities_file_holds_every_parents_rows(self, batch):
+        _stage(batch, "clone-1", self._actionable())
+        _stage(batch, "clone-2", self._actionable())
+
+        skips, _, out_liabilities = _run(batch)
+
+        assert skips == [("clone-1", ""), ("clone-2", "")]
+        assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"clone-1", "clone-2"}
+
+    def test_clonotype_key_and_liability_key_identify_a_row_across_the_file(self, batch):
+        # Two antibodies with identical liabilities at identical positions —
+        # the liabilityKey repeats, so only the pair keeps rows distinct.
+        _stage(batch, "clone-1", self._actionable())
+        _stage(batch, "clone-2", self._actionable())
+
+        _, _, out_liabilities = _run(batch)
+
+        rows = _rows_of(out_liabilities)
+        keys = [(r["clonotypeKey"], r["liabilityKey"]) for r in rows]
+        assert len(set(keys)) == len(rows)
+
+    def test_a_clonotype_step_one_already_skipped_gets_no_second_row(self, batch):
+        # structure.py named this one's reason and left no residues file.
+        # A row here would count it twice in the run-level reduce.
+        _stage(batch, "indexed", self._actionable())
+        batch.add("skipped-earlier", "")
+
+        skips, _, out_liabilities = _run(batch)
+
+        assert skips == [("indexed", "")]
+        assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"indexed"}
+
+    def test_an_empty_roster_leaves_a_header_only_liabilities_tsv(self, batch):
+        skips, _, out_liabilities = _run(batch)
+
+        assert skips == []
+        assert _rows_of(out_liabilities) == []
+        assert out_liabilities.read_text().startswith("clonotypeKey\t")

@@ -38,18 +38,16 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+import batch
 import candidate_store
 import cysteine
 import liability_store
 import motifs
+import roster
 import tolerance_store
 
 DEFAULT_MAX_EDITS_PER_VARIANT = 5
 DEFAULT_CANDIDATE_RESIDUES_PER_POSITION = 3
-
-
-def _write_skip(path: str, reason: str) -> None:
-    Path(path).write_text(reason)
 
 
 def _require_file(path: str, producer: str) -> None:
@@ -163,18 +161,40 @@ def build_candidates(
     return candidates
 
 
+def process_one(
+    triaged_path: str,
+    tolerance_path: str,
+    out_candidates: str,
+    taxonomy: list[dict],
+    max_edits_per_variant: int,
+    candidate_residues_per_position: int,
+) -> str:
+    """Build and gate one antibody's candidates."""
+    candidates = build_candidates(
+        liability_store.read_triaged(triaged_path),
+        tolerance_store.read_tolerance_tsv(tolerance_path),
+        taxonomy,
+        max_edits_per_variant,
+        candidate_residues_per_position,
+    )
+    candidate_store.write_candidates(out_candidates, candidates)
+    return "" if candidates else "no-candidate-cleared-motif"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Build candidate substitutions and re-scan each for new liabilities."
+        description="Build candidate substitutions for every antibody and re-scan each for "
+        "new liabilities."
     )
-    parser.add_argument("--triaged", required=True, help="scan.py's --out-triaged")
-    parser.add_argument("--tolerance", required=True, help="antifold.py's --out-tolerance")
+    parser.add_argument("--triaged-dir", required=True, help="scan.py's --out-triaged-dir")
+    parser.add_argument("--tolerance-dir", required=True, help="antifold.py's --out-tolerance-dir")
+    parser.add_argument("--pdb-index", required=True, help="the roster")
     parser.add_argument(
         "--definitions",
         required=True,
         help="taxonomy JSON; the re-scan needs the identical detector",
     )
-    parser.add_argument("--out-candidates", required=True)
+    parser.add_argument("--out-candidates-dir", required=True)
     parser.add_argument("--out-skip", required=True)
     parser.add_argument(
         "--max-edits-per-variant", type=int, default=DEFAULT_MAX_EDITS_PER_VARIANT
@@ -186,25 +206,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    _require_file(args.triaged, "scan.py's --out-triaged")
-    _require_file(args.tolerance, "antifold.py's --out-tolerance")
     _require_file(args.definitions, "the shared taxonomy package's output")
-
-    triaged_list = liability_store.read_triaged(args.triaged)
-    tolerance_lookup = tolerance_store.read_tolerance_tsv(args.tolerance)
     taxonomy = json.loads(Path(args.definitions).read_text())
 
-    candidates = build_candidates(
-        triaged_list,
-        tolerance_lookup,
-        taxonomy,
-        args.max_edits_per_variant,
-        args.candidate_residues_per_position,
-    )
+    triaged_dir = Path(args.triaged_dir)
+    tolerance_dir = Path(args.tolerance_dir)
+    out_dir = Path(args.out_candidates_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    candidate_store.write_candidates(args.out_candidates, candidates)
-    _write_skip(args.out_skip, "" if candidates else "no-candidate-cleared-motif")
-    return 0
+    def one(entry: roster.Entry) -> str | None:
+        triaged_path = triaged_dir / f"{entry.stem}.json"
+        tolerance_path = tolerance_dir / f"{entry.stem}.tsv"
+        # This step joins two predecessors, so either one may legitimately
+        # have named this antibody's reason already — no second row for it.
+        if not triaged_path.is_file() or not tolerance_path.is_file():
+            return None
+        return process_one(
+            str(triaged_path),
+            str(tolerance_path),
+            str(out_dir / f"{entry.stem}.json"),
+            taxonomy,
+            args.max_edits_per_variant,
+            args.candidate_residues_per_position,
+        )
+
+    return batch.run(roster.read_roster(args.pdb_index), one, args.out_skip)
 
 
 if __name__ == "__main__":

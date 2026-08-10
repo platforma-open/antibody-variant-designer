@@ -21,19 +21,26 @@ effect this package cannot actually compute. The penalty only reorders
 that leading window; a candidate outside it never moves, and no
 candidate's reported `structuralTolerance` changes because of it.
 
-This entrypoint reads `residues.json` in addition to `candidates.json`,
-which the boundary-file table does not list — a candidate's edits are not
-enough to render `variantSequence` on their own; the wild-type residues at
-every unedited position are needed too, and `residues.json` is the only
-place they still are.
+This entrypoint reads each antibody's `residues.json` in addition to its
+`candidates.json` — a candidate's edits are not enough to render
+`variantSequence` on their own; the wild-type residues at every unedited
+position are needed too, and the residue index is the only place they still
+are.
+
+Ranks restart at 1 for every parent, and `variants.tsv` is one dataset-wide
+file, so each row carries its `clonotypeKey` and `variantKey` as columns.
+Rows are appended per parent rather than collected, which is what holds the
+peak footprint at one antibody.
 """
 
 import argparse
 import sys
 from pathlib import Path
 
+import batch
 import candidate_store
 import residue_store
+import roster
 import variant_store
 
 DEFAULT_VARIANTS_PER_PARENT = 10
@@ -127,11 +134,19 @@ def rank_variants(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Rank cleared candidates, band their binding risk, and render each sequence."
+        description="Rank every antibody's cleared candidates, band their binding risk, and "
+        "render each sequence."
     )
-    parser.add_argument("--candidates", required=True, help="candidates.py's --out-candidates")
-    parser.add_argument("--residues", required=True, help="structure.py's output")
+    parser.add_argument(
+        "--candidates-dir", required=True, help="candidates.py's --out-candidates-dir"
+    )
+    parser.add_argument("--residues-dir", required=True, help="structure.py's output directory")
+    parser.add_argument("--pdb-index", required=True, help="the roster")
+    parser.add_argument(
+        "--block-id", required=True, help="the third ingredient of the variantKey hash"
+    )
     parser.add_argument("--out-variants", required=True)
+    parser.add_argument("--out-skip", required=True)
     parser.add_argument(
         "--variants-per-parent", type=int, default=DEFAULT_VARIANTS_PER_PARENT
     )
@@ -143,26 +158,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    for path, producer in (
-        (args.candidates, "candidates.py's --out-candidates"),
-        (args.residues, "structure.py's output"),
-    ):
-        if not Path(path).is_file():
-            raise SystemExit(f"{path} does not exist — expected {producer}")
+    candidates_dir = Path(args.candidates_dir)
+    residues_dir = Path(args.residues_dir)
+    variant_store.write_variants_header(args.out_variants)
 
-    candidates = candidate_store.read_candidates(args.candidates)
-    residues = residue_store.read_residues(args.residues)
+    def one(entry: roster.Entry) -> str | None:
+        candidates_path = candidates_dir / f"{entry.stem}.json"
+        residues_path = residues_dir / f"{entry.stem}.json"
+        if not candidates_path.is_file() or not residues_path.is_file():
+            return None
+        variants = rank_variants(
+            candidate_store.read_candidates(str(candidates_path)),
+            residue_store.read_residues(str(residues_path)),
+            args.variants_per_parent,
+            args.low_tolerance_floor,
+            args.epistasis_rescore_top_k,
+        )
+        variant_store.append_variants_tsv(
+            args.out_variants, entry.clonotype_key, args.block_id, variants
+        )
+        # Ranking declines nothing: an antibody reaching this step already
+        # cleared the re-scan gate, so every reason it could carry was
+        # named upstream.
+        return ""
 
-    variants = rank_variants(
-        candidates,
-        residues,
-        args.variants_per_parent,
-        args.low_tolerance_floor,
-        args.epistasis_rescore_top_k,
-    )
-
-    variant_store.write_variants_tsv(args.out_variants, variants)
-    return 0
+    return batch.run(roster.read_roster(args.pdb_index), one, args.out_skip)
 
 
 if __name__ == "__main__":

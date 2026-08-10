@@ -7,10 +7,12 @@ partial index.
 """
 
 import json
+from pathlib import Path
 
 import cysteine
 import motifs
 import residue_store
+import skip_store
 from pdb_fixtures import make_pdb, platforma_cdr_remark
 from structure import main
 
@@ -60,22 +62,24 @@ def remarks(role, chain):
     )
 
 
-def run_structure(tmp_path, text):
-    """Run the CLI over `text`. Returns `(skip_reason, residues)`."""
-    pdb_path = tmp_path / "input.pdb"
-    pdb_path.write_text(text)
-    out_residues = tmp_path / "residues.json"
-    out_skip = tmp_path / "skip.txt"
+def run_structure(batch, text):
+    """Run the batch CLI over a one-antibody roster carrying `text`.
+    Returns `(skip_reason, residues)` for that antibody."""
+    entry = batch.add("clonotype-1", text)
+    out_residues_dir = batch.dir("residues")
+    out_skip = batch.path("skip.tsv")
 
     rc = main([
-        "--pdb", str(pdb_path),
-        "--clonotype-key", "clonotype-1",
-        "--out-residues", str(out_residues),
-        "--out-skip", str(out_skip),
+        "--pdb-dir", str(batch.pdb_dir),
+        "--pdb-index", batch.index,
+        "--out-residues-dir", out_residues_dir,
+        "--out-skip", out_skip,
     ])
 
     assert rc == 0
-    return out_skip.read_text(), residue_store.read_residues(str(out_residues))
+    [(_, reason)] = skip_store.read_skips(out_skip)
+    residues = residue_store.read_residues(f"{out_residues_dir}/{entry.stem}.json")
+    return reason, residues
 
 
 def researched(residues):
@@ -85,9 +89,9 @@ def researched(residues):
 class TestCase1Nanobody:
     """One chain, role H, V domain only — researched in full."""
 
-    def test_whole_chain_is_researched(self, tmp_path):
+    def test_whole_chain_is_researched(self, batch):
         skip, residues = run_structure(
-            tmp_path, remarks("H", "H") + "\n" + make_pdb(v_domain("H"))
+            batch, remarks("H", "H") + "\n" + make_pdb(v_domain("H"))
         )
 
         assert skip == ""
@@ -95,11 +99,11 @@ class TestCase1Nanobody:
         assert len(researched(residues)) == 128
         assert {r.chain_role for r in residues} == {"H"}
 
-    def test_vhh_hallmark_cdr_disulfide_is_not_an_extra_cysteine(self, tmp_path):
+    def test_vhh_hallmark_cdr_disulfide_is_not_an_extra_cysteine(self, batch):
         # The CDR1-CDR3 pair a canonical VHH carries. `cysteine.py` counts
         # FR1 and FR3 only, so this must stay silent.
         _, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n" + make_pdb(v_domain("H", cys_at=(24, 104, 33, 110))),
         )
 
@@ -109,9 +113,9 @@ class TestCase1Nanobody:
 class TestCase2Fv:
     """Chains H and L, V domains only — both researched, neither joined."""
 
-    def test_both_chains_are_researched(self, tmp_path):
+    def test_both_chains_are_researched(self, batch):
         skip, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n" + remarks("L", "L") + "\n"
             + make_pdb(v_domain("H") + v_domain("L")),
         )
@@ -120,11 +124,11 @@ class TestCase2Fv:
         assert len(researched(residues)) == 256
         assert {r.chain for r in researched(residues)} == {"H", "L"}
 
-    def test_no_motif_spans_the_two_chains(self, tmp_path):
+    def test_no_motif_spans_the_two_chains(self, batch):
         # H ends in ASN, L opens with GLY. Joined, that is an `N[GS]` hit;
         # per chain it is nothing.
         _, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n" + remarks("L", "L") + "\n"
             + make_pdb(v_domain("H", overrides={128: "ASN"})
                        + v_domain("L", overrides={1: "GLY"})),
@@ -136,9 +140,9 @@ class TestCase2Fv:
 class TestCase3ScFv:
     """VH + linker + VL on one chain — a named skip, not a partial index."""
 
-    def test_two_v_domains_on_one_chain_skip(self, tmp_path):
+    def test_two_v_domains_on_one_chain_skip(self, batch):
         skip, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "A") + "\n" + remarks("L", "A") + "\n"
             + make_pdb(v_domain("A") + linker("A") + v_domain("A")),
         )
@@ -146,11 +150,11 @@ class TestCase3ScFv:
         assert skip == "structure-multi-domain-chain"
         assert residues == []
 
-    def test_two_roles_naming_one_chain_skip(self, tmp_path):
+    def test_two_roles_naming_one_chain_skip(self, batch):
         # The role collision alone is enough, even when the numbering
         # happens not to repeat.
         skip, _ = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "A") + "\n" + remarks("L", "A") + "\n"
             + make_pdb(v_domain("A")),
         )
@@ -161,9 +165,9 @@ class TestCase3ScFv:
 class TestCase4Fab:
     """H = VH + CH1, L = VL + CL — V domains researched, C domains not."""
 
-    def test_constant_domains_are_indexed_but_not_researched(self, tmp_path):
+    def test_constant_domains_are_indexed_but_not_researched(self, batch):
         skip, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n" + remarks("L", "L") + "\n"
             + make_pdb(v_domain("H") + c_domain("H", 129)
                        + v_domain("L") + c_domain("L", 129)),
@@ -174,18 +178,18 @@ class TestCase4Fab:
         assert len(researched(residues)) == 256
         assert all(r.region is not None for r in researched(residues))
 
-    def test_no_liability_is_reported_inside_a_constant_domain(self, tmp_path):
+    def test_no_liability_is_reported_inside_a_constant_domain(self, batch):
         _, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n"
             + make_pdb(v_domain("H") + c_domain("H", 129, overrides={150: "ASN", 151: "GLY"})),
         )
 
         assert motifs.detect_all(residues, TAXONOMY) == []
 
-    def test_constant_domain_restarting_at_one_skips(self, tmp_path):
+    def test_constant_domain_restarting_at_one_skips(self, batch):
         skip, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n" + make_pdb(v_domain("H") + c_domain("H", 1)),
         )
 
@@ -196,9 +200,9 @@ class TestCase4Fab:
 class TestCase5Mab:
     """Two heavy and two light chains — only the role-bearing pair is researched."""
 
-    def test_second_arm_is_indexed_but_not_researched(self, tmp_path):
+    def test_second_arm_is_indexed_but_not_researched(self, batch):
         skip, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n" + remarks("L", "L") + "\n"
             + make_pdb(v_domain("H") + v_domain("L") + v_domain("A") + v_domain("B")),
         )
@@ -207,10 +211,10 @@ class TestCase5Mab:
         assert len(residues) == 512
         assert {r.chain for r in researched(residues)} == {"H", "L"}
 
-    def test_an_identical_second_arm_does_not_double_the_hits(self, tmp_path):
+    def test_an_identical_second_arm_does_not_double_the_hits(self, batch):
         hit = {60: "ASN", 61: "GLY"}
         _, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n"
             + make_pdb(v_domain("H", overrides=hit) + v_domain("A", overrides=hit)),
         )
@@ -219,9 +223,9 @@ class TestCase5Mab:
 
         assert [h.relevant.chain for h in hits] == ["H"]
 
-    def test_an_antigen_chain_is_never_researched(self, tmp_path):
+    def test_an_antigen_chain_is_never_researched(self, batch):
         _, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n"
             + make_pdb(v_domain("H") + c_domain("X", 129, overrides={150: "ASN", 151: "GLY"})),
         )
@@ -233,9 +237,9 @@ class TestCase5Mab:
 class TestCase6HalfMab:
     """One role-bearing V domain plus a constant mass."""
 
-    def test_only_the_one_variable_domain_is_researched(self, tmp_path):
+    def test_only_the_one_variable_domain_is_researched(self, batch):
         skip, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n"
             + make_pdb(v_domain("H") + c_domain("H", 129)
                        + c_domain("C", 129) + c_domain("D", 129)),
@@ -246,16 +250,16 @@ class TestCase6HalfMab:
         assert len(researched(residues)) == 128
         assert {r.chain for r in researched(residues)} == {"H"}
 
-    def test_the_constant_mass_still_reaches_the_index_for_burial(self, tmp_path):
+    def test_the_constant_mass_still_reaches_the_index_for_burial(self, batch):
         _, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n" + make_pdb(v_domain("H") + c_domain("C", 129)),
         )
 
         assert {r.chain for r in residues} == {"H", "C"}
 
-    def test_a_file_with_no_variable_domain_skips(self, tmp_path):
-        skip, residues = run_structure(tmp_path, make_pdb(c_domain("H", 1)))
+    def test_a_file_with_no_variable_domain_skips(self, batch):
+        skip, residues = run_structure(batch, make_pdb(c_domain("H", 1)))
 
         assert skip == "no-researchable-residue"
         assert residues == []
@@ -266,13 +270,13 @@ class TestBoundaryFileCarriesTheRole:
     both re-read `residues.json` and apply the same scope rule the writer
     applied."""
 
-    def test_chain_role_round_trips_through_residues_json(self, tmp_path):
+    def test_chain_role_round_trips_through_residues_json(self, batch):
         _, residues = run_structure(
-            tmp_path,
+            batch,
             remarks("H", "H") + "\n" + make_pdb(v_domain("H") + c_domain("X", 129)),
         )
 
-        rows = json.loads((tmp_path / "residues.json").read_text())
+        rows = json.loads(Path(batch.dir("residues"), "clonotype-1.json").read_text())
 
         assert {row["chainRole"] for row in rows} == {"H", None}
         assert [r.chain_role for r in residues] == [row["chainRole"] for row in rows]

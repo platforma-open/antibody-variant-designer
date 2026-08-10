@@ -21,21 +21,19 @@ import json
 import sys
 from pathlib import Path
 
+import batch
 import cysteine
 import exposure
 import liability_store
 import motifs
 import residue_store
+import roster
 import triage
 
 DEFAULT_RSASA_BURIED_CUTOFF = 0.075
 DEFAULT_FR_CONFIDENCE_THRESHOLD = 4.0
 DEFAULT_CDR_CONFIDENCE_THRESHOLD = 6.0
 DEFAULT_ACT_ON_FIXABILITY = "fixable,easily_fixable"
-
-
-def _write_skip(path: str, reason: str) -> None:
-    Path(path).write_text(reason)
 
 
 def _load_confidence_sidecar(path: str | None) -> list[dict]:
@@ -80,24 +78,59 @@ def _confidence_lookup(
     return lookup
 
 
+def process_one(
+    pdb_path: str,
+    residues_path: str,
+    out_triaged: str,
+    taxonomy: list[dict],
+    confidence_sidecar: str | None,
+    rsasa_buried_cutoff: float,
+    fr_confidence_threshold: float,
+    cdr_confidence_threshold: float,
+    act_on_fixability: list[str],
+) -> tuple[str, list[triage.Triaged]]:
+    """Scan and triage one antibody. Returns its skip reason (`""` on pass)
+    and every triaged liability, whatever its verdict — the caller appends
+    those to the run's one `liabilities.tsv`, because the Parents page needs
+    the declined ones too."""
+    residues = residue_store.read_residues(residues_path)
+
+    rsasa_lookup = exposure.annotate(residues, pdb_path)
+    confidence_lookup = _confidence_lookup(residues, confidence_sidecar)
+
+    detected = motifs.detect_all(residues, taxonomy) + cysteine.detect_all(residues, taxonomy)
+    triaged = triage.verdict_for(
+        detected,
+        rsasa_lookup,
+        confidence_lookup,
+        rsasa_buried_cutoff,
+        fr_confidence_threshold=fr_confidence_threshold,
+        cdr_confidence_threshold=cdr_confidence_threshold,
+        act_on_fixability=act_on_fixability,
+    )
+    actionable = [t for t in triaged if triage.generates_for(t)]
+
+    liability_store.write_triaged(out_triaged, actionable)
+    return ("" if actionable else "no-liability-survived-triage"), triaged
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Scan every liability and triage each hit, non-destructively."
+        description="Scan every staged antibody's liabilities and triage each hit, "
+        "non-destructively."
     )
-    parser.add_argument("--pdb", required=True, help="the same staged PDB blob structure.py read")
-    parser.add_argument("--residues", required=True, help="structure.py's output")
-    parser.add_argument(
-        "--clonotype-key", required=True, help="the parent this invocation is for"
-    )
+    parser.add_argument("--pdb-dir", required=True, help="the same staged blobs structure.py read")
+    parser.add_argument("--residues-dir", required=True, help="structure.py's output directory")
+    parser.add_argument("--pdb-index", required=True, help="the roster")
     parser.add_argument(
         "--definitions", required=True, help="taxonomy JSON from the shared package"
     )
     parser.add_argument(
-        "--per-residue-confidence",
+        "--confidence-dir",
         default=None,
-        help="optional upstream sidecar; the PDB B-factor column is the second source",
+        help="optional upstream sidecars; the PDB B-factor column is the second source",
     )
-    parser.add_argument("--out-triaged", required=True)
+    parser.add_argument("--out-triaged-dir", required=True)
     parser.add_argument("--out-liabilities", required=True)
     parser.add_argument("--out-skip", required=True)
     parser.add_argument("--rsasa-buried-cutoff", type=float, default=DEFAULT_RSASA_BURIED_CUTOFF)
@@ -110,29 +143,45 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--act-on-fixability", default=DEFAULT_ACT_ON_FIXABILITY)
     args = parser.parse_args(argv)
 
-    residues = residue_store.read_residues(args.residues)
     taxonomy = json.loads(Path(args.definitions).read_text())
     act_on_fixability = [v for v in args.act_on_fixability.split(",") if v]
 
-    rsasa_lookup = exposure.annotate(residues, args.pdb)
-    confidence_lookup = _confidence_lookup(residues, args.per_residue_confidence)
+    pdb_dir = Path(args.pdb_dir)
+    residues_dir = Path(args.residues_dir)
+    confidence_dir = Path(args.confidence_dir) if args.confidence_dir else None
+    out_dir = Path(args.out_triaged_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    liability_store.write_liabilities_header(args.out_liabilities)
 
-    detected = motifs.detect_all(residues, taxonomy) + cysteine.detect_all(residues, taxonomy)
-    triaged = triage.verdict_for(
-        detected,
-        rsasa_lookup,
-        confidence_lookup,
-        args.rsasa_buried_cutoff,
-        fr_confidence_threshold=args.fr_confidence_gating_threshold,
-        cdr_confidence_threshold=args.cdr_confidence_gating_threshold,
-        act_on_fixability=act_on_fixability,
-    )
-    actionable = [t for t in triaged if triage.generates_for(t)]
+    def one(entry: roster.Entry) -> str | None:
+        residues_path = residues_dir / f"{entry.stem}.json"
+        pdb_path = pdb_dir / entry.filename
+        # structure.py already named this antibody's reason; a second row
+        # here would count it twice in the run-level reduce.
+        if not residues_path.is_file() or not pdb_path.is_file():
+            return None
+        sidecar = None
+        if confidence_dir is not None:
+            candidate = confidence_dir / f"{entry.stem}.json"
+            sidecar = str(candidate) if candidate.is_file() else None
 
-    liability_store.write_triaged(args.out_triaged, actionable)
-    liability_store.write_liabilities_tsv(args.out_liabilities, triaged)
-    _write_skip(args.out_skip, "" if actionable else "no-liability-survived-triage")
-    return 0
+        reason, triaged = process_one(
+            str(pdb_path),
+            str(residues_path),
+            str(out_dir / f"{entry.stem}.json"),
+            taxonomy,
+            sidecar,
+            args.rsasa_buried_cutoff,
+            args.fr_confidence_gating_threshold,
+            args.cdr_confidence_gating_threshold,
+            act_on_fixability,
+        )
+        # Appended even when triage declined everything, so an antibody
+        # that produces no variant still has Parents-page data.
+        liability_store.append_liabilities_tsv(args.out_liabilities, entry.clonotype_key, triaged)
+        return reason
+
+    return batch.run(roster.read_roster(args.pdb_index), one, args.out_skip)
 
 
 if __name__ == "__main__":

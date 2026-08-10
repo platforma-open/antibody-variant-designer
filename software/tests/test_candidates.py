@@ -1,12 +1,14 @@
 """Unit tests for `candidates.py` and its re-scan gate."""
 
 import json
+from pathlib import Path
 
 import candidate_store
 import candidates
 import liability_store
 import pytest
 import residue_store
+import skip_store
 import tolerance_store
 import triage
 
@@ -182,83 +184,104 @@ class TestBuildCandidatesEditBudget:
         assert candidates_out == []
 
 
-class TestMainRequiresItsPredecessorsOutput:
-    def test_a_missing_triaged_file_is_a_readable_non_zero_exit(self, tmp_path):
-        missing_triaged = tmp_path / "triaged.json"
+def _tolerance_rows():
+    return [
+        {"chain": "H", "posins": posins, "perplexity": row["perplexity"], **row["logProbs"]}
+        for (_, posins), row in _ng_tolerance_lookup().items()
+    ]
 
-        with pytest.raises(SystemExit, match=str(missing_triaged)):
+
+def _stage(batch, clonotype_key):
+    """Stage one antibody's `triaged.json` and `tolerance.tsv`, the way
+    scan.py and antifold.py would have left them."""
+    entry = batch.add(clonotype_key)
+    liability_store.write_triaged(
+        str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_triaged(_ng_site())]
+    )
+    tolerance_store.write_tolerance_tsv(
+        str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")), _tolerance_rows()
+    )
+    return entry
+
+
+def _run(batch, extra_args=None):
+    definitions_path = batch.path("definitions.json")
+    Path(definitions_path).write_text(json.dumps(TAXONOMY))
+    out_dir = batch.dir("candidates")
+    out_skip = batch.path("skip.tsv")
+
+    rc = candidates.main(
+        [
+            "--triaged-dir", batch.dir("triaged"),
+            "--tolerance-dir", batch.dir("tolerance"),
+            "--pdb-index", batch.index,
+            "--definitions", definitions_path,
+            "--out-candidates-dir", out_dir,
+            "--out-skip", out_skip,
+        ]
+        + (extra_args or [])
+    )
+
+    assert rc == 0
+    return skip_store.read_skips(out_skip), out_dir
+
+
+class TestMainRequiresTheTaxonomy:
+    def test_a_missing_definitions_file_is_a_readable_non_zero_exit(self, batch):
+        missing = batch.path("definitions.json")
+
+        with pytest.raises(SystemExit, match=missing):
             candidates.main(
                 [
-                    "--triaged", str(missing_triaged),
-                    "--tolerance", str(tmp_path / "tolerance.tsv"),
-                    "--definitions", str(tmp_path / "definitions.json"),
-                    "--out-candidates", str(tmp_path / "candidates.json"),
-                    "--out-skip", str(tmp_path / "skip.txt"),
+                    "--triaged-dir", batch.dir("triaged"),
+                    "--tolerance-dir", batch.dir("tolerance"),
+                    "--pdb-index", batch.index,
+                    "--definitions", missing,
+                    "--out-candidates-dir", batch.dir("candidates"),
+                    "--out-skip", batch.path("skip.tsv"),
                 ]
             )
 
 
 class TestMainWiresTheGateAndWritesTheSkip:
-    def _write_inputs(self, tmp_path):
-        triaged_path = tmp_path / "triaged.json"
-        liability_store.write_triaged(str(triaged_path), [_triaged(_ng_site())])
+    def test_a_successful_run_writes_candidates_and_an_empty_skip(self, batch):
+        entry = _stage(batch, "clone-1")
 
-        tolerance_path = tmp_path / "tolerance.tsv"
-        tolerance_store.write_tolerance_tsv(
-            str(tolerance_path),
-            [
-                {"chain": "H", "posins": "107", "perplexity": 3.0, **row["logProbs"]}
-                for (_, posins), row in _ng_tolerance_lookup().items()
-                if posins == "107"
-            ]
-            + [
-                {"chain": "H", "posins": "108", "perplexity": 3.0, **row["logProbs"]}
-                for (_, posins), row in _ng_tolerance_lookup().items()
-                if posins == "108"
-            ],
+        skips, out_dir = _run(batch)
+
+        assert skips == [("clone-1", "")]
+        assert candidate_store.read_candidates(str(Path(out_dir, f"{entry.stem}.json")))
+
+    def test_no_surviving_candidate_writes_the_named_skip_reason(self, batch):
+        entry = _stage(batch, "clone-1")
+
+        skips, out_dir = _run(batch, ["--max-edits-per-variant", "1"])
+
+        assert skips == [("clone-1", "no-candidate-cleared-motif")]
+        assert candidate_store.read_candidates(str(Path(out_dir, f"{entry.stem}.json"))) == []
+
+
+class TestBatchCli:
+    def test_each_antibody_gets_its_own_candidates_file(self, batch):
+        _stage(batch, "clone-1")
+        _stage(batch, "clone-2")
+
+        skips, out_dir = _run(batch)
+
+        assert skips == [("clone-1", ""), ("clone-2", "")]
+        assert candidate_store.read_candidates(str(Path(out_dir, "clone-1.json")))
+        assert candidate_store.read_candidates(str(Path(out_dir, "clone-2.json")))
+
+    def test_an_antibody_missing_either_predecessors_file_gets_no_row(self, batch):
+        # This step joins two predecessors, so either may have named the
+        # reason already — a row here would double-count it.
+        _stage(batch, "complete")
+        only_triaged = batch.add("no-tolerance")
+        liability_store.write_triaged(
+            str(Path(batch.dir("triaged"), f"{only_triaged.stem}.json")),
+            [_triaged(_ng_site())],
         )
 
-        definitions_path = tmp_path / "definitions.json"
-        definitions_path.write_text(json.dumps(TAXONOMY))
+        skips, _ = _run(batch)
 
-        return triaged_path, tolerance_path, definitions_path
-
-    def test_a_successful_run_writes_candidates_and_an_empty_skip(self, tmp_path):
-        triaged_path, tolerance_path, definitions_path = self._write_inputs(tmp_path)
-        out_candidates = tmp_path / "candidates.json"
-        out_skip = tmp_path / "skip.txt"
-
-        rc = candidates.main(
-            [
-                "--triaged", str(triaged_path),
-                "--tolerance", str(tolerance_path),
-                "--definitions", str(definitions_path),
-                "--out-candidates", str(out_candidates),
-                "--out-skip", str(out_skip),
-            ]
-        )
-
-        assert rc == 0
-        assert out_skip.read_text() == ""
-        written = candidate_store.read_candidates(str(out_candidates))
-        assert len(written) > 0
-
-    def test_no_surviving_candidate_writes_the_named_skip_reason(self, tmp_path):
-        triaged_path, tolerance_path, definitions_path = self._write_inputs(tmp_path)
-        out_candidates = tmp_path / "candidates.json"
-        out_skip = tmp_path / "skip.txt"
-
-        rc = candidates.main(
-            [
-                "--triaged", str(triaged_path),
-                "--tolerance", str(tolerance_path),
-                "--definitions", str(definitions_path),
-                "--out-candidates", str(out_candidates),
-                "--out-skip", str(out_skip),
-                "--max-edits-per-variant", "1",
-            ]
-        )
-
-        assert rc == 0
-        assert out_skip.read_text() == "no-candidate-cleared-motif"
-        assert candidate_store.read_candidates(str(out_candidates)) == []
+        assert skips == [("complete", "")]

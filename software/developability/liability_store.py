@@ -22,6 +22,7 @@ import residue_store
 import triage
 
 TSV_COLUMNS = [
+    "clonotypeKey",
     "liabilityKey",
     "liabilityType",
     "verdict",
@@ -86,15 +87,29 @@ def read_triaged(path: str) -> list[triage.Triaged]:
     ]
 
 
-def write_liabilities_tsv(path: str, triaged_list: list[triage.Triaged]) -> None:
-    """Every triaged liability, whatever its verdict — the Parents page's
-    only source for a `buried` or `fixability-declined` row."""
+def write_liabilities_header(path: str) -> None:
+    """Start the run's one dataset-wide file. Called once, before the batch
+    loop, so an empty roster still leaves a header-only TSV rather than no
+    file at all."""
+    Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
+
+
+def append_liabilities_tsv(
+    path: str, clonotype_key: str, triaged_list: list[triage.Triaged]
+) -> None:
+    """Append one antibody's rows — every triaged liability, whatever its
+    verdict, since the Parents page has no other source for a `buried` or
+    `fixability-declined` row.
+
+    Appends rather than returning rows to collect: one file now holds the
+    whole dataset, and accumulating every antibody's rows before a single
+    write is what the sequential-streaming constraint forbids."""
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-    writer.writerow(TSV_COLUMNS)
     for t in triaged_list:
         writer.writerow(
             [
+                _tsv_value(clonotype_key),
                 _tsv_value(liability_key(t)),
                 _tsv_value(t.liability_type),
                 _tsv_value(t.verdict),
@@ -104,4 +119,5 @@ def write_liabilities_tsv(path: str, triaged_list: list[triage.Triaged]) -> None
                 _tsv_value(t.fixability),
             ]
         )
-    Path(path).write_text(buf.getvalue())
+    with Path(path).open("a") as fh:
+        fh.write(buf.getvalue())

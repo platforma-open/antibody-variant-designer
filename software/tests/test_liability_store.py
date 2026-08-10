@@ -72,6 +72,10 @@ class TestLiabilityKey:
         assert liability_store.liability_key(triaged) == "deamidation@H107"
 
 
+def _rows_of(path):
+    return list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
+
+
 class TestLiabilitiesTsv:
     def test_every_verdict_is_written_including_declined_ones(self, tmp_path):
         exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
@@ -81,9 +85,12 @@ class TestLiabilitiesTsv:
         )
         path = tmp_path / "liabilities.tsv"
 
-        liability_store.write_liabilities_tsv(str(path), [exposed, buried, declined])
+        liability_store.write_liabilities_header(str(path))
+        liability_store.append_liabilities_tsv(
+            str(path), "clone-1", [exposed, buried, declined]
+        )
 
-        rows = list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
+        rows = _rows_of(path)
         assert [r["verdict"] for r in rows] == ["exposed", "buried", "fixability-declined"]
 
     def test_low_confidence_is_the_string_yes_or_no_never_a_bool(self, tmp_path):
@@ -91,16 +98,55 @@ class TestLiabilitiesTsv:
         high = _triaged([_residue("H", 1, imgt="108")], low_confidence=False)
         path = tmp_path / "liabilities.tsv"
 
-        liability_store.write_liabilities_tsv(str(path), [low, high])
+        liability_store.write_liabilities_header(str(path))
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [low, high])
 
-        rows = list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
-        assert [r["lowConfidence"] for r in rows] == ["yes", "no"]
+        assert [r["lowConfidence"] for r in _rows_of(path)] == ["yes", "no"]
 
     def test_null_rsasa_writes_an_empty_cell_not_the_word_none(self, tmp_path):
         unmeasured = _triaged([_residue("H", 0, imgt="107")], rsasa=None)
         path = tmp_path / "liabilities.tsv"
 
-        liability_store.write_liabilities_tsv(str(path), [unmeasured])
+        liability_store.write_liabilities_header(str(path))
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [unmeasured])
 
-        rows = list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
-        assert rows[0]["rsasa"] == ""
+        assert _rows_of(path)[0]["rsasa"] == ""
+
+    def test_header_alone_is_a_valid_empty_file(self, tmp_path):
+        path = tmp_path / "liabilities.tsv"
+
+        liability_store.write_liabilities_header(str(path))
+
+        assert _rows_of(path) == []
+        assert path.read_text().startswith("clonotypeKey\t")
+
+
+class TestOneFileHoldsEveryParent:
+    def test_each_appended_row_carries_its_own_clonotype_key(self, tmp_path):
+        path = tmp_path / "liabilities.tsv"
+
+        liability_store.write_liabilities_header(str(path))
+        liability_store.append_liabilities_tsv(
+            str(path), "clone-1", [_triaged([_residue("H", 0, imgt="107")])]
+        )
+        liability_store.append_liabilities_tsv(
+            str(path), "clone-2", [_triaged([_residue("H", 1, imgt="108")])]
+        )
+
+        assert [r["clonotypeKey"] for r in _rows_of(path)] == ["clone-1", "clone-2"]
+
+    def test_clonotype_key_and_liability_key_are_unique_across_the_whole_file(self, tmp_path):
+        # Two parents may carry the same liability at the same position, so
+        # the liabilityKey alone stops identifying a row once one file holds
+        # every parent — the pair is the axis tuple.
+        same_liability = [_triaged([_residue("H", 0, imgt="107")])]
+        path = tmp_path / "liabilities.tsv"
+
+        liability_store.write_liabilities_header(str(path))
+        liability_store.append_liabilities_tsv(str(path), "clone-1", same_liability)
+        liability_store.append_liabilities_tsv(str(path), "clone-2", same_liability)
+
+        rows = _rows_of(path)
+        keys = [(r["clonotypeKey"], r["liabilityKey"]) for r in rows]
+        assert len(set(keys)) == len(rows) == 2
+        assert len({r["liabilityKey"] for r in rows}) == 1

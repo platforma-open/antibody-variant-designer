@@ -10,10 +10,12 @@ import csv
 import io
 import math
 import socket
+from pathlib import Path
 
 import antifold
 import pytest
 import residue_store
+import skip_store
 import tolerance_store
 
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
@@ -146,73 +148,183 @@ class TestBlockNetwork:
         assert socket.socket is original
 
 
+def _stage(batch, clonotype_key, residues=None):
+    """Stage one antibody's PDB and residue index, as structure.py would."""
+    entry = batch.add(clonotype_key, "ATOM")
+    residue_store.write_residues(
+        str(Path(batch.dir("residues"), f"{entry.stem}.json")),
+        residues if residues is not None else [_residue("H", 0, imgt="1", role="H")],
+    )
+    return entry
+
+
+def _weights(batch):
+    path = Path(batch.path("model.pt"))
+    path.write_text("not-a-real-checkpoint")
+    return str(path)
+
+
+def _run(batch, weights):
+    out_dir = batch.dir("tolerance")
+    out_skip = batch.path("skip.tsv")
+
+    rc = antifold.main(
+        [
+            "--pdb-dir", str(batch.pdb_dir),
+            "--residues-dir", batch.dir("residues"),
+            "--pdb-index", batch.index,
+            "--weights", weights,
+            "--out-tolerance-dir", out_dir,
+            "--out-skip", out_skip,
+        ]
+    )
+
+    assert rc == 0
+    return skip_store.read_skips(out_skip), out_dir
+
+
 class TestMissingWeightsRaisesBeforeAnyModelCall:
-    def test_missing_weights_path_is_a_readable_non_zero_exit(self, tmp_path, monkeypatch):
+    def test_missing_weights_path_is_a_readable_non_zero_exit(self, batch, monkeypatch):
         def _fail_if_called(*_args, **_kwargs):
             raise AssertionError("the model must never be called when --weights is missing")
 
+        monkeypatch.setattr(antifold, "load_model", _fail_if_called)
         monkeypatch.setattr(antifold, "_run_model", _fail_if_called)
+        _stage(batch, "clone-1")
+        missing_weights = str(Path(batch.root, "absent", "model.pt"))
 
-        residues_path = tmp_path / "residues.json"
-        residue_store.write_residues(str(residues_path), [_residue("H", 0, role="H")])
-        out_tolerance = tmp_path / "tolerance.tsv"
-        out_skip = tmp_path / "skip.txt"
-        missing_weights = tmp_path / "absent" / "model.pt"
-
-        with pytest.raises(SystemExit, match=str(missing_weights)):
+        with pytest.raises(SystemExit, match=missing_weights):
             antifold.main(
                 [
-                    "--pdb", str(tmp_path / "input.pdb"),
-                    "--residues", str(residues_path),
-                    "--weights", str(missing_weights),
-                    "--out-tolerance", str(out_tolerance),
-                    "--out-skip", str(out_skip),
+                    "--pdb-dir", str(batch.pdb_dir),
+                    "--residues-dir", batch.dir("residues"),
+                    "--pdb-index", batch.index,
+                    "--weights", missing_weights,
+                    "--out-tolerance-dir", batch.dir("tolerance"),
+                    "--out-skip", batch.path("skip.tsv"),
                 ]
             )
 
-        assert not out_tolerance.exists()
+        # A missing checkpoint is a broken run, not N bad antibodies: it must
+        # not degrade into a skip TSV full of `backend-failed` rows.
+        assert not Path(batch.path("skip.tsv")).exists()
 
 
 class TestMainWiresTheJoinAndWritesTheTsv:
     def test_a_successful_run_writes_the_tolerance_tsv_and_an_empty_skip(
-        self, tmp_path, monkeypatch
+        self, batch, monkeypatch
     ):
-        residues = [_residue("H", 0, imgt="1", role="H")]
-        residues_path = tmp_path / "residues.json"
-        residue_store.write_residues(str(residues_path), residues)
-        weights_path = tmp_path / "model.pt"
-        weights_path.write_text("not-a-real-checkpoint")
-        out_tolerance = tmp_path / "tolerance.tsv"
-        out_skip = tmp_path / "skip.txt"
-
+        entry = _stage(batch, "clone-1")
         captured = {}
 
-        def _fake_run_model(pdb_path, weights, h_chain, l_chain, nanobody_mode):
+        def _fake_run_model(model, pdb_path, h_chain, l_chain, nanobody_mode):
             captured.update(
-                pdb_path=pdb_path, weights=weights, h_chain=h_chain,
+                model=model, pdb_path=pdb_path, h_chain=h_chain,
                 l_chain=l_chain, nanobody_mode=nanobody_mode,
             )
             return [_logits_row("H", "1", perplexity=4.2)]
 
+        monkeypatch.setattr(antifold, "load_model", lambda _w: "loaded-model")
         monkeypatch.setattr(antifold, "_run_model", _fake_run_model)
 
-        rc = antifold.main(
-            [
-                "--pdb", str(tmp_path / "input.pdb"),
-                "--residues", str(residues_path),
-                "--weights", str(weights_path),
-                "--out-tolerance", str(out_tolerance),
-                "--out-skip", str(out_skip),
-            ]
-        )
+        skips, out_dir = _run(batch, _weights(batch))
 
-        assert rc == 0
-        assert out_skip.read_text() == ""
+        assert skips == [("clone-1", "")]
         assert captured["h_chain"] == "H"
         assert captured["l_chain"] is None
         assert captured["nanobody_mode"] is True
 
-        rows = list(csv.DictReader(io.StringIO(out_tolerance.read_text()), delimiter="\t"))
+        rows = list(
+            csv.DictReader(
+                io.StringIO(Path(out_dir, f"{entry.stem}.tsv").read_text()), delimiter="\t"
+            )
+        )
         assert rows[0]["chain"] == "H"
         assert rows[0]["posins"] == "1"
         assert rows[0]["perplexity"] == "4.2"
+
+
+class TestBatchCli:
+    def test_the_checkpoint_is_loaded_once_for_the_whole_batch(self, batch, monkeypatch):
+        # The single load is the entire cost argument for batching, so more
+        # than one call here means the saving was lost.
+        _stage(batch, "clone-1")
+        _stage(batch, "clone-2")
+        _stage(batch, "clone-3")
+        loads = []
+
+        monkeypatch.setattr(
+            antifold, "load_model", lambda _w: loads.append(1) or "loaded-model"
+        )
+        monkeypatch.setattr(
+            antifold,
+            "_run_model",
+            lambda *_a, **_k: [_logits_row("H", "1", perplexity=4.2)],
+        )
+
+        skips, _ = _run(batch, _weights(batch))
+
+        assert len(loads) == 1
+        assert skips == [("clone-1", ""), ("clone-2", ""), ("clone-3", "")]
+
+    def test_a_middle_antibody_raising_is_named_and_the_others_still_finish(
+        self, batch, monkeypatch, capsys
+    ):
+        _stage(batch, "first")
+        _stage(batch, "middle")
+        _stage(batch, "last")
+
+        def _fake_run_model(_model, pdb_path, *_a, **_k):
+            # Match the filename, never the whole path — pytest names the
+            # tmp dir after the test, so a substring check on the path would
+            # match every antibody in this one.
+            if Path(pdb_path).stem == "middle":
+                raise RuntimeError("torch exploded")
+            return [_logits_row("H", "1", perplexity=4.2)]
+
+        monkeypatch.setattr(antifold, "load_model", lambda _w: "loaded-model")
+        monkeypatch.setattr(antifold, "_run_model", _fake_run_model)
+
+        skips, out_dir = _run(batch, _weights(batch))
+
+        assert skips == [
+            ("first", ""),
+            ("middle", "backend-failed"),
+            ("last", ""),
+        ]
+        assert Path(out_dir, "first.tsv").is_file()
+        assert not Path(out_dir, "middle.tsv").exists()
+        assert Path(out_dir, "last.tsv").is_file()
+        # AntiFold swallows its own exceptions and exits 0, so the clonotype
+        # key reaching stderr is the only trace back to the cause.
+        assert "middle" in capsys.readouterr().err
+
+    def test_an_antibody_step_one_skipped_gets_no_row_and_no_model_call(
+        self, batch, monkeypatch
+    ):
+        _stage(batch, "indexed")
+        batch.add("skipped-earlier", "ATOM")  # no residues file written
+        seen = []
+
+        monkeypatch.setattr(antifold, "load_model", lambda _w: "loaded-model")
+
+        def _fake_run_model(_model, pdb_path, *_a, **_k):
+            seen.append(pdb_path)
+            return [_logits_row("H", "1", perplexity=4.2)]
+
+        monkeypatch.setattr(antifold, "_run_model", _fake_run_model)
+
+        skips, _ = _run(batch, _weights(batch))
+
+        assert skips == [("indexed", "")]
+        assert len(seen) == 1
+
+    def test_an_empty_roster_never_loads_the_checkpoint(self, batch, monkeypatch):
+        def _fail_if_called(*_args, **_kwargs):
+            raise AssertionError("nothing runnable — the 540 MiB load buys nothing")
+
+        monkeypatch.setattr(antifold, "load_model", _fail_if_called)
+
+        skips, _ = _run(batch, _weights(batch))
+
+        assert skips == []
