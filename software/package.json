@@ -5,6 +5,75 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "uv run --group dev ruff check ."
+    "build": "pl-pkg build",
+    "check": "uv run --group dev ruff check .",
+    "deps:export": "bash scripts/deps-export.sh",
+    "prepublishOnly": "pl-pkg prepublish"
+  },
+  "devDependencies": {
+    "@platforma-open/milaboratories.runenv-python-3": "catalog:",
+    "@platforma-sdk/package-builder": "catalog:"
+  },
+  "block-software": {
+    "artifacts": {
+      "design-script": {
+        "type": "python",
+        "registry": "platforma-open",
+        "environment": "@platforma-open/milaboratories.runenv-python-3:3.12.10",
+        "dependencies": {
+          "toolset": "pip",
+          "requirements": "requirements.txt"
+        },
+        "root": "./developability"
+      },
+      "design-script-with-antifold": {
+        "type": "python",
+        "registry": "platforma-open",
+        "environment": "@platforma-open/milaboratories.runenv-python-3:3.12.10",
+        "dependencies": {
+          "toolset": "pip",
+          "requirements": "requirements-antifold.txt"
+        },
+        "root": "./developability"
+      }
+    },
+    "entrypoints": {
+      "index-structure": {
+        "binary": {
+          "artifact": "design-script",
+          "cmd": [
+            "python",
+            "{pkg}/structure.py"
+          ]
+        }
+      },
+      "scan-liabilities": {
+        "binary": {
+          "artifact": "design-script",
+          "cmd": [
+            "python",
+            "{pkg}/scan.py"
+          ]
+        }
+      },
+      "read-tolerance": {
+        "binary": {
+          "artifact": "design-script-with-antifold",
+          "cmd": [
+            "python",
+            "{pkg}/antifold.py"
+          ]
+        }
+      },
+      "build-variants": {
+        "binary": {
+          "artifact": "design-script",
+          "cmd": [
+            "python",
+            "{pkg}/variants.py"
+          ]
+        }
+      }
+    }
   }
 }

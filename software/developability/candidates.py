@@ -1,23 +1,26 @@
-"""Candidate substitutions and the re-scan gate, the entrypoint that writes
-`candidates.json` — the block's only real filter between a triaged
-liability and a variant.
+"""Candidate substitutions and the re-scan gate — the block's only real
+filter between a triaged liability and a variant.
 
-This entrypoint never receives the residue index or the PDB — only
-`triaged.json` and `tolerance.tsv` — so a candidate's own site (the exact
+A module, not an entrypoint: `variants.py` runs this and then `ranking.py`
+in one exec, because ranking discards nothing and reads nothing this module
+did not just produce.
+
+This gate never sees the residue index or the PDB — only a triaged
+liability and the tolerance table — so a candidate's own site (the exact
 residues its originating motif or cysteine check matched over) is the only
-window this re-scan can see. Substituting every position in that site
+window the re-scan can see. Substituting every position in that site
 together and re-running the same two detectors over just that window is
 therefore both the mechanism and its own boundary: a hit reappearing in
 the re-scan means either the target motif still matches (not cleared) or a
 different taxonomy entry now matches inside that same short span (a new
 liability), and either way the candidate is discarded. A liability whose
-site runs longer than `--max-edits-per-variant` is skipped outright, since
+site runs longer than `max_edits_per_variant` is skipped outright, since
 substituting every one of its positions would exceed the edit budget
 before the re-scan even runs.
 
 `cysteine.detect_all`'s expected-cysteine-position indexing is relative to
 a region's full residue list, not to a bare site; re-scanning a cysteine
-candidate over its own (shorter) site is an approximation this entrypoint
+candidate over its own (shorter) site is an approximation this module
 accepts because, again, the full region is not something it can see.
 
 A surviving candidate's `tolerance` is the worst (lowest) AntiFold
@@ -28,31 +31,57 @@ per-amino-acid log-probability `_top_substitutions` ranks by. `region`,
 the triaged liability; `addressed_target` and `changed_positions` are
 built here, from the taxonomy's own label and the fixed
 `<chain>:<wt><imgtLabel><mut>` rendering, so `ranking.py` never has to
-re-read `triaged.json` or the taxonomy to report either one.
+re-read the triaged liabilities or the taxonomy to report either one.
 """
 
-import argparse
 import itertools
-import json
-import sys
-from dataclasses import replace
-from pathlib import Path
+from dataclasses import dataclass, replace
 
-import batch
-import candidate_store
 import cysteine
-import liability_store
 import motifs
-import roster
-import tolerance_store
 
 DEFAULT_MAX_EDITS_PER_VARIANT = 5
 DEFAULT_CANDIDATE_RESIDUES_PER_POSITION = 3
 
 
-def _require_file(path: str, producer: str) -> None:
-    if not Path(path).is_file():
-        raise SystemExit(f"{path} does not exist — expected {producer}")
+@dataclass(frozen=True)
+class Edit:
+    """One substitution: `wild_type` at `(chain, offset)` becomes `to`.
+
+    Carries `imgt` alongside `offset` for the same reason `residue_store`
+    does — the display label and the join key are different things, and a
+    reader needing either finds it here without a second lookup."""
+
+    chain: str
+    offset: int
+    imgt: str
+    wild_type: str
+    to: str
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """One re-scan-cleared substitution set, still keyed to the one
+    liability it was built to address.
+
+    `region`, `low_confidence` and `worst_confidence_angstroms` are carried
+    forward unchanged from the `triage.Triaged` this candidate was built
+    from — this module computes none of them itself. `addressed_target` and
+    `changed_positions` are its own output: a human-readable label for the
+    liability the edits target, and the fixed-spelling
+    `<chain>:<wt><imgtLabel><mut>` rendering of the edits.
+
+    Never serialized. Candidates are handed straight to `ranking.py` inside
+    one exec, so this type crosses no boundary and needs no wire format."""
+
+    target_definition_id: str
+    edits: tuple[Edit, ...]
+    tolerance: float
+    region: str | None
+    low_confidence: bool
+    worst_confidence_angstroms: float | None
+    addressed_target: str
+    changed_positions: str
 
 
 def _top_substitutions(residue, tolerance_lookup: dict, k: int) -> list[str]:
@@ -84,7 +113,7 @@ def _changed_positions(edits: tuple) -> str:
 def _addressed_target(definition_id: str, site: list, taxonomy_by_id: dict) -> str:
     """A human-readable label for the liability this candidate was built
     to clear — the taxonomy's own name plus where it sits, since neither
-    `triage.Triaged` nor `candidate_store.Candidate` carries a display
+    `triage.Triaged` nor `Candidate` carries a display
     string on its own."""
     definition = taxonomy_by_id.get(definition_id, {})
     name = definition.get("name") or definition_id
@@ -100,7 +129,7 @@ def build_candidates(
     taxonomy: list[dict],
     max_edits_per_variant: int,
     candidate_residues_per_position: int,
-) -> list[candidate_store.Candidate]:
+) -> list[Candidate]:
     """Every re-scan-cleared substitution set, one liability at a time.
     Every position in a liability's site is substituted together, so each
     candidate's edit count equals that site's length — a site longer than
@@ -108,7 +137,7 @@ def build_candidates(
     substitution at any of its positions is skipped, both before the
     re-scan runs at all."""
     taxonomy_by_id = {d["id"]: d for d in taxonomy}
-    candidates: list[candidate_store.Candidate] = []
+    candidates: list[Candidate] = []
     for triaged in triaged_list:
         site = triaged.site
         if len(site) > max_edits_per_variant:
@@ -137,7 +166,7 @@ def build_candidates(
                 continue
 
             edits = tuple(
-                candidate_store.Edit(
+                Edit(
                     chain=residue.chain,
                     offset=residue.offset,
                     imgt=residue.imgt,
@@ -147,7 +176,7 @@ def build_candidates(
                 for residue, to_aa in zip(site, combo, strict=True)
             )
             candidates.append(
-                candidate_store.Candidate(
+                Candidate(
                     target_definition_id=triaged.definition_id,
                     edits=edits,
                     tolerance=structural_tolerance,
@@ -159,79 +188,3 @@ def build_candidates(
                 )
             )
     return candidates
-
-
-def process_one(
-    triaged_path: str,
-    tolerance_path: str,
-    out_candidates: str,
-    taxonomy: list[dict],
-    max_edits_per_variant: int,
-    candidate_residues_per_position: int,
-) -> str:
-    """Build and gate one antibody's candidates."""
-    candidates = build_candidates(
-        liability_store.read_triaged(triaged_path),
-        tolerance_store.read_tolerance_tsv(tolerance_path),
-        taxonomy,
-        max_edits_per_variant,
-        candidate_residues_per_position,
-    )
-    candidate_store.write_candidates(out_candidates, candidates)
-    return "" if candidates else "no-candidate-cleared-motif"
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Build candidate substitutions for every antibody and re-scan each for "
-        "new liabilities."
-    )
-    parser.add_argument("--triaged-dir", required=True, help="scan.py's --out-triaged-dir")
-    parser.add_argument("--tolerance-dir", required=True, help="antifold.py's --out-tolerance-dir")
-    parser.add_argument("--pdb-index", required=True, help="the roster")
-    parser.add_argument(
-        "--definitions",
-        required=True,
-        help="taxonomy JSON; the re-scan needs the identical detector",
-    )
-    parser.add_argument("--out-candidates-dir", required=True)
-    parser.add_argument("--out-skip", required=True)
-    parser.add_argument(
-        "--max-edits-per-variant", type=int, default=DEFAULT_MAX_EDITS_PER_VARIANT
-    )
-    parser.add_argument(
-        "--candidate-residues-per-position",
-        type=int,
-        default=DEFAULT_CANDIDATE_RESIDUES_PER_POSITION,
-    )
-    args = parser.parse_args(argv)
-
-    _require_file(args.definitions, "the shared taxonomy package's output")
-    taxonomy = json.loads(Path(args.definitions).read_text())
-
-    triaged_dir = Path(args.triaged_dir)
-    tolerance_dir = Path(args.tolerance_dir)
-    out_dir = Path(args.out_candidates_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    def one(entry: roster.Entry) -> str | None:
-        triaged_path = triaged_dir / f"{entry.stem}.json"
-        tolerance_path = tolerance_dir / f"{entry.stem}.tsv"
-        # This step joins two predecessors, so either one may legitimately
-        # have named this antibody's reason already — no second row for it.
-        if not triaged_path.is_file() or not tolerance_path.is_file():
-            return None
-        return process_one(
-            str(triaged_path),
-            str(tolerance_path),
-            str(out_dir / f"{entry.stem}.json"),
-            taxonomy,
-            args.max_edits_per_variant,
-            args.candidate_residues_per_position,
-        )
-
-    return batch.run(roster.read_roster(args.pdb_index), one, args.out_skip)
-
-
-if __name__ == "__main__":
-    sys.exit(main())

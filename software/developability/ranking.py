@@ -1,46 +1,37 @@
-"""Ranking, binding-risk banding and sequence rendering, the entrypoint
-that writes `variants.tsv` — the block's final artifact.
+"""Ranking, binding-risk banding and sequence rendering.
+
+A module, not an entrypoint: `variants.py` calls this straight after
+`candidates.py` in one exec. Nothing here filters — every candidate reaching
+this module already cleared the re-scan gate — so this is a presentation
+pass, and its own thresholds only order and truncate.
 
 There is no paratope model and no binding-affinity prediction anywhere in
 this package, so `binding_risk` is a band, not a score: a CDR edit at a
 position AntiFold tolerates poorly, or at a site the structure prediction
 itself was unsure about, is `High`; a framework edit with neither problem
-is `Low`; everything else is `Medium`. `--low-tolerance-floor` is the
+is `Low`; everything else is `Medium`. `low_tolerance_floor` is the
 perplexity below which a position counts as poorly tolerated for this
-banding — the same number, on the same scale, `candidate_store.Candidate.
+banding — the same number, on the same scale, `candidates.Candidate.
 tolerance` already carries.
 
-`--epistasis-rescore-top-k` exists because the per-candidate tolerance is
+`epistasis_rescore_top_k` exists because the per-candidate tolerance is
 the worst single edited position, which says nothing about a multi-edit
 candidate's edits interacting with each other. Re-scoring every candidate
-this way would cost a call this package has no model to back, so instead
-only the leading `--epistasis-rescore-top-k` candidates (by the initial
+properly would need a model this package does not have, so instead only the
+leading `epistasis_rescore_top_k` candidates (by the initial
 band-then-tolerance order) are re-sorted among themselves, penalizing each
 extra edit past the first — a deliberately blunt proxy for an interaction
 effect this package cannot actually compute. The penalty only reorders
 that leading window; a candidate outside it never moves, and no
-candidate's reported `structuralTolerance` changes because of it.
+candidate's reported structural tolerance changes because of it.
 
-This entrypoint reads each antibody's `residues.json` in addition to its
-`candidates.json` — a candidate's edits are not enough to render
-`variantSequence` on their own; the wild-type residues at every unedited
-position are needed too, and the residue index is the only place they still
-are.
-
-Ranks restart at 1 for every parent, and `variants.tsv` is one dataset-wide
-file, so each row carries its `clonotypeKey` and `variantKey` as columns.
-Rows are appended per parent rather than collected, which is what holds the
-peak footprint at one antibody.
+Rendering a variant's sequence needs the residue index as well as the
+edits: the wild-type residues at every unedited position are what the edits
+are applied over, and the index is the only place they are.
 """
 
-import argparse
-import sys
-from pathlib import Path
-
-import batch
-import candidate_store
+import candidates
 import residue_store
-import roster
 import variant_store
 
 DEFAULT_VARIANTS_PER_PARENT = 10
@@ -56,7 +47,7 @@ EPISTASIS_EDIT_PENALTY = 1.0
 _BAND_ORDER = {"Low": 0, "Medium": 1, "High": 2}
 
 
-def binding_risk(candidate: candidate_store.Candidate, low_tolerance_floor: float) -> str:
+def binding_risk(candidate: candidates.Candidate, low_tolerance_floor: float) -> str:
     """`Low` / `Medium` / `High` from the candidate's region, its
     structural tolerance against `low_tolerance_floor`, and its
     low-confidence warning — see the module docstring for why this is a
@@ -68,12 +59,12 @@ def binding_risk(candidate: candidate_store.Candidate, low_tolerance_floor: floa
     return "Medium" if (is_low_tolerance and candidate.low_confidence) else "Low"
 
 
-def _epistasis_adjusted_tolerance(candidate: candidate_store.Candidate) -> float:
+def _epistasis_adjusted_tolerance(candidate: candidates.Candidate) -> float:
     return candidate.tolerance - EPISTASIS_EDIT_PENALTY * (len(candidate.edits) - 1)
 
 
 def build_variant_sequence(
-    residues: list[residue_store.Residue], edits: tuple[candidate_store.Edit, ...]
+    residues: list[residue_store.Residue], edits: tuple[candidates.Edit, ...]
 ) -> str:
     """The full researched sequence with `edits` applied — every in-scope
     residue, ordered `chain_role` then `chain` then `offset` (H before L,
@@ -89,7 +80,7 @@ def build_variant_sequence(
 
 
 def rank_variants(
-    candidates: list[candidate_store.Candidate],
+    candidate_list: list[candidates.Candidate],
     residues: list[residue_store.Residue],
     variants_per_parent: int,
     low_tolerance_floor: float,
@@ -100,7 +91,7 @@ def rank_variants(
     penalty, then keep the top `variants_per_parent`. Rank restarts at 1
     here, because one call already covers exactly one parent's
     candidates."""
-    scored = [(c, binding_risk(c, low_tolerance_floor)) for c in candidates]
+    scored = [(c, binding_risk(c, low_tolerance_floor)) for c in candidate_list]
     scored.sort(
         key=lambda pair: (_BAND_ORDER[pair[1]], -pair[0].tolerance, pair[0].changed_positions)
     )
@@ -130,60 +121,3 @@ def rank_variants(
             )
         )
     return variants
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Rank every antibody's cleared candidates, band their binding risk, and "
-        "render each sequence."
-    )
-    parser.add_argument(
-        "--candidates-dir", required=True, help="candidates.py's --out-candidates-dir"
-    )
-    parser.add_argument("--residues-dir", required=True, help="structure.py's output directory")
-    parser.add_argument("--pdb-index", required=True, help="the roster")
-    parser.add_argument(
-        "--block-id", required=True, help="the third ingredient of the variantKey hash"
-    )
-    parser.add_argument("--out-variants", required=True)
-    parser.add_argument("--out-skip", required=True)
-    parser.add_argument(
-        "--variants-per-parent", type=int, default=DEFAULT_VARIANTS_PER_PARENT
-    )
-    parser.add_argument(
-        "--low-tolerance-floor", type=float, default=DEFAULT_LOW_TOLERANCE_FLOOR
-    )
-    parser.add_argument(
-        "--epistasis-rescore-top-k", type=int, default=DEFAULT_EPISTASIS_RESCORE_TOP_K
-    )
-    args = parser.parse_args(argv)
-
-    candidates_dir = Path(args.candidates_dir)
-    residues_dir = Path(args.residues_dir)
-    variant_store.write_variants_header(args.out_variants)
-
-    def one(entry: roster.Entry) -> str | None:
-        candidates_path = candidates_dir / f"{entry.stem}.json"
-        residues_path = residues_dir / f"{entry.stem}.json"
-        if not candidates_path.is_file() or not residues_path.is_file():
-            return None
-        variants = rank_variants(
-            candidate_store.read_candidates(str(candidates_path)),
-            residue_store.read_residues(str(residues_path)),
-            args.variants_per_parent,
-            args.low_tolerance_floor,
-            args.epistasis_rescore_top_k,
-        )
-        variant_store.append_variants_tsv(
-            args.out_variants, entry.clonotype_key, args.block_id, variants
-        )
-        # Ranking declines nothing: an antibody reaching this step already
-        # cleared the re-scan gate, so every reason it could carry was
-        # named upstream.
-        return ""
-
-    return batch.run(roster.read_roster(args.pdb_index), one, args.out_skip)
-
-
-if __name__ == "__main__":
-    sys.exit(main())

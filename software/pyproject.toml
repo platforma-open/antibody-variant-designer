@@ -3,12 +3,54 @@ name = "antibody-variant-designer"
 version = "0.1.0"
 description = "Antibody Variant Designer software: residue indexing, liability scan and triage, AntiFold tolerance read, candidate generation, and ranking."
 requires-python = ">=3.12"
-dependencies = [
+# Deliberately empty: the two artifacts this package builds must not share a
+# base set. `uv pip compile` always folds base dependencies into whatever
+# extra it is given, and there is no `--only-extra`, so anything listed here
+# would land in BOTH requirements files. Each artifact's set is an extra
+# below, and `deps:export` compiles one file per extra.
+dependencies = []
+
+[project.optional-dependencies]
+# The light set, and the ONLY third-party import the four non-model
+# entrypoints have: `exposure.py` calls freesasa and nothing else in them
+# reaches outside the standard library. Steps that never touch the model must
+# not stage anything heavier — one shared set would put torch in every
+# invocation of code that never imports it.
+light = [
     "freesasa==2.2.1",
+]
+# The heavy set, for the tolerance step alone. Every entry is module-level
+# on the import chain of the only three AntiFold functions this package
+# calls — `_load_IF1_local`, `load_IF1_checkpoint`, `get_pdbs_logits`.
+#
+# Three packages the vendored tree references are deliberately absent.
+# `anarci` is imported only by `vendor/AntiFold/antifold/_anarci/ImmunoPDB.py`,
+# a standalone CLI script nothing imports. `torch_scatter` is a
+# function-local import inside a branch guarded by `autoregressive_x is not
+# None`, which the encoder-only forward never takes — upstream's own comment
+# says it "isn't used in ESM-IF1". `torchvision` is function-local in a
+# dataset-download helper that is dead code here.
+#
+# torch_geometric is held at >= 2.3 on purpose: from that line it implements
+# scatter with native torch ops, so importing `MessagePassing` no longer
+# drags `torch_scatter` back in.
+antifold = [
+    "torch==2.2.*",
+    "torch_geometric>=2.3,<2.5",
+    "numpy==1.26.*",
+    "pandas==2.*",
+    "scipy==1.*",
+    "biotite==0.38.*",
+    "biopython==1.83",
 ]
 
 [dependency-groups]
+# Carries the light extra as well, so the pinned test command
+# (`uv run --group dev pytest -q`) still has freesasa: `exposure.py` is under
+# test and imports it. Base dependencies cannot supply it — see the comment
+# on `[project].dependencies` above.
 dev = [
+    "antibody-variant-designer[light]",
     "pytest>=9.0.2",
     "pytest-cov>=6.0.0",
     "ruff>=0.16.1",
