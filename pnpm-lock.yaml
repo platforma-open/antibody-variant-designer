@@ -24,6 +24,9 @@ catalogs:
     '@platforma-sdk/model':
       specifier: 1.80.13
       version: 1.80.13
+    '@platforma-sdk/package-builder':
+      specifier: 3.14.2
+      version: 3.14.2
     '@platforma-sdk/tengo-builder':
       specifier: 4.0.21
       version: 4.0.21
@@ -136,9 +139,9 @@ importers:
       '@platforma-open/milaboratories.runenv-python-3':
         specifier: 'catalog:'
         version: 1.8.2
-      '@platforma-sdk/block-tools':
+      '@platforma-sdk/package-builder':
         specifier: 'catalog:'
-        version: 2.12.10(@types/node@26.1.2)
+        version: 3.14.2
 
   test:
     dependencies:
@@ -192,6 +195,9 @@ importers:
       '@platforma-open/milaboratories.antibody-variant-designer.software':
         specifier: workspace:*
         version: link:../software
+      '@platforma-open/milaboratories.antifold-weights-assets':
+        specifier: ^1.0.0
+        version: 1.0.0
       '@platforma-sdk/workflow-tengo':
         specifier: 'catalog:'
         version: 6.8.2
@@ -1606,6 +1612,12 @@ packages:
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
 
+  '@platforma-open/milaboratories.antifold-weights-assets.antifold@1.0.0':
+    resolution: {integrity: sha512-PJ6ql8NUMHtnWtn0gEHD3w0RcggVv1b/23gun41w08T/FeLqTcFAjPsuxXNi18FT8PNsjmOrHRNpR9pNE+rugQ==}
+
+  '@platforma-open/milaboratories.antifold-weights-assets@1.0.0':
+    resolution: {integrity: sha512-RJ/tamCBxwZPIs6jHN0LwN31mWWZlx5sP6B9tTKgGWCvA+ToJRzDvLeAA0VI4afcNf7Dd8a2XbMaFTflWaBuyA==}
+
   '@platforma-open/milaboratories.runenv-python-3.12.10-atls@1.2.4':
     resolution: {integrity: sha512-yeklY7ISewNOQ5TWlNLRi6VSOGfcdTJPoDWtf5Z8na3xPP56fWZFuckX/ixZpGvcoyBSQf1kFBFnHPginX7jCw==}
 
@@ -1670,6 +1682,10 @@ packages:
 
   '@platforma-sdk/package-builder-lib@1.2.1':
     resolution: {integrity: sha512-H6weitj7JxbiJSlteEFLafTJ+tfty6iv/imf3ysy8oCS8AZIRJk2VMW3M/aAc+xVkQeX7oVIwMwFMYrJIoFsAg==}
+
+  '@platforma-sdk/package-builder@3.14.2':
+    resolution: {integrity: sha512-EtI6VRIJdmiexse4nNjyajD2wuzt0xwyS8snl/XSbHamdCIFtkyckbAeBCtjaCqmoislzOMIMGQYegw3cxfZXA==}
+    hasBin: true
 
   '@platforma-sdk/tengo-builder@4.0.21':
     resolution: {integrity: sha512-ecv4TE4eNljBHbpjQT50NPJofrE5Qv5Q8EY02RO8rSWpYbTmkbzaJ0eUwKcYkxkO9NlLhhMpXe7RpMC2QPLAsQ==}
@@ -6705,6 +6721,12 @@ snapshots:
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
+  '@platforma-open/milaboratories.antifold-weights-assets.antifold@1.0.0': {}
+
+  '@platforma-open/milaboratories.antifold-weights-assets@1.0.0':
+    dependencies:
+      '@platforma-open/milaboratories.antifold-weights-assets.antifold': 1.0.0
+
   '@platforma-open/milaboratories.runenv-python-3.12.10-atls@1.2.4': {}
 
   '@platforma-open/milaboratories.runenv-python-3.12.10-h5ad@1.1.4': {}
@@ -6811,6 +6833,17 @@ snapshots:
       winston: 3.19.0
       yaml: 2.9.0
       zod: 3.25.76
+    transitivePeerDependencies:
+      - aws-crt
+      - bare-abort-controller
+      - bare-buffer
+      - react-native-b4a
+
+  '@platforma-sdk/package-builder@3.14.2':
+    dependencies:
+      '@platforma-sdk/package-builder-lib': 1.2.1
+      commander: 15.0.0
+      winston: 3.19.0
     transitivePeerDependencies:
       - aws-crt
       - bare-abort-controller

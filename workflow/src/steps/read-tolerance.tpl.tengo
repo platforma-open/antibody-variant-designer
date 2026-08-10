@@ -1,0 +1,67 @@
+// Step 2 of 3 — read AntiFold's per-position tolerance for every antibody.
+//
+// The only step that mounts the weights asset and the only one that asks for
+// a GPU, which is also the only reason it is not fused into the step before
+// it: it is a different deployment unit, running on the torch requirements
+// set while the other two run without torch.
+//
+// It loads the 540.6 MiB checkpoint **once for the run**, before its loop.
+// That single load is the whole reason one exec covers the dataset rather
+// than one exec per antibody.
+//
+// It reads `triaged/` purely as a gate. An antibody with no actionable
+// liability can produce no variant, so running the model on it is wasted
+// work, and skipping it is the only saving available on the run's dominant
+// term. Absence in `triaged/` already means either "nothing actionable" or
+// "already named upstream", so one check serves both.
+
+self := import("@platforma-sdk/workflow-tengo:tpl")
+
+assets := import("@platforma-sdk/workflow-tengo:assets")
+exec := import("@platforma-sdk/workflow-tengo:exec")
+
+roster := import(":steps.roster")
+
+antifoldSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software:read-tolerance")
+weightsAsset := assets.importAsset("@platforma-open/milaboratories.antifold-weights-assets:antifold")
+
+TOLERANCE_DIR := "tolerance"
+SKIP_FILE := "skip.tsv"
+
+self.defineOutputs("tolerance", "skip")
+
+self.body(func(inputs) {
+	result := exec.builder().
+		software(antifoldSw).
+		// A fixed pair, not a data-scaled formula: the loop is sequential, so
+		// the peak is the model plus one V-domain however many antibodies the
+		// run holds. The onGPU block still asks for real cores and host RAM,
+		// because the CPU fallback has to make progress — AntiFold runs on
+		// CPU, it just runs slower.
+		resources({
+			queue: "heavy",
+			onCPU: { cpu: 4, ram: "8GiB" },
+			onGPU: { cpu: 4, ram: "8GiB", vram: "6GiB" }
+		}).
+		printErrStreamToStdout().
+		addAsset(weightsAsset, "models").
+		addFiles(inputs.pdbs).
+		addFiles(inputs.residues).
+		addFiles(inputs.triaged).
+		writeFile(roster.INDEX_FILE, roster.renderIndex(inputs.roster)).
+		arg("--pdb-dir").arg("pdbs").
+		arg("--pdb-index").arg(roster.INDEX_FILE).
+		arg("--residues-dir").arg("residues").
+		arg("--triaged-dir").arg("triaged").
+		arg("--weights").arg("models/model.pt").
+		arg("--out-tolerance-dir").arg(TOLERANCE_DIR).
+		arg("--out-skip").arg(SKIP_FILE).
+		saveFileSet("tolerance", roster.dirPattern(TOLERANCE_DIR)).
+		saveFile(SKIP_FILE).
+		run()
+
+	return {
+		tolerance: result.getFileSet("tolerance"),
+		skip: result.getFile(SKIP_FILE)
+	}
+})

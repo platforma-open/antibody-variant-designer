@@ -1,0 +1,60 @@
+// Step 3 of 3 — build candidate substitutions, re-scan each, rank what
+// survives.
+//
+// The re-scan is the block's only real filter; the ranking discards nothing.
+// They share this one exec because ranking reads nothing the gate did not
+// just produce, so a boundary between them would buy no parallelism and no
+// independent attribution while costing a job bootstrap and a directory of
+// candidate files written out and staged back in.
+//
+// `variants.tsv` is dataset-wide and leaves the pipeline as a PFrame. Its
+// `variantKey` is content-addressed over the parent, the block and the edit
+// set, which is why the block id has to reach the process that writes it.
+
+self := import("@platforma-sdk/workflow-tengo:tpl")
+
+assets := import("@platforma-sdk/workflow-tengo:assets")
+exec := import("@platforma-sdk/workflow-tengo:exec")
+
+roster := import(":steps.roster")
+
+variantsSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software:build-variants")
+
+VARIANTS_FILE := "variants.tsv"
+SKIP_FILE := "skip.tsv"
+
+self.defineOutputs("variants", "skip")
+
+self.body(func(inputs) {
+	result := exec.builder().
+		software(variantsSw).
+		resources({ queue: "medium", onCPU: { cpu: 2, ram: "4GiB" } }).
+		printErrStreamToStdout().
+		addFiles(inputs.triaged).
+		addFiles(inputs.tolerance).
+		addFiles(inputs.residues).
+		writeFile(roster.INDEX_FILE, roster.renderIndex(inputs.roster)).
+		addFile("definitions.json", inputs.definitions).
+		arg("--pdb-index").arg(roster.INDEX_FILE).
+		arg("--triaged-dir").arg("triaged").
+		arg("--tolerance-dir").arg("tolerance").
+		arg("--residues-dir").arg("residues").
+		arg("--definitions").arg("definitions.json").
+		arg("--block-id").arg(inputs.blockId).
+		arg("--out-variants").arg(VARIANTS_FILE).
+		arg("--out-skip").arg(SKIP_FILE).
+		arg("--max-edits-per-variant").arg(string(inputs.params.maxEditsPerVariant)).
+		arg("--candidate-residues-per-position").
+		arg(string(inputs.params.candidateResiduesPerPosition)).
+		arg("--variants-per-parent").arg(string(inputs.params.variantsPerParent)).
+		arg("--low-tolerance-floor").arg(string(inputs.params.lowToleranceFloor)).
+		arg("--epistasis-rescore-top-k").arg(string(inputs.params.epistasisRescoreTopK)).
+		saveFile(VARIANTS_FILE).
+		saveFile(SKIP_FILE).
+		run()
+
+	return {
+		variants: result.getFile(VARIANTS_FILE),
+		skip: result.getFile(SKIP_FILE)
+	}
+})

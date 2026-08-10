@@ -1,0 +1,59 @@
+// Shared helpers for the three step templates.
+//
+// Every step runs one exec over the whole dataset and every step reads the
+// roster, so the roster's TSV rendering lives here rather than three times.
+//
+// **A directory crossing a step boundary is a file set.** The SDK has no
+// directory primitive: no `addDir`, no file-set *input* type, and an exec's
+// workdir never reaches another exec (`exec/exec.tpl.tengo:30-38` lists the
+// only outputs). What it has is `saveFileSet(name, regex)`, which captures
+// whatever matched without the producer declaring each file — required here,
+// because a step writes an output only for the antibodies it processed and a
+// `saveFile` for one it skipped would fail the exec.
+//
+// Restaging needs no helper at all. A captured set is a `std/map` whose field
+// names are the full relative workdir paths, and `tpl.inputs()` flattens a
+// `std/map` input into a plain `path -> blob` map, so the consumer is just
+// `addFiles(inputs.<name>)` and every file lands back where it was. That is
+// also why these templates stay **pure**: the map arrives on the regular
+// input rail, which the pure readiness gate deep-waits to final before the
+// body runs, so no `awaitState` is needed and none is allowed.
+
+ll := import("@platforma-sdk/workflow-tengo:ll")
+text := import("text")
+
+// The roster's filename inside every step's workdir.
+INDEX_FILE := "pdb_index.tsv"
+
+COLUMNS := ["clonotypeKey", "filename"]
+
+/**
+ * Render the roster as the TSV every entrypoint parses.
+ *
+ * @param entries: [{clonotypeKey: string, filename: string}] - in the caller's
+ *                 order, which is sorted-key order, so the exec input stays
+ *                 canonical and the pure step dedups.
+ * @return string
+ */
+renderIndex := func(entries) {
+	lines := [text.join(COLUMNS, "\t")]
+	for e in entries {
+		lines = append(lines, e.clonotypeKey + "\t" + e.filename)
+	}
+	return text.join(lines, "\n") + "\n"
+}
+
+/**
+ * A regex matching every file directly inside `dir` — what `saveFileSet`
+ * takes. Anchored at both ends so one directory never captures another's
+ * files, and so a nested path cannot slip in.
+ */
+dirPattern := func(dir) {
+	return "^" + dir + "/[^/]+$"
+}
+
+export ll.toStrict({
+	INDEX_FILE: INDEX_FILE,
+	renderIndex: renderIndex,
+	dirPattern: dirPattern
+})

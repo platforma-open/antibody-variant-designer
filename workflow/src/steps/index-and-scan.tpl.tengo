@@ -1,0 +1,77 @@
+// Step 1 of 3 — index every staged structure, then scan and triage it.
+//
+// One exec over the whole dataset. The residue index and the scan share one
+// deployment unit and nothing between them is read by anything else, so they
+// are one process: the entrypoint's index phase produces the index and its
+// scan phase consumes it in memory.
+//
+// Two outputs cross a boundary as directories — the residue index, read by
+// both later steps, and the triaged liabilities, read by the last one. Each
+// holds a file only for the antibodies that got that far; absence is how a
+// later step learns an antibody was already named. `liabilities.tsv` is
+// dataset-wide and leaves the pipeline as a PFrame, not as a step input.
+
+self := import("@platforma-sdk/workflow-tengo:tpl")
+
+assets := import("@platforma-sdk/workflow-tengo:assets")
+exec := import("@platforma-sdk/workflow-tengo:exec")
+
+roster := import(":steps.roster")
+
+scanSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software:index-and-scan")
+
+RESIDUES_DIR := "residues"
+TRIAGED_DIR := "triaged"
+LIABILITIES_FILE := "liabilities.tsv"
+SKIP_FILE := "skip.tsv"
+
+self.defineOutputs("residues", "triaged", "liabilities", "skip")
+
+self.body(func(inputs) {
+	// `pdbs` and `confidence` arrive already flattened by `tpl.inputs()`:
+	// each is a `path -> blob` map whose keys are the workdir paths the
+	// producer used, so `addFiles` restages them verbatim.
+	cmd := exec.builder().
+		software(scanSw).
+		resources({ queue: "medium", onCPU: { cpu: 2, ram: "4GiB" } }).
+		printErrStreamToStdout().
+		addFiles(inputs.pdbs).
+		writeFile(roster.INDEX_FILE, roster.renderIndex(inputs.roster)).
+		addFile("definitions.json", inputs.definitions).
+		arg("--pdb-dir").arg("pdbs").
+		arg("--pdb-index").arg(roster.INDEX_FILE).
+		arg("--definitions").arg("definitions.json").
+		arg("--out-residues-dir").arg(RESIDUES_DIR).
+		arg("--out-triaged-dir").arg(TRIAGED_DIR).
+		arg("--out-liabilities").arg(LIABILITIES_FILE).
+		arg("--out-skip").arg(SKIP_FILE).
+		arg("--rsasa-buried-cutoff").arg(string(inputs.params.rsasaBuriedCutoff)).
+		arg("--fr-confidence-gating-threshold").arg(string(inputs.params.frConfThresh)).
+		arg("--cdr-confidence-gating-threshold").arg(string(inputs.params.cdrConfThresh)).
+		arg("--act-on-fixability").arg(inputs.params.actOnFixability)
+
+	// The confidence sidecars are optional: an older upstream emits none, and
+	// the entrypoint falls back to each structure's own B-factor column per
+	// antibody. Passing the flag with an empty directory would be the same
+	// thing but noisier, so the flag is omitted entirely when there is
+	// nothing to stage.
+	if !is_undefined(inputs.confidence) && len(inputs.confidence) > 0 {
+		cmd = cmd.
+			addFiles(inputs.confidence).
+			arg("--confidence-dir").arg("confidence")
+	}
+
+	result := cmd.
+		saveFileSet("residues", roster.dirPattern(RESIDUES_DIR)).
+		saveFileSet("triaged", roster.dirPattern(TRIAGED_DIR)).
+		saveFile(LIABILITIES_FILE).
+		saveFile(SKIP_FILE).
+		run()
+
+	return {
+		residues: result.getFileSet("residues"),
+		triaged: result.getFileSet("triaged"),
+		liabilities: result.getFile(LIABILITIES_FILE),
+		skip: result.getFile(SKIP_FILE)
+	}
+})
