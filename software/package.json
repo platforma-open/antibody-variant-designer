@@ -36,12 +36,24 @@
           "requirements": "requirements-antifold.txt"
         },
         "root": "./developability"
+      },
+      "design-script-docker": {
+        "type": "docker",
+        "context": "./developability",
+        "dockerfile": "Dockerfile"
       }
     },
     "entrypoints": {
       "index-and-scan": {
         "binary": {
           "artifact": "design-script",
+          "cmd": [
+            "python",
+            "{pkg}/scan.py"
+          ]
+        },
+        "docker": {
+          "artifact": "design-script-docker",
           "cmd": [
             "python",
             "{pkg}/scan.py"
@@ -60,6 +72,13 @@
       "build-variants": {
         "binary": {
           "artifact": "design-script",
+          "cmd": [
+            "python",
+            "{pkg}/variants.py"
+          ]
+        },
+        "docker": {
+          "artifact": "design-script-docker",
           "cmd": [
             "python",
             "{pkg}/variants.py"
