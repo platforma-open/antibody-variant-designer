@@ -21,6 +21,7 @@
     "check": "ts-builder check --target block-model"
   },
   "dependencies": {
+    "@milaboratories/helpers": "catalog:",
     "@platforma-sdk/model": "catalog:"
   },
   "devDependencies": {
