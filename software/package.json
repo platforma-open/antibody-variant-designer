@@ -41,6 +41,11 @@
         "type": "docker",
         "context": "./developability",
         "dockerfile": "Dockerfile"
+      },
+      "design-script-with-antifold-docker": {
+        "type": "docker",
+        "context": "./developability",
+        "dockerfile": "Dockerfile-antifold"
       }
     },
     "entrypoints": {
@@ -63,6 +68,13 @@
       "read-tolerance": {
         "binary": {
           "artifact": "design-script-with-antifold",
+          "cmd": [
+            "python",
+            "{pkg}/antifold.py"
+          ]
+        },
+        "docker": {
+          "artifact": "design-script-with-antifold-docker",
           "cmd": [
             "python",
             "{pkg}/antifold.py"

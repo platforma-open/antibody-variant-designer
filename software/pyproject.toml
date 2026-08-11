@@ -39,7 +39,13 @@ antifold = [
     "torch_geometric>=2.3,<2.5",
     "numpy==1.26.*",
     "pandas==2.*",
-    "scipy==1.*",
+    # Upper bound, not decoration: `deps:export` compiles with `--no-deps`, so uv
+    # resolves each top-level pin on its own and never checks them against each
+    # other. scipy 1.18 requires numpy>=2.0.0, which contradicts the numpy pin
+    # above, and pip refuses the exported file with ResolutionImpossible; scipy
+    # 1.17 publishes no cp312 wheel. 1.16 is the newest line that accepts numpy
+    # 1.26 (its floor is 1.25.2) and ships one.
+    "scipy>=1,<1.17",
     "biotite==0.38.*",
     "biopython==1.83",
 ]
