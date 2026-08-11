@@ -43,6 +43,13 @@ ScanLiabilities := func(roster, pdbs, definitions, args, columns, resolvedSubset
 			frConfThresh: args.frConfThresh,
 			cdrConfThresh: args.cdrConfThresh,
 			actOnFixability: text.join(args.actOnFixability, ",")
+		},
+		// Advanced Settings → Resource Allocation. Either may be unset; the
+		// step keeps its own fixed default for the dimension the operator
+		// left empty.
+		resources: {
+			cpu: args.indexAndScanCpu,
+			mem: args.indexAndScanMem
 		}
 	}
 
@@ -64,12 +71,16 @@ ScanLiabilities := func(roster, pdbs, definitions, args, columns, resolvedSubset
 /**
  * Per-position structural tolerance for every antibody that still has work.
  */
-_readTolerance := func(roster, pdbs, residues, triaged) {
+_readTolerance := func(roster, pdbs, residues, triaged, args) {
 	return render.create(Step2ReadToleranceTpl, {
 		roster: roster,
 		pdbs: pdbs,
 		residues: residues,
-		triaged: triaged
+		triaged: triaged,
+		resources: {
+			cpu: args.readToleranceCpu,
+			mem: args.readToleranceMem
+		}
 	})
 }
 
@@ -90,6 +101,10 @@ _buildVariants := func(roster, triaged, tolerance, residues, definitions, blockI
 			variantsPerParent: args.variantsPerParent,
 			lowToleranceFloor: args.lowToleranceFloor,
 			epistasisRescoreTopK: args.epistasisRescoreTopK
+		},
+		resources: {
+			cpu: args.buildVariantsCpu,
+			mem: args.buildVariantsMem
 		}
 	})
 }
@@ -157,7 +172,7 @@ wf.body(func(args) {
 
 	liabilities := ScanLiabilities(roster, pdbs, definitions, args, args.columns, args.resolvedSubset)
 	tolerance := _readTolerance(
-		roster, pdbs, liabilities.output("residues"), liabilities.output("triaged"))
+		roster, pdbs, liabilities.output("residues"), liabilities.output("triaged"), args)
 	variants := _buildVariants(
 		roster,
 		liabilities.output("triaged"),

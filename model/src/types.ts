@@ -20,12 +20,21 @@ export type BlockData = {
   candidateResiduesPerPosition: number;
   lowToleranceFloor: number;
   epistasisRescoreTopK: number;
-  /** Results-table sort / filter / column state, one per table. */
+  /** Results-table sort / filter / column state, one per page. */
   variantsTableState: PlDataTableStateV2;
   liabilitiesTableState: PlDataTableStateV2;
-  /** Which table the single page shows, switched by the `PlTabs` control
-   *  next to the Settings button — cosmetic state, not a workflow arg. */
-  currentTab: "variants" | "parents";
+  /** Advanced Settings → Resource Allocation. Unset means the workflow's
+   *  own fixed size for that step; set overrides it. Never data-scaled —
+   *  the pipeline itself never derives these from input size
+   *  ([[015-decision-request-gpu-directly]]), so a value here is only ever
+   *  the operator's own choice, the same "leave empty to use the default"
+   *  contract `sequence-embeddings` and `cell-ranger` use. */
+  indexAndScanCpu?: number;
+  indexAndScanMem?: number;
+  readToleranceCpu?: number;
+  readToleranceMem?: number;
+  buildVariantsCpu?: number;
+  buildVariantsMem?: number;
 };
 
 /** Projection consumed by the workflow. `primaryRef` is kept as the whole
@@ -44,6 +53,12 @@ export type BlockArgs = {
   candidateResiduesPerPosition: number;
   lowToleranceFloor: number;
   epistasisRescoreTopK: number;
+  indexAndScanCpu?: number;
+  indexAndScanMem?: number;
+  readToleranceCpu?: number;
+  readToleranceMem?: number;
+  buildVariantsCpu?: number;
+  buildVariantsMem?: number;
 };
 
 /** The seven skip reasons the three steps can raise. `no-structure`,

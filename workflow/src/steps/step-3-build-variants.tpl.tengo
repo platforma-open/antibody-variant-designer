@@ -48,15 +48,31 @@ self.validateInputs({
 		variantsPerParent: "number",
 		lowToleranceFloor: "number",
 		epistasisRescoreTopK: "number"
+	},
+	// Advanced Settings → Resource Allocation. Either may be unset — the
+	// default below wins for the dimension the operator left empty.
+	resources: {
+		"__options__,closed": "",
+		"cpu,?": "number",
+		"mem,?": "number"
 	}
 })
 
 self.defineOutputs("variants", "skip", "skipContent")
 
 self.body(func(inputs) {
+	cpuOverride := inputs.resources.cpu
+	memOverride := is_undefined(inputs.resources.mem) ? undefined : string(inputs.resources.mem) + "GiB"
+
 	result := exec.builder().
 		software(variantsSw).
-		resources({ queue: "medium", onCPU: { cpu: 2, ram: "4GiB" } }).
+		resources({
+			queue: "medium",
+			onCPU: {
+				cpu: is_undefined(cpuOverride) ? 2 : cpuOverride,
+				ram: is_undefined(memOverride) ? "4GiB" : memOverride
+			}
+		}).
 		printErrStreamToStdout().
 		addFiles(inputs.triaged).
 		addFiles(inputs.tolerance).

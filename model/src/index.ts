@@ -30,7 +30,6 @@ const dataModel = new DataModelBuilder().from<BlockData>("v1").init(() => ({
   epistasisRescoreTopK: 20,
   variantsTableState: createPlDataTableStateV2(),
   liabilitiesTableState: createPlDataTableStateV2(),
-  currentTab: "variants",
 }));
 
 const STRUCTURE_PDB_COLUMN = "pl7.app/structure/pdb";
@@ -130,6 +129,12 @@ export const platforma = BlockModelV3.create(dataModel)
       candidateResiduesPerPosition: data.candidateResiduesPerPosition,
       lowToleranceFloor: data.lowToleranceFloor,
       epistasisRescoreTopK: data.epistasisRescoreTopK,
+      indexAndScanCpu: data.indexAndScanCpu,
+      indexAndScanMem: data.indexAndScanMem,
+      readToleranceCpu: data.readToleranceCpu,
+      readToleranceMem: data.readToleranceMem,
+      buildVariantsCpu: data.buildVariantsCpu,
+      buildVariantsMem: data.buildVariantsMem,
     };
   })
   // Anchor-marked `pl7.app/structure/pdb` columns as selectable datasets;
@@ -204,7 +209,10 @@ export const platforma = BlockModelV3.create(dataModel)
     }
     return reduceSkipSummary([liabilitiesSkip, toleranceSkip, variantsSkip]);
   })
-  .sections(() => [{ type: "link", href: "/", label: "Main" }])
+  .sections(() => [
+    { type: "link", href: "/", label: "Variants" },
+    { type: "link", href: "/parents", label: "Parents" },
+  ])
   .done();
 
 export type BlockOutputs = InferOutputsType<typeof platforma>;

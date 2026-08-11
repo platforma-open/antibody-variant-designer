@@ -43,23 +43,38 @@ self.validateInputs({
 	residues: { any: validation.resource() },
 	// Read only as a gate — never opened. An antibody absent here has no
 	// actionable liability, or was already named upstream.
-	triaged: { any: validation.resource() }
+	triaged: { any: validation.resource() },
+	// Advanced Settings → Resource Allocation. Either may be unset — the
+	// default below wins for the dimension the operator left empty. `vram`
+	// stays fixed: it sizes to the checkpoint AntiFold loads, not to load,
+	// so it is not exposed here.
+	resources: {
+		"__options__,closed": "",
+		"cpu,?": "number",
+		"mem,?": "number"
+	}
 })
 
 self.defineOutputs("tolerance", "skip", "skipContent")
 
 self.body(func(inputs) {
+	cpuOverride := inputs.resources.cpu
+	memOverride := is_undefined(inputs.resources.mem) ? undefined : string(inputs.resources.mem) + "GiB"
+	cpu := is_undefined(cpuOverride) ? 4 : cpuOverride
+	ram := is_undefined(memOverride) ? "8GiB" : memOverride
+
 	result := exec.builder().
 		software(antifoldSw).
-		// A fixed pair, not a data-scaled formula: the loop is sequential, so
-		// the peak is the model plus one V-domain however many antibodies the
-		// run holds. The onGPU block still asks for real cores and host RAM,
-		// because the CPU fallback has to make progress — AntiFold runs on
-		// CPU, it just runs slower.
+		// The DEFAULT pair is fixed, not a data-scaled formula: the loop is
+		// sequential, so the peak is the model plus one V-domain however many
+		// antibodies the run holds. An Advanced Settings override applies to
+		// both legs identically — the CPU fallback still has to make progress
+		// on the same host footprint AntiFold runs on when there's no GPU.
+		// `vram` stays fixed: it sizes to the checkpoint AntiFold loads.
 		resources({
 			queue: "heavy",
-			onCPU: { cpu: 4, ram: "8GiB" },
-			onGPU: { cpu: 4, ram: "8GiB", vram: "6GiB" }
+			onCPU: { cpu: cpu, ram: ram },
+			onGPU: { cpu: cpu, ram: ram, vram: "6GiB" }
 		}).
 		printErrStreamToStdout().
 		addAsset(weightsAsset, "models").

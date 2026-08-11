@@ -52,6 +52,13 @@ self.validateInputs({
 		frConfThresh: "number",
 		cdrConfThresh: "number",
 		actOnFixability: "string"
+	},
+	// Advanced Settings → Resource Allocation. Either may be unset — the
+	// default below wins for the dimension the operator left empty.
+	resources: {
+		"__options__,closed": "",
+		"cpu,?": "number",
+		"mem,?": "number"
 	}
 })
 
@@ -61,9 +68,18 @@ self.body(func(inputs) {
 	// `pdbs` arrives already flattened by `tpl.inputs()`: a `path -> blob`
 	// map whose keys are the workdir paths the producer used, so
 	// `addFiles` restages it verbatim.
+	cpuOverride := inputs.resources.cpu
+	memOverride := is_undefined(inputs.resources.mem) ? undefined : string(inputs.resources.mem) + "GiB"
+
 	cmd := exec.builder().
 		software(scanSw).
-		resources({ queue: "medium", onCPU: { cpu: 2, ram: "4GiB" } }).
+		resources({
+			queue: "medium",
+			onCPU: {
+				cpu: is_undefined(cpuOverride) ? 2 : cpuOverride,
+				ram: is_undefined(memOverride) ? "4GiB" : memOverride
+			}
+		}).
 		printErrStreamToStdout().
 		addFiles(inputs.pdbs).
 		writeFile(workdir.INDEX_FILE, workdir.renderIndex(inputs.roster)).
