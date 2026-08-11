@@ -5,13 +5,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pl-pkg build",
+    "build": "block-tools software build",
     "check": "uv run --group dev ruff check .",
     "deps:export": "bash scripts/deps-export.sh",
     "prepublishOnly": "pl-pkg prepublish"
   },
   "devDependencies": {
     "@platforma-open/milaboratories.runenv-python-3": "catalog:",
+    "@platforma-sdk/block-tools": "catalog:",
     "@platforma-sdk/package-builder": "catalog:"
   },
   "block-software": {

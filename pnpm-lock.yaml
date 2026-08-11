@@ -148,6 +148,9 @@ importers:
       '@platforma-open/milaboratories.runenv-python-3':
         specifier: 'catalog:'
         version: 1.8.2
+      '@platforma-sdk/block-tools':
+        specifier: 'catalog:'
+        version: 2.12.10(@types/node@26.1.2)
       '@platforma-sdk/package-builder':
         specifier: 'catalog:'
         version: 3.14.2
@@ -8969,7 +8972,7 @@ snapshots:
 
   compressible@2.0.18:
     dependencies:
-      mime-db: 1.52.0
+      mime-db: 1.54.0
 
   compression@1.8.1:
     dependencies:
