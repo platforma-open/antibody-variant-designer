@@ -20,9 +20,12 @@ export type BlockData = {
   candidateResiduesPerPosition: number;
   lowToleranceFloor: number;
   epistasisRescoreTopK: number;
-  /** Results-table sort / filter / column state, one per page. */
+  /** Results-table sort / filter / column state, one per table. */
   variantsTableState: PlDataTableStateV2;
   liabilitiesTableState: PlDataTableStateV2;
+  /** Which table the single page shows, switched by the `PlTabs` control
+   *  next to the Settings button — cosmetic state, not a workflow arg. */
+  currentTab: "variants" | "parents";
 };
 
 /** Projection consumed by the workflow. `primaryRef` is kept as the whole

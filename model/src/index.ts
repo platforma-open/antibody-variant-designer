@@ -30,6 +30,7 @@ const dataModel = new DataModelBuilder().from<BlockData>("v1").init(() => ({
   epistasisRescoreTopK: 20,
   variantsTableState: createPlDataTableStateV2(),
   liabilitiesTableState: createPlDataTableStateV2(),
+  currentTab: "variants",
 }));
 
 const STRUCTURE_PDB_COLUMN = "pl7.app/structure/pdb";
