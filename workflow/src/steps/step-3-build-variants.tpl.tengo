@@ -51,7 +51,7 @@ self.validateInputs({
 	}
 })
 
-self.defineOutputs("variants", "skip")
+self.defineOutputs("variants", "skip", "skipContent")
 
 self.body(func(inputs) {
 	result := exec.builder().
@@ -79,10 +79,12 @@ self.body(func(inputs) {
 		arg("--epistasis-rescore-top-k").arg(string(inputs.params.epistasisRescoreTopK)).
 		saveFile(VARIANTS_FILE).
 		saveFile(SKIP_FILE).
+		saveFileContent(SKIP_FILE).
 		run()
 
 	return {
 		variants: result.getFile(VARIANTS_FILE),
-		skip: result.getFile(SKIP_FILE)
+		skip: result.getFile(SKIP_FILE),
+		skipContent: result.getFileContent(SKIP_FILE)
 	}
 })

@@ -4,6 +4,7 @@ Module discovery (script source + `tests/` helpers) is wired via
 `pyproject.toml` `[tool.pytest.ini_options].pythonpath`, so no manual
 `sys.path` mutation is needed here."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,23 @@ class StagedBatch:
         """A file path inside the workdir, for the dataset-wide TSVs and the
         per-step skip files."""
         return str(self.root / name)
+
+    def definitions(self, liabilities: list[dict]) -> str:
+        """Stage `definitions.json` in the taxonomy package's own document
+        shape and return its path. The package writes an object, not the flat
+        list the detectors iterate, so a fixture that wrote the list would
+        pass while the shipped file fails."""
+        path = self.root / "definitions.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "liabilities": liabilities,
+                    "fixabilityWeights": {},
+                }
+            )
+        )
+        return str(path)
 
 
 @pytest.fixture

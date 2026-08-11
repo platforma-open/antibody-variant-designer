@@ -1,10 +1,222 @@
-// Workflow entry point for antibody-variant-designer.
+// Antibody Variant Designer, workflow entry point.
+//
+// Resolves the structures dataset (and its optional Lead Selection subset),
+// stages every PDB blob into the roster the three steps share, runs the
+// shared liability taxonomy once, wires `index-and-scan` -> `read-tolerance`
+// -> `build-variants`, and imports the two dataset-wide TSVs the last two
+// steps leave behind as PFrames. No per-residue logic and no step body live
+// here — that is entirely the steps' concern.
 
 wf := import("@platforma-sdk/workflow-tengo:workflow")
+assets := import("@platforma-sdk/workflow-tengo:assets")
+exec := import("@platforma-sdk/workflow-tengo:exec")
+render := import("@platforma-sdk/workflow-tengo:render")
+file := import("@platforma-sdk/workflow-tengo:file")
+ll := import("@platforma-sdk/workflow-tengo:ll")
+maps := import("@platforma-sdk/workflow-tengo:maps")
+pframes := import("@platforma-sdk/workflow-tengo:pframes")
+pSpec := import("@platforma-sdk/workflow-tengo:pframes.spec")
+xsv := import("@platforma-sdk/workflow-tengo:pframes.xsv")
+text := import("text")
+json := import("json")
+
+specs := import(":specs")
+
+definitionsSw := assets.importSoftware("@platforma-open/milaboratories.software-liability-definitions:main")
+
+Step1ScanLiabilitiesTpl := assets.importTemplate(":steps.step-1-index-and-scan")
+Step2ReadToleranceTpl := assets.importTemplate(":steps.step-2-read-tolerance")
+Step3BuildVariantsTpl := assets.importTemplate(":steps.step-3-build-variants")
+
+/**
+ * Residues, triaged sites, and the parent-keyed liabilities TSV — including
+ * declined liabilities the Parents page needs.
+ * Optional confidence / subset sidecars are single dataset-wide TSVs.
+ */
+ScanLiabilities := func(roster, pdbs, definitions, args, columns, resolvedSubset) {
+	inputs := {
+		roster: roster,
+		pdbs: pdbs,
+		definitions: definitions,
+		params: {
+			rsasaBuriedCutoff: args.rsasaBuriedCutoff,
+			frConfThresh: args.frConfThresh,
+			cdrConfThresh: args.cdrConfThresh,
+			actOnFixability: text.join(args.actOnFixability, ",")
+		}
+	}
+
+	confidenceCols := columns.getColumns("perResidueConfidence")
+	if !is_undefined(confidenceCols) && len(confidenceCols) > 0 {
+		inputs.confidence = xsv.exportFrame([confidenceCols[0]], "tsv", { mem: "1GiB", cpu: 1 })
+	}
+
+	// The optional Lead Selection subset scopes this step alone; later steps
+	// already narrow via absent predecessor artifacts, so exporting the
+	// same key list twice would buy nothing.
+	if !is_undefined(resolvedSubset) {
+		inputs.clonotypeFilter = xsv.exportFrame([resolvedSubset], "tsv", { mem: "1GiB", cpu: 1 })
+	}
+
+	return render.create(Step1ScanLiabilitiesTpl, inputs)
+}
+
+/**
+ * Per-position structural tolerance for every antibody that still has work.
+ */
+_readTolerance := func(roster, pdbs, residues, triaged) {
+	return render.create(Step2ReadToleranceTpl, {
+		roster: roster,
+		pdbs: pdbs,
+		residues: residues,
+		triaged: triaged
+	})
+}
+
+/**
+ * Ranked variant hypotheses that cleared the re-scan gate.
+ */
+_buildVariants := func(roster, triaged, tolerance, residues, definitions, blockId, args) {
+	return render.create(Step3BuildVariantsTpl, {
+		roster: roster,
+		triaged: triaged,
+		tolerance: tolerance,
+		residues: residues,
+		definitions: definitions,
+		blockId: blockId,
+		params: {
+			maxEditsPerVariant: args.maxEditsPerVariant,
+			candidateResiduesPerPosition: args.candidateResiduesPerPosition,
+			variantsPerParent: args.variantsPerParent,
+			lowToleranceFloor: args.lowToleranceFloor,
+			epistasisRescoreTopK: args.epistasisRescoreTopK
+		}
+	})
+}
+
+wf.prepare(func(args) {
+	// Anchor on the PDB column so upstream's per-residue confidence
+	// auto-discovers on the same clonotype axis. There is no subset filter
+	// to resolve here — an optional Lead Selection subset is a second,
+	// independent column reference, resolved only when the user picked one.
+	bb := wf.createPBundleBuilder()
+	bb.ignoreMissingDomains()
+	bb.addAnchor("pdb", args.primaryRef.column)
+	bb.addMulti(
+		{
+			axes: [{ anchor: "pdb", idx: 0 }],
+			name: "pl7.app/structure/confidence/perResidue"
+		},
+		"perResidueConfidence")
+
+	prepared := {
+		resolvedPdb: wf.resolve(args.primaryRef.column, { errIfMissing: true }),
+		columns: bb.build()
+	}
+	if !is_undefined(args.subsetRef) {
+		prepared.resolvedSubset = wf.resolve(args.subsetRef, { errIfMissing: true })
+	}
+	return prepared
+})
 
 wf.body(func(args) {
-  return {
-    outputs: {},
-    exports: {}
-  }
+	blockId := wf.blockId().getDataAsJson()
+
+	pdbCol := args.resolvedPdb
+	pdbAxes := pdbCol.spec.axesSpec
+	if len(pdbAxes) != 1 {
+		ll.panic("unsupported PDB column axes count: expected 1 (the clonotype key), got %d", len(pdbAxes))
+	}
+	clonotypeAxis := pdbAxes[0]
+
+	// Each ResourceMap key is a JSON-encoded [clonotypeKey] array; each value
+	// is a Blob ref to a PDB file. One sorted pass builds the roster every
+	// step shares and the path -> blob map `pdbs` restages into each exec —
+	// sorted keys keep every step's input canonical so the pure step dedups.
+	inputsMap := pdbCol.data.inputs()
+	roster := []
+	pdbs := {}
+	for keyJson in maps.getKeys(inputsMap) {
+		clonotypeKey := json.decode(keyJson)[0]
+		bareName := clonotypeKey + ".pdb"
+		pdbs["pdbs/" + bareName] = inputsMap[keyJson].getValue()
+		roster = append(roster, { clonotypeKey: clonotypeKey, filename: bareName })
+	}
+
+	// The shared liability taxonomy, read once per run and handed to steps
+	// 1 and 3 — the two that scan against it.
+	definitionsResult := exec.builder().
+		software(definitionsSw).
+		mem("1GiB").
+		cpu(1).
+		printErrStreamToStdout().
+		arg("definitions.json").
+		saveFile("definitions.json").
+		run()
+	definitions := definitionsResult.getFile("definitions.json")
+
+	liabilities := ScanLiabilities(roster, pdbs, definitions, args, args.columns, args.resolvedSubset)
+	tolerance := _readTolerance(
+		roster, pdbs, liabilities.output("residues"), liabilities.output("triaged"))
+	variants := _buildVariants(
+		roster,
+		liabilities.output("triaged"),
+		tolerance.output("tolerance"),
+		liabilities.output("residues"),
+		definitions,
+		blockId,
+		args)
+
+	// Import both dataset-wide TSVs as PColumns on the upstream clonotype
+	// axis, so a downstream block auto-joins on it exactly as it would on
+	// the PDB column itself.
+	variantsXsv := xsv.importFile(
+		variants.output("variants"), "tsv",
+		specs.buildVariantsXsvSettings(blockId, clonotypeAxis),
+		{ splitDataAndSpec: true })
+	liabilitiesXsv := xsv.importFile(
+		liabilities.output("liabilities"), "tsv",
+		specs.buildLiabilitiesXsvSettings(blockId, clonotypeAxis),
+		{ splitDataAndSpec: true })
+
+	// Stamp every emitted column with the trace chain derived from the
+	// upstream PDB column so downstream consumers see the full lineage.
+	trace := pSpec.makeTrace(pdbCol.spec, {
+		type: "milaboratories.antibody-variant-designer",
+		id: blockId,
+		importance: 20,
+		label: "Antibody Variant Designer"
+	})
+
+	variantsPfBuilder := pframes.pFrameBuilder()
+	for k, v in variantsXsv {
+		variantsPfBuilder.add(k, trace.inject(v.spec), v.data)
+	}
+	variantsPf := variantsPfBuilder.build()
+
+	liabilitiesPfBuilder := pframes.pFrameBuilder()
+	for k, v in liabilitiesXsv {
+		liabilitiesPfBuilder.add(k, trace.inject(v.spec), v.data)
+	}
+	liabilitiesPf := liabilitiesPfBuilder.build()
+
+	// The synthesis CSV: the fixed six-column contract over the variant
+	// group's leading declaring run, re-specced with its own headers.
+	synthesisCsv := xsv.exportFrame(
+		specs.buildSynthesisCsvColumns(blockId, variantsXsv, clonotypeAxis),
+		"csv", { mem: "1GiB", cpu: 1 })
+
+	return {
+		outputs: {
+			liabilitiesSkip: liabilities.output("skipContent"),
+			toleranceSkip: tolerance.output("skipContent"),
+			variantsSkip: variants.output("skipContent"),
+			variantsData: pframes.exportFrame(variantsPf),
+			liabilitiesData: pframes.exportFrame(liabilitiesPf),
+			synthesisCsv: file.exportFile(synthesisCsv),
+			variants: variantsPf,
+			liabilities: liabilitiesPf
+		},
+		exports: {}
+	}
 })

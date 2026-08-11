@@ -16,7 +16,6 @@ them.
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -26,6 +25,7 @@ import liability_store
 import ranking
 import residue_store
 import roster
+import taxonomy_store
 import tolerance_store
 import variant_store
 
@@ -110,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(
             f"{args.definitions} does not exist — expected the shared taxonomy package's output"
         )
-    taxonomy = json.loads(Path(args.definitions).read_text())
+    taxonomy = taxonomy_store.read_taxonomy(args.definitions)
 
     triaged_dir = Path(args.triaged_dir)
     tolerance_dir = Path(args.tolerance_dir)

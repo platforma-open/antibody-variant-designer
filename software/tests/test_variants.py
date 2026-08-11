@@ -1,7 +1,6 @@
 """Unit tests for `variants.py` — the fused gate-then-rank entrypoint, and
 the dataset-wide `variants.tsv` it writes."""
 
-import json
 from pathlib import Path
 
 import liability_store
@@ -93,8 +92,7 @@ def _stage(batch, clonotype_key):
 
 
 def _run(batch, extra_args=None):
-    definitions = batch.path("definitions.json")
-    Path(definitions).write_text(json.dumps(TAXONOMY))
+    definitions = batch.definitions(TAXONOMY)
     out_variants = batch.path("variants.tsv")
     out_skip = batch.path("skip.tsv")
 

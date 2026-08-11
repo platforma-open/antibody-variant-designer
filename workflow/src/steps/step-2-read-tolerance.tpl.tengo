@@ -46,7 +46,7 @@ self.validateInputs({
 	triaged: { any: validation.resource() }
 })
 
-self.defineOutputs("tolerance", "skip")
+self.defineOutputs("tolerance", "skip", "skipContent")
 
 self.body(func(inputs) {
 	result := exec.builder().
@@ -76,10 +76,12 @@ self.body(func(inputs) {
 		arg("--out-skip").arg(SKIP_FILE).
 		saveFileSet("tolerance", workdir.dirPattern(TOLERANCE_DIR)).
 		saveFile(SKIP_FILE).
+		saveFileContent(SKIP_FILE).
 		run()
 
 	return {
 		tolerance: result.getFileSet("tolerance"),
-		skip: result.getFile(SKIP_FILE)
+		skip: result.getFile(SKIP_FILE),
+		skipContent: result.getFileContent(SKIP_FILE)
 	}
 })

@@ -24,8 +24,10 @@ triage at all, so an antibody with zero variants still has data there.
 """
 
 import argparse
+import csv
 import json
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import batch
@@ -36,6 +38,7 @@ import motifs
 import residue_store
 import roster
 import structure
+import taxonomy_store
 import triage
 
 DEFAULT_RSASA_BURIED_CUTOFF = 0.075
@@ -44,31 +47,77 @@ DEFAULT_CDR_CONFIDENCE_THRESHOLD = 6.0
 DEFAULT_ACT_ON_FIXABILITY = "fixable,easily_fixable"
 
 
-def _load_confidence_sidecar(path: str | None) -> list[dict]:
-    """upstream's `pl7.app/structure/confidence/perResidue` JSON, staged for
-    this one antibody: a list of `{"pos", "chain", "errorAngstroms"}`
-    records. Absent or unreadable reads as no sidecar at all, not an error —
-    the PDB B-factor column is the second source precisely for this case."""
+def _iter_clonotype_keyed_tsv(path: Path) -> Iterator[tuple[str, str]]:
+    """Yield `(clonotype_key, raw_value)` for a dataset-wide TSV exported by
+    `main.tpl.tengo` with the clonotype key in the first column and the value
+    in the second. Skips rows with an empty value. Shared by the confidence
+    and clonotype-filter loaders below, since both TSVs take that same
+    two-column shape."""
+    with path.open(newline="") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        fields = reader.fieldnames or []
+        if len(fields) < 2:
+            return
+        key_col, val_col = fields[0], fields[1]
+        for row in reader:
+            raw = row.get(val_col)
+            if raw is None or raw == "":
+                continue
+            yield row[key_col], raw
+
+
+def _load_confidence_tsv(path: str | None) -> dict[str, list[dict]]:
+    """Per-clonotype `pl7.app/structure/confidence/perResidue` records, from
+    the one dataset-wide TSV `main.tpl.tengo` exports — never a directory of
+    per-stem files. A clonotype absent here, or whose value fails to parse
+    as a JSON list, falls through to its own B-factor column, the second
+    source `_confidence_lookup` reads."""
+    result: dict[str, list[dict]] = {}
     if path is None or not Path(path).is_file():
-        return []
-    try:
-        records = json.loads(Path(path).read_text())
-    except (json.JSONDecodeError, OSError):
-        return []
-    return records if isinstance(records, list) else []
+        return result
+    for key, raw in _iter_clonotype_keyed_tsv(Path(path)):
+        try:
+            records = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(records, list):
+            result[key] = records
+    return result
+
+
+def _load_clonotype_filter(path: str | None) -> set[str] | None:
+    """The optional Lead Selection subset, exported as one dataset-wide TSV.
+    `None` means no filter was picked — process the whole roster. A picked
+    filter yields a (possibly empty) keep set; a clonotype whose value is
+    falsy is treated as not selected, same grammar as the sibling block's
+    `--clonotype-filter`."""
+    if path is None or not Path(path).is_file():
+        return None
+    keep: set[str] = set()
+    for key, raw in _iter_clonotype_keyed_tsv(Path(path)):
+        value = raw.strip().lower()
+        if value in {"0", "false", "no", "null"}:
+            continue
+        try:
+            if float(value) == 0.0:
+                continue
+        except ValueError:
+            pass
+        keep.add(key)
+    return keep
 
 
 def _confidence_lookup(
-    residues: list[residue_store.Residue], sidecar_path: str | None
+    residues: list[residue_store.Residue], confidence_records: list[dict] | None
 ) -> dict[tuple[str, str], float | None]:
-    """Per-residue confidence, JSON sidecar first, the PDB B-factor column
-    as the second source — the only available check on index alignment,
-    since ImmuneBuilder writes the same error array to both. A residue the
-    sidecar does not mention falls through to its own B-factor; a residue
-    with neither stays unmeasured, read as `None` by `triage.py`, never as
-    high-confidence."""
+    """Per-residue confidence, this antibody's sidecar records first, the
+    PDB B-factor column as the second source — the only available check on
+    index alignment, since ImmuneBuilder writes the same error array to
+    both. A residue the sidecar does not mention falls through to its own
+    B-factor; a residue with neither stays unmeasured, read as `None` by
+    `triage.py`, never as high-confidence."""
     from_sidecar: dict[tuple[str, str], float] = {}
-    for record in _load_confidence_sidecar(sidecar_path):
+    for record in confidence_records or []:
         if not isinstance(record, dict):
             continue
         pos, chain, err = record.get("pos"), record.get("chain"), record.get("errorAngstroms")
@@ -91,7 +140,7 @@ def process_one(
     out_residues: str,
     out_triaged: str,
     taxonomy: list[dict],
-    confidence_sidecar: str | None,
+    confidence_records: list[dict] | None,
     rsasa_buried_cutoff: float,
     fr_confidence_threshold: float,
     cdr_confidence_threshold: float,
@@ -113,7 +162,7 @@ def process_one(
     residues = residue_store.read_residues(out_residues)
 
     rsasa_lookup = exposure.annotate(residues, pdb_path)
-    confidence_lookup = _confidence_lookup(residues, confidence_sidecar)
+    confidence_lookup = _confidence_lookup(residues, confidence_records)
 
     detected = motifs.detect_all(residues, taxonomy) + cysteine.detect_all(residues, taxonomy)
     triaged = triage.verdict_for(
@@ -147,9 +196,18 @@ def main(argv: list[str] | None = None) -> int:
         "--definitions", required=True, help="taxonomy JSON from the shared package"
     )
     parser.add_argument(
-        "--confidence-dir",
+        "--per-residue-confidence",
         default=None,
-        help="optional upstream sidecars; the PDB B-factor column is the second source",
+        dest="per_residue_confidence",
+        help="optional dataset-wide TSV exported from upstream's per-residue confidence "
+        "column; the PDB B-factor column is the second source",
+    )
+    parser.add_argument(
+        "--clonotype-filter",
+        default=None,
+        dest="clonotype_filter",
+        help="optional dataset-wide TSV naming the subset to process; omitted means the "
+        "whole roster",
     )
     parser.add_argument("--out-triaged-dir", required=True)
     parser.add_argument("--out-liabilities", required=True)
@@ -164,11 +222,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--act-on-fixability", default=DEFAULT_ACT_ON_FIXABILITY)
     args = parser.parse_args(argv)
 
-    taxonomy = json.loads(Path(args.definitions).read_text())
+    taxonomy = taxonomy_store.read_taxonomy(args.definitions)
     act_on_fixability = [v for v in args.act_on_fixability.split(",") if v]
 
     pdb_dir = Path(args.pdb_dir)
-    confidence_dir = Path(args.confidence_dir) if args.confidence_dir else None
+    confidence_by_clonotype = _load_confidence_tsv(args.per_residue_confidence)
+    keep_clonotypes = _load_clonotype_filter(args.clonotype_filter)
     residues_dir = Path(args.out_residues_dir)
     residues_dir.mkdir(parents=True, exist_ok=True)
     out_dir = Path(args.out_triaged_dir)
@@ -176,23 +235,24 @@ def main(argv: list[str] | None = None) -> int:
     liability_store.write_liabilities_header(args.out_liabilities)
 
     def one(entry: roster.Entry) -> str | None:
+        # A picked filter narrows which parents this step attempts; a
+        # filtered-out clonotype gets no skip row at all, since it was never
+        # in scope rather than having failed.
+        if keep_clonotypes is not None and entry.clonotype_key not in keep_clonotypes:
+            return None
         pdb_path = pdb_dir / entry.filename
         # A clonotype the upstream block failed for has no staged blob at
         # all — never a null one — so absence is this step's own named
         # reason rather than an error.
         if not pdb_path.is_file():
             return "no-structure"
-        sidecar = None
-        if confidence_dir is not None:
-            candidate = confidence_dir / f"{entry.stem}.json"
-            sidecar = str(candidate) if candidate.is_file() else None
 
         reason, triaged = process_one(
             str(pdb_path),
             str(residues_dir / f"{entry.stem}.json"),
             str(out_dir / f"{entry.stem}.json"),
             taxonomy,
-            sidecar,
+            confidence_by_clonotype.get(entry.clonotype_key),
             args.rsasa_buried_cutoff,
             args.fr_confidence_gating_threshold,
             args.cdr_confidence_gating_threshold,

@@ -39,9 +39,12 @@ self.validateInputs({
 	// Each staged directory arrives flattened by `tpl.inputs()` — a
 	// `workdir path -> blob` map, which is exactly what `addFiles` takes.
 	pdbs: { any: validation.resource() },
-	// Optional: an older upstream emits no per-residue confidence at all,
-	// and each antibody then falls back to its own B-factor column.
-	"confidence,?": { any: validation.resource() },
+	// Optional: one dataset-wide TSV each, never a directory of per-stem
+	// files. An older upstream emits no per-residue confidence at all, and
+	// each antibody then falls back to its own B-factor column; an absent
+	// filter means the whole roster is in scope.
+	"confidence,?": validation.resource(),
+	"clonotypeFilter,?": validation.resource(),
 	definitions: validation.resource(),
 	params: {
 		"__options__,closed": "",
@@ -52,12 +55,12 @@ self.validateInputs({
 	}
 })
 
-self.defineOutputs("residues", "triaged", "liabilities", "skip")
+self.defineOutputs("residues", "triaged", "liabilities", "skip", "skipContent")
 
 self.body(func(inputs) {
-	// `pdbs` and `confidence` arrive already flattened by `tpl.inputs()`:
-	// each is a `path -> blob` map whose keys are the workdir paths the
-	// producer used, so `addFiles` restages them verbatim.
+	// `pdbs` arrives already flattened by `tpl.inputs()`: a `path -> blob`
+	// map whose keys are the workdir paths the producer used, so
+	// `addFiles` restages it verbatim.
 	cmd := exec.builder().
 		software(scanSw).
 		resources({ queue: "medium", onCPU: { cpu: 2, ram: "4GiB" } }).
@@ -77,15 +80,20 @@ self.body(func(inputs) {
 		arg("--cdr-confidence-gating-threshold").arg(string(inputs.params.cdrConfThresh)).
 		arg("--act-on-fixability").arg(inputs.params.actOnFixability)
 
-	// The confidence sidecars are optional: an older upstream emits none, and
-	// the entrypoint falls back to each structure's own B-factor column per
-	// antibody. Passing the flag with an empty directory would be the same
-	// thing but noisier, so the flag is omitted entirely when there is
-	// nothing to stage.
-	if !is_undefined(inputs.confidence) && len(inputs.confidence) > 0 {
+	// Both sidecars are optional dataset-wide TSVs, not directories: an
+	// older upstream emits no per-residue confidence at all, and an absent
+	// filter means the whole roster is in scope. Each flag is omitted
+	// entirely when its input never arrived, rather than passed pointing at
+	// an empty file.
+	if !is_undefined(inputs.confidence) {
 		cmd = cmd.
-			addFiles(inputs.confidence).
-			arg("--confidence-dir").arg("confidence")
+			addFile("confidence.tsv", inputs.confidence).
+			arg("--per-residue-confidence").arg("confidence.tsv")
+	}
+	if !is_undefined(inputs.clonotypeFilter) {
+		cmd = cmd.
+			addFile("clonotype_filter.tsv", inputs.clonotypeFilter).
+			arg("--clonotype-filter").arg("clonotype_filter.tsv")
 	}
 
 	result := cmd.
@@ -93,12 +101,14 @@ self.body(func(inputs) {
 		saveFileSet("triaged", workdir.dirPattern(TRIAGED_DIR)).
 		saveFile(LIABILITIES_FILE).
 		saveFile(SKIP_FILE).
+		saveFileContent(SKIP_FILE).
 		run()
 
 	return {
 		residues: result.getFileSet("residues"),
 		triaged: result.getFileSet("triaged"),
 		liabilities: result.getFile(LIABILITIES_FILE),
-		skip: result.getFile(SKIP_FILE)
+		skip: result.getFile(SKIP_FILE),
+		skipContent: result.getFileContent(SKIP_FILE)
 	}
 })

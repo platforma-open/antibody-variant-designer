@@ -50,8 +50,7 @@ def _stage(batch, clonotype_key, pdb_text, stem=None):
 def _run(batch, extra_args=None):
     """Run the batch CLI over whatever `batch` holds. Returns
     `(skips, triaged_dir, liabilities_path)`."""
-    definitions_path = batch.path("definitions.json")
-    Path(definitions_path).write_text(json.dumps(TAXONOMY))
+    definitions_path = batch.definitions(TAXONOMY)
     triaged_dir = batch.dir("triaged")
     out_liabilities = batch.path("liabilities.tsv")
     out_skip = batch.path("skip.tsv")
@@ -83,6 +82,18 @@ def _run_scan(batch, pdb_text, extra_args=None):
 
 def _rows_of(path):
     return list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
+
+
+def _write_keyed_tsv(path, rows):
+    """A dataset-wide `clonotypeKey ⇥ value` TSV, the shape both
+    `--per-residue-confidence` and `--clonotype-filter` take. `rows` is
+    `[(clonotype_key, value)]`."""
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
+    writer.writerow(["clonotypeKey", "value"])
+    for key, value in rows:
+        writer.writerow([key, value])
+    Path(path).write_text(buf.getvalue())
 
 
 def _index(pdb_text, role="H", chain="H"):
@@ -159,22 +170,25 @@ class TestLowConfidenceFallsBackToBFactor:
             {"pos": r.imgt, "chain": r.chain, "errorAngstroms": 0.1}
             for r in _index(pdb_text) if r.in_scope
         ]
-        confidence_dir = Path(batch.dir("confidence"))
-        (confidence_dir / f"{entry.stem}.json").write_text(json.dumps(sidecar))
+        confidence_tsv = batch.path("confidence.tsv")
+        _write_keyed_tsv(confidence_tsv, [("clonotype-1", json.dumps(sidecar))])
 
-        skips, triaged_dir, _ = _run(batch, ["--confidence-dir", str(confidence_dir)])
+        skips, triaged_dir, _ = _run(batch, ["--per-residue-confidence", confidence_tsv])
 
         assert skips == [("clonotype-1", "")]
         [hit] = liability_store.read_triaged(str(Path(triaged_dir, f"{entry.stem}.json")))
         assert hit.low_confidence is False
 
-    def test_a_clonotype_with_no_sidecar_file_falls_back_to_its_b_factor(self, batch):
-        # The sidecar is per clonotype, so one antibody missing its file must
-        # fall back on its own rather than disabling the sidecar for the run.
+    def test_a_clonotype_with_no_row_in_the_tsv_falls_back_to_its_b_factor(self, batch):
+        # The confidence TSV is dataset-wide, so one antibody missing its row
+        # must fall back on its own B-factor rather than disabling the
+        # sidecar for the whole run.
         pdb_text = remarks("H", "H") + "\n" + make_pdb(v_domain("H"))
         _stage(batch, "clonotype-1", pdb_text)
+        confidence_tsv = batch.path("confidence.tsv")
+        _write_keyed_tsv(confidence_tsv, [("some-other-clonotype", json.dumps([]))])
 
-        skips, _, _ = _run(batch, ["--confidence-dir", batch.dir("confidence")])
+        skips, _, _ = _run(batch, ["--per-residue-confidence", confidence_tsv])
 
         assert skips == [("clonotype-1", "no-liability-survived-triage")]
 
@@ -191,6 +205,36 @@ class TestActOnFixabilityIsWired:
         assert skip == ""
         [actionable] = liability_store.read_triaged(str(out_triaged))
         assert actionable.definition_id == "missing_cysteines"
+
+
+class TestClonotypeFilter:
+    def _actionable(self):
+        return (
+            remarks("H", "H") + "\n"
+            + make_pdb(v_domain("H", cys_at=(104,), overrides={30: "ASN", 31: "GLY"}))
+        )
+
+    def test_a_roster_of_three_with_two_kept_attempts_only_those_two(self, batch):
+        _stage(batch, "clone-1", self._actionable())
+        _stage(batch, "clone-2", self._actionable())
+        _stage(batch, "clone-3", self._actionable())
+        filter_tsv = batch.path("clonotype_filter.tsv")
+        _write_keyed_tsv(filter_tsv, [("clone-1", "1"), ("clone-2", "1")])
+
+        skips, _, out_liabilities = _run(batch, ["--clonotype-filter", filter_tsv])
+
+        # The filtered-out clonotype gets no skip row at all — it was never
+        # in scope, which is not the same as having failed.
+        assert skips == [("clone-1", ""), ("clone-2", "")]
+        assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"clone-1", "clone-2"}
+
+    def test_an_absent_filter_attempts_the_whole_roster(self, batch):
+        _stage(batch, "clone-1", self._actionable())
+        _stage(batch, "clone-2", self._actionable())
+
+        skips, _, _ = _run(batch)
+
+        assert skips == [("clone-1", ""), ("clone-2", "")]
 
 
 class TestBatchCli:
