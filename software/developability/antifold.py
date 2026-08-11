@@ -215,7 +215,12 @@ def main(argv: list[str] | None = None) -> int:
         description="Read AntiFold's per-position tolerance for every staged antibody."
     )
     parser.add_argument("--pdb-dir", required=True)
-    parser.add_argument("--residues-dir", required=True, help="structure.py's output directory")
+    parser.add_argument("--residues-dir", required=True, help="scan.py's --out-residues-dir")
+    parser.add_argument(
+        "--triaged-dir",
+        required=True,
+        help="scan.py's --out-triaged-dir, read as a gate only — never opened",
+    )
     parser.add_argument("--pdb-index", required=True, help="the roster")
     parser.add_argument("--weights", required=True, help="mounted models/model.pt")
     parser.add_argument("--out-tolerance-dir", required=True)
@@ -232,14 +237,22 @@ def main(argv: list[str] | None = None) -> int:
 
     pdb_dir = Path(args.pdb_dir)
     residues_dir = Path(args.residues_dir)
+    triaged_dir = Path(args.triaged_dir)
     out_dir = Path(args.out_tolerance_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     entries = roster.read_roster(args.pdb_index)
+    # A missing triaged file is a gate, not an error: it means triage left this
+    # antibody nothing actionable, or the index phase skipped it. Either way
+    # exec 1 already named the reason and no variant can come from it, so the
+    # model call is pure waste. Filtered here rather than in the loop so a
+    # dataset where every antibody is gated out never pays the checkpoint load.
     runnable = [
         e
         for e in entries
-        if (residues_dir / f"{e.stem}.json").is_file() and (pdb_dir / e.filename).is_file()
+        if (residues_dir / f"{e.stem}.json").is_file()
+        and (triaged_dir / f"{e.stem}.json").is_file()
+        and (pdb_dir / e.filename).is_file()
     ]
     # Nothing runnable means nothing to score, and loading the checkpoint
     # would buy a model no antibody uses.

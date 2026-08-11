@@ -13,10 +13,12 @@ import socket
 from pathlib import Path
 
 import antifold
+import liability_store
 import pytest
 import residue_store
 import skip_store
 import tolerance_store
+import triage
 
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
 
@@ -148,13 +150,35 @@ class TestBlockNetwork:
         assert socket.socket is original
 
 
-def _stage(batch, clonotype_key, residues=None):
-    """Stage one antibody's PDB and residue index, as structure.py would."""
-    entry = batch.add(clonotype_key, "ATOM")
-    residue_store.write_residues(
-        str(Path(batch.dir("residues"), f"{entry.stem}.json")),
-        residues if residues is not None else [_residue("H", 0, imgt="1", role="H")],
+def _actionable(site):
+    """One exposed liability. This step reads only whether the triaged file
+    exists, so the row's whole job is to make it a valid `triaged.json`."""
+    return triage.Triaged(
+        definition_id="deamidation_ng",
+        liability_type="deamidation",
+        risk_level="High",
+        fixability="fixable",
+        site=site,
+        verdict="exposed",
+        low_confidence=False,
+        confidence_angstroms=3.0,
+        rsasa=0.5,
     )
+
+
+def _stage(batch, clonotype_key, residues=None, triaged=True):
+    """Stage one antibody's PDB, residue index and triaged liabilities, as
+    `index-and-scan` would. `triaged=False` is the antibody whose triage left
+    nothing actionable — indexed, but never written to `triaged/`."""
+    entry = batch.add(clonotype_key, "ATOM")
+    residues = residues if residues is not None else [_residue("H", 0, imgt="1", role="H")]
+    residue_store.write_residues(
+        str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
+    )
+    if triaged:
+        liability_store.write_triaged(
+            str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_actionable(residues[:1])]
+        )
     return entry
 
 
@@ -172,6 +196,7 @@ def _run(batch, weights):
         [
             "--pdb-dir", str(batch.pdb_dir),
             "--residues-dir", batch.dir("residues"),
+            "--triaged-dir", batch.dir("triaged"),
             "--pdb-index", batch.index,
             "--weights", weights,
             "--out-tolerance-dir", out_dir,
@@ -198,6 +223,7 @@ class TestMissingWeightsRaisesBeforeAnyModelCall:
                 [
                     "--pdb-dir", str(batch.pdb_dir),
                     "--residues-dir", batch.dir("residues"),
+                    "--triaged-dir", batch.dir("triaged"),
                     "--pdb-index", batch.index,
                     "--weights", missing_weights,
                     "--out-tolerance-dir", batch.dir("tolerance"),
@@ -318,6 +344,42 @@ class TestBatchCli:
 
         assert skips == [("indexed", "")]
         assert len(seen) == 1
+
+    def test_an_antibody_with_nothing_actionable_is_gated_out_of_the_model_call(
+        self, batch, monkeypatch
+    ):
+        # The GNN pass is the run's dominant term and this antibody yields no
+        # variant, so scoring it is pure waste. Its reason is already in exec
+        # 1's skip TSV, so a row here would count the clonotype twice.
+        _stage(batch, "actionable")
+        _stage(batch, "nothing-to-fix", triaged=False)
+        seen = []
+
+        monkeypatch.setattr(antifold, "load_model", lambda _w: "loaded-model")
+        monkeypatch.setattr(
+            antifold,
+            "_run_model",
+            lambda _m, pdb_path, *_a, **_k: seen.append(pdb_path)
+            or [_logits_row("H", "1", perplexity=4.2)],
+        )
+
+        skips, out_dir = _run(batch, _weights(batch))
+
+        assert skips == [("actionable", "")]
+        assert [Path(p).stem for p in seen] == ["actionable"]
+        assert not Path(out_dir, "nothing-to-fix.tsv").exists()
+
+    def test_a_batch_gated_out_in_full_never_loads_the_checkpoint(self, batch, monkeypatch):
+        _stage(batch, "nothing-to-fix", triaged=False)
+
+        def _fail_if_called(*_args, **_kwargs):
+            raise AssertionError("every antibody is gated out — the 540 MiB load buys nothing")
+
+        monkeypatch.setattr(antifold, "load_model", _fail_if_called)
+
+        skips, _ = _run(batch, _weights(batch))
+
+        assert skips == []
 
     def test_an_empty_roster_never_loads_the_checkpoint(self, batch, monkeypatch):
         def _fail_if_called(*_args, **_kwargs):
