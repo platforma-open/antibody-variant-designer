@@ -1,6 +1,8 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalDependencies": ["tsconfig.json"],
+  "//": "NODE_EXTRA_CA_CERTS is passed through, not declared in `env`: it names the machine's CA bundle, so it must not enter any task's cache key. Under turbo's strict env mode every undeclared variable is stripped, and a build that pushes reaches ECR and S3 over TLS from node — without the bundle the AWS SDK fails with UNABLE_TO_GET_ISSUER_CERT_LOCALLY, which block-tools reports as an expired SSO session. Global rather than per-task because `test` and `mark-stable` make TLS calls too.",
+  "globalPassThroughEnv": ["NODE_EXTRA_CA_CERTS"],
   "tasks": {
     "fmt": {
       "cache": false
