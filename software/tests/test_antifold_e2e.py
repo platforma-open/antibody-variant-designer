@@ -133,11 +133,13 @@ def untrained_model(isolated_antifold_module):
 
 
 class TestNanobodyReachesTheForwardPass:
-    """Regression test for the fix: a nanobody row used to fail before the
-    model was ever called — first on AntiFold's CSV column-presence check
-    (missing `Lchain` column), then on its H/L chain lookup (`Lchain=None`
-    passed as a real chain id). Both were fixed in `_run_model`; this proves
-    the real vendored code accepts the result, not just the row's shape."""
+    """Regression tests for three stacked fixes: a nanobody row used to fail
+    before the model ever ran — first on AntiFold's CSV column-presence
+    check (missing `Lchain` column), then on its H/L chain lookup
+    (`Lchain=None` passed as a real chain id), then — MPS backend absent
+    only — on an unbound `device` inside the forward pass itself. All three
+    were fixed; these prove the real vendored code accepts the result, not
+    just the row's shape."""
 
     def test_a_nanobody_pdb_produces_one_tolerance_row_per_residue(
         self, isolated_antifold_module, nanobody_pdb, untrained_model
@@ -148,3 +150,21 @@ class TestNanobodyReachesTheForwardPass:
 
         assert len(rows) == 10  # the ten residues staged above
         assert {r["chain"] for r in rows} == {"H"}
+
+    def test_a_nanobody_pdb_still_forwards_on_a_machine_with_no_mps_backend(
+        self, isolated_antifold_module, nanobody_pdb, untrained_model, monkeypatch
+    ):
+        """Every CUDA/Linux host (the block's real deployment target) has no
+        MPS backend. AntiFold's own device-resolution line inside the
+        forward pass read an unbound `device` on that path and silently
+        swallowed the resulting `UnboundLocalError` — this Mac's MPS backend
+        being present is what hid it from the test above."""
+        import torch
+
+        monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+
+        rows = isolated_antifold_module._run_model(
+            untrained_model, str(nanobody_pdb), h_chain="H", l_chain=None, nanobody_mode=True
+        )
+
+        assert len(rows) == 10

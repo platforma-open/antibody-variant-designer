@@ -318,6 +318,17 @@ def dataset_dataloader_to_predictions_list(
         with torch.no_grad():
 
             try:
+                # Upstream defect: this line read `else device` with `device`
+                # never bound in this function, so on any machine without an
+                # MPS backend (every CUDA/Linux host) it raised
+                # UnboundLocalError, silently swallowed by the bare `except`
+                # below — leaving the model on whatever device
+                # `load_IF1_checkpoint`'s own (correct) resolution put it on
+                # while these freshly-built tensors stayed on the default
+                # device, and the forward call crashed with "Expected all
+                # tensors to be on the same device". Mirrors the working
+                # resolution already used in `load_IF1_checkpoint` above.
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 device = "mps" if torch.backends.mps.is_available() else device
                 coords = coords.to(device)
                 padding_mask = padding_mask.to(device)
