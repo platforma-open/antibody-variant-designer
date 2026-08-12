@@ -81,6 +81,7 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Variant sequence",
+					"pl7.app/description": "The full designed V-domain sequence. Only the positions listed in \"Changed positions\" differ from the parent.",
 					"pl7.app/table/visibility": "hidden"
 				}
 			}
@@ -93,7 +94,8 @@ variantColumns := func(blockId) {
 				valueType: "String",
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
-					"pl7.app/label": "Changed positions"
+					"pl7.app/label": "Changed positions",
+					"pl7.app/description": "The edits versus the parent, one per position: <chain>:<wild-type><IMGT position><designed residue>, comma-separated."
 				}
 			}
 		},
@@ -106,7 +108,8 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Addressed liability",
-					"pl7.app/isDiscreteFilter": "true"
+					"pl7.app/isDiscreteFilter": "true",
+					"pl7.app/description": "The one liability this variant was designed to clear — one variant always targets exactly one liability."
 				}
 			}
 		},
@@ -124,6 +127,7 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Status",
+					"pl7.app/description": "Always 'unvalidated-hypothesis'. No variant on this page has been tested; the block predicts nothing about binding.",
 					"pl7.app/table/visibility": "hidden"
 				}
 			}
@@ -138,6 +142,7 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Rank",
+					"pl7.app/description": "Position within this parent's own surviving set, starting at 1. Not comparable across different parents.",
 					"pl7.app/isScore": "true",
 					"pl7.app/score/rankingOrder": "increasing",
 					"pl7.app/table/orderPriority": "1000"
@@ -157,6 +162,7 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Structural tolerance",
+					"pl7.app/description": "AntiFold's fold-tolerance score at the edited position(s) — higher means the model finds the substitution more compatible with the fold. This is what the binding-risk band and the low-tolerance floor are computed from.",
 					"pl7.app/format": ".2f",
 					"pl7.app/structure/toleranceMetric": "antifoldPerplexityBits"
 				}
@@ -174,6 +180,7 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Worst predicted error, Å",
+					"pl7.app/description": "The worst (highest) predicted structural error across the edited residues, in Å. One badly-predicted residue invalidates the edit regardless of how confident the model is at its neighbours.",
 					"pl7.app/format": ".2f",
 					"pl7.app/structure/confidenceMetric": "predictedErrorAngstroms"
 				}
@@ -190,6 +197,7 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Binding risk",
+					"pl7.app/description": "A band standing in for a binding-affinity prediction, which this block does not make: High for a CDR edit with poor fold tolerance or low prediction confidence, Low for a framework edit with neither problem, Medium otherwise.",
 					"pl7.app/isScore": "true",
 					"pl7.app/isDiscreteFilter": "true",
 					"pl7.app/discreteValues": BINDING_RISK_VALUES,
@@ -208,7 +216,8 @@ variantColumns := func(blockId) {
 				valueType: "String",
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
-					"pl7.app/label": "Low confidence"
+					"pl7.app/label": "Low confidence",
+					"pl7.app/description": "Yes when the edited position falls in a low-confidence region of the structure prediction. The variant still generates — this is a caveat on the prediction, not a rejection of the edit."
 				}
 			}
 		}
@@ -232,7 +241,7 @@ liabilityColumns := func(blockId) {
 				valueType: "String",
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
-					"pl7.app/label": "Liability",
+					"pl7.app/label": "Liabilities",
 					"pl7.app/isDiscreteFilter": "true"
 				}
 			}
