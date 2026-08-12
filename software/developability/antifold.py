@@ -191,8 +191,23 @@ def _run_model(
         pdb = Path(pdb_path)
         pdbs_df = _pdbs_frame(pdb.stem, h_chain, l_chain)
 
+        # `custom_chain_mode` and `nanobody_mode` are two independent flags on
+        # AntiFold's own call, but its H/L coordinate loader looks up BOTH
+        # chain letters from the dataframe regardless of `nanobody_mode` —
+        # nanobody_mode alone only changes postprocessing, never which chains
+        # get loaded. A nanobody's `Lchain=None` then reaches biotite's chain
+        # lookup and raises "Chain None not found in input file". Only
+        # `custom_chain_mode=True` switches the loader to the chain-letter
+        # list it actually has (built from the non-null columns), which is
+        # what a nanobody needs. AntiFold's own CLI always sets the two
+        # together for a nanobody, never one without the other.
         [df_logits] = antiscripts.get_pdbs_logits(
-            model, pdbs_df, str(pdb.parent), nanobody_mode=nanobody_mode, save_flag=False
+            model,
+            pdbs_df,
+            str(pdb.parent),
+            nanobody_mode=nanobody_mode,
+            custom_chain_mode=nanobody_mode,
+            save_flag=False,
         )
 
     return [
