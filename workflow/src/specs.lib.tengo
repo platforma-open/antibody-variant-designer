@@ -20,7 +20,11 @@ LIABILITY_AXIS_NAME := "pl7.app/antibodyVariantDesigner/liabilityKey"
 // make them read designed antibodies as peptides.
 variantAxisSpec := {
 	type: "String",
-	name: VARIANT_AXIS_NAME
+	name: VARIANT_AXIS_NAME,
+	annotations: {
+		"pl7.app/label": "Variant ID",
+		"pl7.app/description": "One designed molecule — a content-addressed hash of the parent clonotype, this block instance and the exact edit set. The same edits at the same parent always hash to the same ID, even across re-runs."
+	}
 }
 
 liabilityAxisSpec := {

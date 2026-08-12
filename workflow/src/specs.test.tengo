@@ -40,9 +40,10 @@ TestVariantAxes := func() {
 	test.isEqual("pl7.app/antibodyVariantDesigner/variantKey", settings.axes[1].spec.name)
 	test.isEqual("String", settings.axes[1].spec.type)
 
-	// The variant axis carries no label of its own: the parent's joined label
-	// plus the key already say what the row is.
-	test.isTrue(is_undefined(settings.axes[1].spec.annotations))
+	// The axis value is an opaque content-addressed hash, so it needs its own
+	// label — unlike the parent's joined label, nothing about the value itself
+	// says what the row is.
+	test.isEqual("Variant ID", settings.axes[1].spec.annotations["pl7.app/label"])
 }
 
 TestVariantColumns := func() {
