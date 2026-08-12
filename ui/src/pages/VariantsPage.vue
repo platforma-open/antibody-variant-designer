@@ -30,10 +30,13 @@ const settingsOpen = ref(!app.model.data.dataset?.primary?.column);
 const variantsTableOutput = computed(() => app.model.outputs.variantsTable);
 
 // `sourceId` is versioned so a PColumn shape change invalidates AG-Grid's
-// cached column order rather than silently reusing a stale one.
+// cached column order rather than silently reusing a stale one. Bumped to
+// v2 when the variant axis gained a label — AG-Grid kept the header text it
+// had already cached under v1 even after the run picked up the new
+// annotation.
 const variantsTableSettings = usePlDataTableSettingsV2({
   model: () => variantsTableOutput.value,
-  sourceId: () => "avd-variants-v1",
+  sourceId: () => "avd-variants-v2",
 });
 
 const FIXABILITY_OPTIONS = [
