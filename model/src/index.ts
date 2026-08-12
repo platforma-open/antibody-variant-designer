@@ -210,8 +210,8 @@ export const platforma = BlockModelV3.create(dataModel)
     return reduceSkipSummary([liabilitiesSkip, toleranceSkip, variantsSkip]);
   })
   .sections(() => [
-    { type: "link", href: "/", label: "Variants" },
     { type: "link", href: "/parents", label: "Parents" },
+    { type: "link", href: "/", label: "Variants" },
   ])
   .done();
 
