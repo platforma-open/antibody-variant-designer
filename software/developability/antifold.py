@@ -159,27 +159,37 @@ def load_model(weights_path: str):
         return model.eval()
 
 
+def _pdbs_frame(pdb_stem: str, h_chain: str, l_chain: str | None):
+    """AntiFold's one-row `pdb, Hchain, Lchain` frame for a single antibody.
+
+    `Lchain` is always a column, `None` for a nanobody. AntiFold's own
+    dataset loader checks column presence before it reads a single row
+    value, so a dataframe missing the column fails for every antibody,
+    nanobody_mode notwithstanding — the per-row NaN is what its own
+    chain-count inference already handles correctly. Split out from
+    `_run_model` so this shape stays checkable without torch installed."""
+    import pandas as pd
+
+    return pd.DataFrame([{"pdb": pdb_stem, "Hchain": h_chain, "Lchain": l_chain}])
+
+
 def _run_model(
     model, pdb_path: str, h_chain: str, l_chain: str | None, nanobody_mode: bool
 ) -> list[dict]:
     """The only function that touches torch or the vendored AntiFold
-    package. Builds AntiFold's one-row `pdb, Hchain, Lchain` frame for this
-    single antibody and reads its `df_logits` back into plain dicts, so
-    every function above this one stays pandas- and torch-free.
+    package. Builds AntiFold's one-row frame for this single antibody and
+    reads its `df_logits` back into plain dicts, so every function above
+    this one stays pandas- and torch-free.
 
     Takes an already-loaded `model` so the checkpoint is read once per
     process rather than once per antibody."""
     if _VENDOR_DIR not in sys.path:
         sys.path.insert(0, _VENDOR_DIR)
     import antifold.antiscripts as antiscripts
-    import pandas as pd
 
     with _block_network():
         pdb = Path(pdb_path)
-        row = {"pdb": pdb.stem, "Hchain": h_chain}
-        if l_chain is not None:
-            row["Lchain"] = l_chain
-        pdbs_df = pd.DataFrame([row])
+        pdbs_df = _pdbs_frame(pdb.stem, h_chain, l_chain)
 
         [df_logits] = antiscripts.get_pdbs_logits(
             model, pdbs_df, str(pdb.parent), nanobody_mode=nanobody_mode, save_flag=False

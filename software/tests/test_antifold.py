@@ -4,6 +4,9 @@ Every case here avoids torch and the vendored AntiFold package: `pick_chains`
 and `build_tolerance_rows` are plain-Python functions over `residue_store`
 data and a hand-built `logits_rows` fixture, and the CLI test monkeypatches
 `_run_model`, the one function that actually calls the backend.
+
+`TestPdbsFrame` is the one exception, and needs pandas but not torch — it
+skips outright when pandas is absent, which is the `dev` group's default.
 """
 
 import csv
@@ -123,6 +126,28 @@ class TestBuildToleranceRows:
         rows = antifold.build_tolerance_rows(residues, logits_rows)
 
         assert len(rows) == 1
+
+
+class TestPdbsFrame:
+    """AntiFold's own dataset loader rejects a dataframe missing any of
+    `pdb`/`Hchain`/`Lchain` before it reads a single row — column presence
+    alone, independent of `nanobody_mode`. `_pdbs_frame` must always emit
+    the three columns; only the `Lchain` value tells nanobody from paired."""
+
+    def test_a_nanobody_still_gets_an_lchain_column(self):
+        pd = pytest.importorskip("pandas")
+
+        df = antifold._pdbs_frame("clone-1", "H", None)
+
+        assert set(df.columns) == {"pdb", "Hchain", "Lchain"}
+        assert pd.isna(df.loc[0, "Lchain"])
+
+    def test_a_paired_antibody_carries_both_chain_letters(self):
+        pytest.importorskip("pandas")
+
+        df = antifold._pdbs_frame("clone-1", "H", "L")
+
+        assert (df.loc[0, "Hchain"], df.loc[0, "Lchain"]) == ("H", "L")
 
 
 class TestBlockNetwork:
