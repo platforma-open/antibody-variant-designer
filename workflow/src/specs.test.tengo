@@ -1,9 +1,8 @@
 // The emitted PColumn specs are a contract with every downstream block and
 // with the synthesis vendor, and nothing else in the build checks a spec
-// string. These cases pin the parts a rename would break silently: the two
-// axis names, one column name per group, the blockId context domain on every
-// column,
-// and the CSV's six headers.
+// string. These cases pin the parts a rename would break silently: the
+// three variant-group axis names, one column name per group, the blockId
+// context domain on every column, and the CSV's full A-0018 header set.
 
 test := import("@platforma-sdk/workflow-tengo:test")
 specs := import(":specs")
@@ -29,8 +28,10 @@ _byColumn := func(columns) {
 TestVariantAxes := func() {
 	settings := specs.buildVariantsXsvSettings(BLOCK_ID, CLONOTYPE_AXIS)
 
-	// The parent leads, because many variants map to one parent.
-	test.isEqual(2, len(settings.axes))
+	// The parent leads, because many variants map to one parent; the block id
+	// trails, third — the parent axis still leads
+	// (073-decision-the-block-id-becomes-an-axis-not-a-variant-key-ingredient).
+	test.isEqual(3, len(settings.axes))
 	test.isEqual("clonotypeKey", settings.axes[0].column)
 	test.isEqual("pl7.app/vdj/scClonotypeKey", settings.axes[0].spec.name)
 
@@ -39,19 +40,21 @@ TestVariantAxes := func() {
 	test.isEqual("variantKey", settings.axes[1].column)
 	test.isEqual("pl7.app/antibodyVariantDesigner/variantKey", settings.axes[1].spec.name)
 	test.isEqual("String", settings.axes[1].spec.type)
-
-	// The axis value is an opaque content-addressed hash, so it needs its own
-	// label — unlike the parent's joined label, nothing about the value itself
-	// says what the row is.
 	test.isEqual("Variant ID", settings.axes[1].spec.annotations["pl7.app/label"])
+
+	// The run identity, its own axis — distinct from the `pl7.app/blockId`
+	// context domain every column also carries.
+	test.isEqual("blockId", settings.axes[2].column)
+	test.isEqual("pl7.app/antibodyVariantDesigner/blockKey", settings.axes[2].spec.name)
 }
 
 TestVariantColumns := func() {
 	settings := specs.buildVariantsXsvSettings(BLOCK_ID, CLONOTYPE_AXIS)
 	byColumn := _byColumn(settings.columns)
 
-	// Nine value columns, on two axes — eleven grid columns.
-	test.isEqual(9, len(settings.columns))
+	// Twelve value columns, on three axes — A-0018's whole set plus the
+	// block-id axis.
+	test.isEqual(12, len(settings.columns))
 
 	// The designed sequence reuses the sequence name every consumer reads,
 	// qualified by feature and alphabet rather than renamed.
@@ -85,6 +88,11 @@ TestVariantColumns := func() {
 
 	test.isEqual("pl7.app/liabilities/lowConfidence", byColumn.lowConfidenceWarning.spec.name)
 	test.isEqual("pl7.app/antibodyVariantDesigner/status", byColumn.status.spec.name)
+
+	// The three columns this TODO adds.
+	test.isEqual("pl7.app/antibodyVariantDesigner/variantId", byColumn.variantId.spec.name)
+	test.isEqual("pl7.app/antibodyVariantDesigner/chain", byColumn.chain.spec.name)
+	test.isEqual("pl7.app/antibodyVariantDesigner/objective", byColumn.objective.spec.name)
 
 	// Both metrics declare their scale, because both are backend-specific and
 	// a consumer cannot infer either from the number.
@@ -152,42 +160,40 @@ TestNoValueTypeIsBooleanOrObject := func() {
 	}
 }
 
-TestSynthesisCsvHeaders := func() {
-	// `xsv.exportFrame` writes each axis's and each column's label as the
-	// header, so the contract spellings live in an export-only spec over the
-	// same data the table reads.
-	fakeData := { rank: { data: "d" }, addressedTarget: { data: "d" },
-		changedPositions: { data: "d" }, variantSequence: { data: "d" },
-		structuralTolerance: { data: "d" }, worstConfidence: { data: "d" },
-		bindingRisk: { data: "d" }, lowConfidenceWarning: { data: "d" },
-		status: { data: "d" } }
+TestSynthesisCsvColumnOrder := func() {
+	// Built off the flat table in `main.tpl.tengo`, not re-specced PColumn
+	// data — a PColumn's `axesSpec` must match its data's physical partition
+	// count, which re-speccing to fewer axes violates at *read* time, not at
+	// spec-build time (080-fact-export-axesspec-must-match-physical-partition-count).
+	// This function just names which flat column feeds which CSV header, in
+	// the atom's own order — `main.tpl.tengo` does the `pt.col(...).alias(...)`
+	// selection.
+	order := specs.csvColumnOrder(BLOCK_ID)
 
-	columns := specs.buildSynthesisCsvColumns(BLOCK_ID, fakeData, CLONOTYPE_AXIS)
-
-	// Four value columns plus the two axes make the six contract columns.
-	test.isEqual(4, len(columns))
+	// All twelve variant columns declare a `csvHeader` — the full A-0018 set,
+	// `humannessScore` held back for V1.
+	test.isEqual(12, len(order))
 
 	headers := []
-	for c in columns {
-		headers = append(headers, c.spec.annotations["pl7.app/label"])
-		// Every column shares one axes spec, so the export joins them into
-		// one table rather than emitting four.
-		test.isEqual(2, len(c.spec.axesSpec))
-		test.isEqual("parentClonotypeId", c.spec.axesSpec[0].annotations["pl7.app/label"])
-		test.isEqual("variantId", c.spec.axesSpec[1].annotations["pl7.app/label"])
+	columns := []
+	for c in order {
+		headers = append(headers, c.csvHeader)
+		columns = append(columns, c.column)
 	}
-	test.isEqual(["variantSequence", "changedPositions", "addressedTarget", "status"], headers)
+	test.isEqual([
+		"variantId", "rank", "variantSequence", "chain", "changedPositions",
+		"objective", "addressedTarget", "structuralTolerance", "worstConfidence",
+		"bindingRisk", "lowConfidenceWarning", "status"
+	], headers)
+	// Every header here equals its flat column name — no CSV spelling drifts
+	// from the TSV column `variant_store.py` writes.
+	test.isEqual(headers, columns)
 
-	// The contract is the declaration list's leading run, which is what lets the
-	// rows carry no position number: the CSV's columns are the import's first
-	// four, in the same order.
+	// The contract is the declaration list's leading run, which is what lets
+	// the rows carry no position number: `csvColumnOrder`'s output is the
+	// import's own column order, unchanged — here, the whole list.
 	imported := specs.buildVariantsXsvSettings(BLOCK_ID, CLONOTYPE_AXIS).columns
-	for i, c in columns {
-		test.isEqual(imported[i].spec.name, c.spec.name)
+	for i, c in order {
+		test.isEqual(imported[i].column, c.column)
 	}
-
-	// The table's own labels are untouched by the export relabelling.
-	byColumn := _byColumn(specs.buildVariantsXsvSettings(BLOCK_ID, CLONOTYPE_AXIS).columns)
-	test.isEqual("Variant sequence", byColumn.variantSequence.spec.annotations["pl7.app/label"])
-	test.isEqual("Clonotype", CLONOTYPE_AXIS.annotations["pl7.app/label"])
 }

@@ -23,8 +23,8 @@ a region's full residue list, not to a bare site; re-scanning a cysteine
 candidate over its own (shorter) site is an approximation this module
 accepts because, again, the full region is not something it can see.
 
-A surviving candidate's `tolerance` is the worst (lowest) AntiFold
-perplexity among its edited positions — a property of the position itself,
+A surviving candidate's `tolerance` is the **mean** AntiFold perplexity
+over its edited positions — a property of the positions themselves,
 independent of which amino acid was substituted there, unlike the
 per-amino-acid log-probability `_top_substitutions` ranks by. `region`,
 `low_confidence` and `worst_confidence_angstroms` ride along unchanged from
@@ -88,7 +88,18 @@ def _top_substitutions(residue, tolerance_lookup: dict, k: int) -> list[str]:
     """Up to `k` amino acids at `residue`'s position, ranked by AntiFold
     log-probability, wild type excluded — substituting a position to its
     own residue would neither change nor clear anything, so it is never a
-    candidate substitution."""
+    candidate substitution.
+
+    The combined score a position's candidates should be ranked by is a
+    log-space weighted sum of two terms: the structural log-probability
+    row read here, and an objective prior over the same twenty amino
+    acids. At V0.5 that second term does not exist — there is no
+    conventional-fix table yet — so the sum has one live term with a
+    positive weight, and a single positive-weighted term cannot reorder
+    its own ranking. Sorting the log-probability row alone is therefore
+    not an approximation of the full sum; it *is* the full sum, in the
+    one-expert case this package ships. `perplexity` is one number for
+    the whole position and could never order twenty amino acids at it."""
     row = tolerance_lookup.get((residue.chain, residue.imgt))
     if row is None:
         return []
@@ -108,6 +119,16 @@ def _changed_positions(edits: tuple) -> str:
     """The fixed CSV-contract spelling: `<chain>:<wt><imgtLabel><mut>`,
     comma-separated, one entry per edit in site order."""
     return ", ".join(f"{e.chain}:{e.wild_type}{e.imgt}{e.to}" for e in edits)
+
+
+_RISK_LEVEL_ORDER = {"High": 0, "Medium": 1, "Low": 2}
+
+
+def _risk_level_order(triaged) -> int:
+    """`High` before `Medium` before `Low` — the input order `build_candidates`
+    iterates in, so a High-risk liability's candidates are built (and reach
+    ranking) before a Low-risk one's, within one parent."""
+    return _RISK_LEVEL_ORDER[triaged.risk_level]
 
 
 def _addressed_target(definition_id: str, site: list, taxonomy_by_id: dict) -> str:
@@ -138,7 +159,7 @@ def build_candidates(
     re-scan runs at all."""
     taxonomy_by_id = {d["id"]: d for d in taxonomy}
     candidates: list[Candidate] = []
-    for triaged in triaged_list:
+    for triaged in sorted(triaged_list, key=_risk_level_order):
         site = triaged.site
         if len(site) > max_edits_per_variant:
             continue
@@ -152,9 +173,9 @@ def build_candidates(
         # A property of the positions themselves, the same for every
         # combination substituted there — computed once per liability
         # rather than once per candidate.
-        structural_tolerance = min(
+        structural_tolerance = sum(
             tolerance_lookup[(residue.chain, residue.imgt)]["perplexity"] for residue in site
-        )
+        ) / len(site)
         addressed_target = _addressed_target(triaged.definition_id, site, taxonomy_by_id)
 
         for combo in itertools.product(*per_position_options):

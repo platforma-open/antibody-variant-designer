@@ -105,7 +105,7 @@ class TestBuildCandidatesRescanGate:
 
         assert candidate.target_definition_id == "deamidation_ng"
 
-    def test_tolerance_is_the_worst_perplexity_among_the_edited_positions(self):
+    def test_tolerance_is_the_mean_perplexity_over_the_edited_positions(self):
         [candidate] = [
             c
             for c in candidates.build_candidates(
@@ -116,9 +116,9 @@ class TestBuildCandidatesRescanGate:
         ]
 
         # Position 107's perplexity is 5.0, position 108's is 2.0 — the
-        # candidate's tolerance is the position's worst, not either
-        # amino acid's own log-probability, and not their sum or average.
-        assert candidate.tolerance == pytest.approx(2.0)
+        # candidate's tolerance is their mean, not either position's own
+        # perplexity, and not their min or their sum.
+        assert candidate.tolerance == pytest.approx(3.5)
 
     def test_region_low_confidence_and_worst_confidence_carry_forward_from_triage(self):
         [candidate] = [
@@ -160,6 +160,22 @@ class TestBuildCandidatesRescanGate:
         assert candidate.addressed_target == "Deamidation (N[GS]) @ CDR1 H:107"
 
 
+class TestTopSubstitutionsRanksByLogProbability:
+    def test_offered_substitutions_are_the_top_k_of_the_log_probability_row_wild_type_excluded(
+        self,
+    ):
+        # This position's `perplexity` (3.0, one number for the whole
+        # position) disagrees with which amino acids the per-amino-acid
+        # log-probability row favors — pinning that `_top_substitutions`
+        # reads the row, not the scalar, so a future reader cannot
+        # re-open which signal ranks a position's candidate residues
+        # against a test suite that never asserted it.
+        residue = _residue("H", 6, "N", imgt="107")
+        lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=3.0)}
+
+        assert candidates._top_substitutions(residue, lookup, k=2) == ["D", "Q"]
+
+
 class TestBuildCandidatesEditBudget:
     def test_a_site_longer_than_the_edit_budget_produces_no_candidate(self):
         candidates_out = candidates.build_candidates(
@@ -178,3 +194,37 @@ class TestBuildCandidatesEditBudget:
         )
 
         assert candidates_out == []
+
+
+class TestBuildCandidatesRiskLevelOrder:
+    def test_triaged_liabilities_in_low_high_medium_order_are_built_high_medium_low(self):
+        # Three isolated, non-interacting single-residue liabilities, one per
+        # risk level, submitted in an order that matches none of the three
+        # possible sorted orders — only `_risk_level_order` explains the
+        # output order.
+        low = _triaged(
+            [_residue("H", 20, "N", imgt="200")], definition_id="low_risk_lib",
+        )
+        low.risk_level = "Low"
+        high = _triaged(
+            [_residue("H", 21, "M", imgt="201")], definition_id="high_risk_lib",
+        )
+        high.risk_level = "High"
+        medium = _triaged(
+            [_residue("H", 22, "P", imgt="202")], definition_id="medium_risk_lib",
+        )
+        medium.risk_level = "Medium"
+        lookup = {
+            ("H", "200"): _row(["A"], wild_type="N"),
+            ("H", "201"): _row(["A"], wild_type="M"),
+            ("H", "202"): _row(["A"], wild_type="P"),
+        }
+
+        candidates_out = candidates.build_candidates(
+            [low, high, medium], lookup, TAXONOMY,
+            max_edits_per_variant=5, candidate_residues_per_position=1,
+        )
+
+        assert [c.target_definition_id for c in candidates_out] == [
+            "high_risk_lib", "medium_risk_lib", "low_risk_lib",
+        ]

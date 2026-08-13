@@ -44,9 +44,10 @@ def process_one(
     """Gate then rank one antibody. Returns its skip reason (`""` on pass)
     and the ranked variants the caller appends to the run's one
     `variants.tsv`."""
+    tolerance_lookup = tolerance_store.read_tolerance_tsv(tolerance_path)
     cleared = candidates.build_candidates(
         liability_store.read_triaged(triaged_path),
-        tolerance_store.read_tolerance_tsv(tolerance_path),
+        tolerance_lookup,
         taxonomy,
         max_edits_per_variant,
         candidate_residues_per_position,
@@ -57,6 +58,7 @@ def process_one(
     variants = ranking.rank_variants(
         cleared,
         residue_store.read_residues(residues_path),
+        tolerance_lookup,
         variants_per_parent,
         low_tolerance_floor,
         epistasis_rescore_top_k,

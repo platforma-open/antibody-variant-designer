@@ -9,11 +9,11 @@
 // `pl7.app/label` joins onto it and this block emits no label of its own.
 
 ll := import("@platforma-sdk/workflow-tengo:ll")
-maps := import("@platforma-sdk/workflow-tengo:maps")
 slices := import("@platforma-sdk/workflow-tengo:slices")
 
 VARIANT_AXIS_NAME := "pl7.app/antibodyVariantDesigner/variantKey"
 LIABILITY_AXIS_NAME := "pl7.app/antibodyVariantDesigner/liabilityKey"
+BLOCK_AXIS_NAME := "pl7.app/antibodyVariantDesigner/blockKey"
 
 // `pl7.app/variantKey` is deliberately NOT this name. Four blocks compare
 // that exact string to decide a row is peptide data, so emitting it would
@@ -23,7 +23,7 @@ variantAxisSpec := {
 	name: VARIANT_AXIS_NAME,
 	annotations: {
 		"pl7.app/label": "Variant ID",
-		"pl7.app/description": "One designed molecule — a content-addressed hash of the parent clonotype, this block instance and the exact edit set. The same edits at the same parent always hash to the same ID, even across re-runs."
+		"pl7.app/description": "A per-parent ordinal — v01, v02, … in this run's rank order. Unique within one parent and one run; the (clonotypeKey, blockKey) axis pair is what makes a row globally distinguishable, not this value alone."
 	}
 }
 
@@ -32,6 +32,21 @@ liabilityAxisSpec := {
 	name: LIABILITY_AXIS_NAME,
 	annotations: {
 		"pl7.app/label": "Liability site"
+	}
+}
+
+// The run identity, as its own axis on the variant group — distinct from
+// `pl7.app/blockId` in every column's `contextDomain`, which is a join
+// selector, not a row identity
+// (073-decision-the-block-id-becomes-an-axis-not-a-variant-key-ingredient).
+// Two runs of this block over one dataset produce rows that differ in this
+// axis value, rather than rows whose `variantKey` silently differs in a way
+// no reader can decode.
+blockAxisSpec := {
+	type: "String",
+	name: BLOCK_AXIS_NAME,
+	annotations: {
+		"pl7.app/label": "Run ID"
 	}
 }
 
@@ -52,19 +67,56 @@ BINDING_RISK_DEFAULT_CUTOFF := "[\"Low\",\"Medium\"]"
 // A row is `{column, csvHeader?, spec}`. `column` is not part of the spec: it
 // is the header `variant_store.TSV_COLUMNS` writes, and it is what the importer
 // reads the values from, so the row starts at the file and ends at the emitted
-// column. `csvHeader` marks the four columns the synthesis CSV carries and
-// names the header the vendor's contract fixes — a spelling independent of both
-// the PColumn name and the table's label.
+// column. `csvHeader` names the header the vendor's contract fixes — a
+// spelling independent of both the PColumn name and the table's label.
 //
-// **Those four lead the list, in the CSV's own order**, so the contract is one
-// contiguous run a reader can check against the vendor's form top to bottom.
-// That is why no row carries a position number: a number beside a list that
-// already fixes the order is a second copy of it, free to disagree. The
-// builder asserts the run stays contiguous, which is the only part of this the
-// list shape cannot enforce on its own.
+// **`A-0018`'s whole column set is this list, in the atom's own order**, so
+// the contract is the list itself, top to bottom, and every row declares a
+// `csvHeader` — that is why no row carries a position number: a number beside
+// a list that already fixes the order is a second copy of it, free to
+// disagree. `variantId` leads (built in `main.tpl.tengo` from the parent and
+// variant axes, since `xsv.exportFrame` can relabel a column but never
+// compute one — 079-fact-variantid-needs-a-computed-column-not-a-relabel);
+// `humannessScore` stays out at V0.5 ([[A-0018]] — V1 only).
 
 variantColumns := func(blockId) {
 	return [
+		{
+			column: "variantId",
+			csvHeader: "variantId",
+			// Built in `main.tpl.tengo`, not derived here: `<parentClonotypeId>:
+			// <variantKey>`, concatenated on the flat table before the axes exist.
+			// Hidden from the in-block table — the two axes already show the same
+			// pair there, so this column exists for the CSV alone.
+			spec: {
+				name: "pl7.app/antibodyVariantDesigner/variantId",
+				valueType: "String",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Variant ID",
+					"pl7.app/description": "`<parentClonotypeId>:<variantKey>` — the stable id that survives the synthesis → NGS round-trip.",
+					"pl7.app/table/visibility": "hidden"
+				}
+			}
+		},
+		{
+			column: "rank",
+			csvHeader: "rank",
+			// Position within THIS parent's surviving set, restarting at 1 per
+			// parent, so the number means nothing compared across parents.
+			spec: {
+				name: "pl7.app/score",
+				valueType: "Long",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Rank",
+					"pl7.app/description": "Position within this parent's own surviving set, starting at 1. Not comparable across different parents. Lower is better — rank 1 is the top pick for that parent.",
+					"pl7.app/isScore": "true",
+					"pl7.app/score/rankingOrder": "increasing",
+					"pl7.app/table/orderPriority": "1000"
+				}
+			}
+		},
 		{
 			column: "variantSequence",
 			csvHeader: "variantSequence",
@@ -91,6 +143,24 @@ variantColumns := func(blockId) {
 			}
 		},
 		{
+			column: "chain",
+			csvHeader: "chain",
+			// "H" for a VHH (the single V-domain), "H,L" for a paired Fv — which
+			// chain(s) `variantSequence` actually renders, derived once per
+			// antibody from the residue index's own `chain_role`
+			// (unit-must-not-be-derivable: never carried as a boundary field).
+			spec: {
+				name: "pl7.app/antibodyVariantDesigner/chain",
+				valueType: "String",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Chain",
+					"pl7.app/description": "Which chain(s) \"Variant sequence\" renders: H alone for a VHH, H,L for a paired Fv.",
+					"pl7.app/isDiscreteFilter": "true"
+				}
+			}
+		},
+		{
 			column: "changedPositions",
 			csvHeader: "changedPositions",
 			spec: {
@@ -100,6 +170,26 @@ variantColumns := func(blockId) {
 				annotations: {
 					"pl7.app/label": "Changed positions",
 					"pl7.app/description": "The edits versus the parent, one per position: <chain>:<wild-type><IMGT position><designed residue>, comma-separated."
+				}
+			}
+		},
+		{
+			column: "objective",
+			csvHeader: "objective",
+			// The constant `liability` — V1's second objective, `humanness`,
+			// is not generated at V0.5. A value invariant across every row is
+			// what a domain key is for, and this is another column that breaks
+			// that rule on purpose, for the same reason `status` does: the
+			// synthesis CSV must carry the word.
+			spec: {
+				name: "pl7.app/antibodyVariantDesigner/objective",
+				valueType: "String",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Objective",
+					"pl7.app/description": "Always 'liability' at V0.5 — the humanness objective is a later increment.",
+					"pl7.app/isDiscreteFilter": "true",
+					"pl7.app/table/visibility": "hidden"
 				}
 			}
 		},
@@ -118,43 +208,8 @@ variantColumns := func(blockId) {
 			}
 		},
 		{
-			column: "status",
-			csvHeader: "status",
-			// The constant `unvalidated-hypothesis`. A value invariant across
-			// every row is what a domain key is for, and this is the one column
-			// that breaks that rule on purpose: `xsv.exportFrame` exports
-			// columns, and the synthesis CSV must carry the word, which a domain
-			// key would never reach.
-			spec: {
-				name: "pl7.app/antibodyVariantDesigner/status",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Status",
-					"pl7.app/description": "Always 'unvalidated-hypothesis'. No variant on this page has been tested; the block predicts nothing about binding.",
-					"pl7.app/table/visibility": "hidden"
-				}
-			}
-		},
-		{
-			column: "rank",
-			// Position within THIS parent's surviving set, restarting at 1 per
-			// parent, so the number means nothing compared across parents.
-			spec: {
-				name: "pl7.app/score",
-				valueType: "Long",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Rank",
-					"pl7.app/description": "Position within this parent's own surviving set, starting at 1. Not comparable across different parents.",
-					"pl7.app/isScore": "true",
-					"pl7.app/score/rankingOrder": "increasing",
-					"pl7.app/table/orderPriority": "1000"
-				}
-			}
-		},
-		{
 			column: "structuralTolerance",
+			csvHeader: "structuralTolerance",
 			// AntiFold's perplexity, `2^H₂(p)` over `[1,20]` — entropy in bits,
 			// a different base from the natural-log columns beside it in the
 			// model's own frame. The scale is backend-specific, hence the metric
@@ -166,7 +221,7 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Structural tolerance",
-					"pl7.app/description": "AntiFold's fold-tolerance score at the edited position(s) — higher means the model finds the substitution more compatible with the fold. This is what the binding-risk band and the low-tolerance floor are computed from.",
+					"pl7.app/description": "AntiFold's fold-tolerance score at the edited position(s) — higher means the model finds the substitution more compatible with the fold. This is what the binding-risk band and the low-tolerance floor are computed from. Higher is better.",
 					"pl7.app/format": ".2f",
 					"pl7.app/structure/toleranceMetric": "antifoldPerplexityBits"
 				}
@@ -174,6 +229,7 @@ variantColumns := func(blockId) {
 		},
 		{
 			column: "worstConfidence",
+			csvHeader: "worstConfidence",
 			// Worst over the edited span, not mean: one badly-predicted residue
 			// invalidates the edit whatever its neighbours look like. Every
 			// member of the confidence family carries the metric annotation so a
@@ -184,7 +240,7 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Worst predicted error, Å",
-					"pl7.app/description": "The worst (highest) predicted structural error across the edited residues, in Å. One badly-predicted residue invalidates the edit regardless of how confident the model is at its neighbours.",
+					"pl7.app/description": "The worst (highest) predicted structural error across the edited residues, in Å. One badly-predicted residue invalidates the edit regardless of how confident the model is at its neighbours. Lower is better — a small Å value means the model is confident in that position's structure.",
 					"pl7.app/format": ".2f",
 					"pl7.app/structure/confidenceMetric": "predictedErrorAngstroms"
 				}
@@ -192,6 +248,7 @@ variantColumns := func(blockId) {
 		},
 		{
 			column: "bindingRisk",
+			csvHeader: "bindingRisk",
 			// There is no paratope model and no ΔΔG prediction anywhere in this
 			// block. This band is the whole substitute for one, which is why it
 			// is a band rather than a number.
@@ -212,6 +269,7 @@ variantColumns := func(blockId) {
 		},
 		{
 			column: "lowConfidenceWarning",
+			csvHeader: "lowConfidenceWarning",
 			// Warns and down-ranks; it never blocked generation, so a "yes" row
 			// is a real proposal with a caveat. Same name, grammar and meaning
 			// as the liability group's column of that name, on the other axis.
@@ -222,6 +280,25 @@ variantColumns := func(blockId) {
 				annotations: {
 					"pl7.app/label": "Low confidence",
 					"pl7.app/description": "Yes when the edited position falls in a low-confidence region of the structure prediction. The variant still generates — this is a caveat on the prediction, not a rejection of the edit."
+				}
+			}
+		},
+		{
+			column: "status",
+			csvHeader: "status",
+			// The constant `unvalidated-hypothesis`. A value invariant across
+			// every row is what a domain key is for, and this is another column
+			// that breaks that rule on purpose: `xsv.exportFrame` exports
+			// columns, and the synthesis CSV must carry the word, which a domain
+			// key would never reach.
+			spec: {
+				name: "pl7.app/antibodyVariantDesigner/status",
+				valueType: "String",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Status",
+					"pl7.app/description": "Always 'unvalidated-hypothesis'. No variant on this page has been tested; the block predicts nothing about binding.",
+					"pl7.app/table/visibility": "hidden"
 				}
 			}
 		}
@@ -283,6 +360,7 @@ liabilityColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Relative SASA",
+					"pl7.app/description": "How solvent-exposed the residue is, as a fraction of the exposure a lone Ala-X-Ala tripeptide would show (can exceed 1 at a chain terminus). Higher means more exposed. Below the buried cutoff a liability is declined rather than acted on, so higher is the direction that makes a liability worth fixing — not a quality score in itself.",
 					"pl7.app/format": ".3f"
 				}
 			}
@@ -315,28 +393,16 @@ liabilityColumns := func(blockId) {
 	]
 }
 
-// ──────────── The synthesis CSV's two axis headers ────────────
+// ──────────── The synthesis CSV's parent column header ────────────
 //
 // A vendor's order form and, later, the annotation key for returning NGS
-// reads, so the column set is a contract rather than a display choice. Its
-// headers are independent of the PColumn names: `xsv.exportFrame` writes each
-// axis's and each column's `pl7.app/label`, so the contract spellings are
-// carried by a second, export-only spec over the same data.
-//
-// The two axes are the CSV's first two columns. `variantId` is the variant
-// axis relabelled: the key already hashes the parent, the block and the edit
-// set, so it identifies one molecule on its own and needs no parent prefix.
+// reads, so the column set is a contract rather than a display choice.
+// Built straight off the flat table in `main.tpl.tengo` — see
+// `csvColumnOrder` below for why.
 
 CSV_PARENT_HEADER := "parentClonotypeId"
-CSV_VARIANT_HEADER := "variantId"
 
 // ──────────── Builders ────────────
-
-withLabel := func(spec, label) {
-	return maps.merge(spec, {
-		annotations: maps.merge(spec.annotations, { "pl7.app/label": label })
-	})
-}
 
 declaresCsvHeader := func(d) {
 	return !is_undefined(d.csvHeader)
@@ -366,7 +432,8 @@ buildVariantsXsvSettings := func(blockId, clonotypeAxisSpec) {
 	return {
 		axes: [
 			{ column: "clonotypeKey", spec: clonotypeAxisSpec },
-			{ column: "variantKey", spec: variantAxisSpec }
+			{ column: "variantKey", spec: variantAxisSpec },
+			{ column: "blockId", spec: blockAxisSpec }
 		],
 		columns: buildXsvColumns(variantColumns(blockId)),
 		storageFormat: "Parquet"
@@ -389,52 +456,45 @@ buildLiabilitiesXsvSettings := func(blockId, clonotypeAxisSpec) {
 }
 
 /**
- * The synthesis CSV's value columns — the leading run of variant columns that
- * declare a `csvHeader`, in list order — re-specced with the contract headers
- * over the imported data.
+ * The synthesis CSV's flat column order: the leading run of variant columns
+ * that declare a `csvHeader`, in list order — `{column, csvHeader}` pairs,
+ * naming the flat TSV column to read and the contract header to write it
+ * under.
  *
- * @param importedVariants: map - `xsv.importFile(..., {splitDataAndSpec: true})`
- *                          output for `variants.tsv`, keyed by `column`.
- * @param clonotypeAxisSpec: object - the same parent axis the import used.
- * @return [{spec, data}] - ready for `xsv.exportFrame`.
+ * **Built from the flat table, not from the imported PFrame.** A PColumn's
+ * `axesSpec` must match the physical axis count its data was partitioned
+ * with at `xsv.importFile` time (three, since `[[073]]`) — re-speccing it
+ * with fewer axes for export crashes at read time, not at spec-build time
+ * ([[080-fact-export-axesspec-must-match-physical-partition-count]]). The
+ * flat table has no axes at all, so `main.tpl.tengo` selects straight off it
+ * with `pt.col(column).alias(csvHeader)`, in this order, before
+ * `xsv.importFile` ever runs.
+ *
+ * @return [{column, csvHeader}] - in the CSV's own contract order.
  */
-buildSynthesisCsvColumns := func(blockId, importedVariants, clonotypeAxisSpec) {
-	axesSpec := [
-		withLabel(clonotypeAxisSpec, CSV_PARENT_HEADER),
-		withLabel(variantAxisSpec, CSV_VARIANT_HEADER)
-	]
-
+csvColumnOrder := func(blockId) {
 	declaring := slices.filter(variantColumns(blockId), declaresCsvHeader)
 
 	// The declaring rows are the list's leading run, so their list order IS the
 	// contract order and no row needs a position number. The one thing the list
 	// shape cannot state is that the run stays contiguous — a later row
-	// rejoining it would append a fifth column to the vendor's six — so the
+	// rejoining it would append an extra column to the vendor's set — so the
 	// prefix of that length must be exactly the declaring rows.
 	ll.assert(
 		slices.every(slices.slice(variantColumns(blockId), 0, len(declaring)), declaresCsvHeader),
 		"the synthesis CSV columns must be the leading run of the variant list")
 
 	return slices.map(declaring, func(d) {
-		return {
-			// The export reads labels only, so the contract header replaces the
-			// table's own label and every other annotation drops away.
-			spec: maps.merge(d.spec, {
-				kind: "PColumn",
-				axesSpec: axesSpec,
-				annotations: { "pl7.app/label": d.csvHeader }
-			}),
-			data: importedVariants[d.column].data
-		}
+		return { column: d.column, csvHeader: d.csvHeader }
 	})
 }
 
 export ll.toStrict({
 	VARIANT_AXIS_NAME: VARIANT_AXIS_NAME,
 	LIABILITY_AXIS_NAME: LIABILITY_AXIS_NAME,
+	BLOCK_AXIS_NAME: BLOCK_AXIS_NAME,
 	CSV_PARENT_HEADER: CSV_PARENT_HEADER,
-	CSV_VARIANT_HEADER: CSV_VARIANT_HEADER,
 	buildVariantsXsvSettings: buildVariantsXsvSettings,
 	buildLiabilitiesXsvSettings: buildLiabilitiesXsvSettings,
-	buildSynthesisCsvColumns: buildSynthesisCsvColumns
+	csvColumnOrder: csvColumnOrder
 })

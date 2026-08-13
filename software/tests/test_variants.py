@@ -120,7 +120,7 @@ class TestGateAndRankInOnePass:
 
         skips, written = _run(batch)
 
-        assert skips == [("clone-1", "")]
+        assert skips == [("clone-1", "", "")]
         assert len(written) > 0
         assert [v.status for _, _, v in written] == ["unvalidated-hypothesis"] * len(written)
 
@@ -139,7 +139,7 @@ class TestGateAndRankInOnePass:
 
         skips, written = _run(batch, ["--max-edits-per-variant", "1"])
 
-        assert skips == [("clone-1", "no-candidate-cleared-motif")]
+        assert skips == [("clone-1", "no-candidate-cleared-motif", "")]
         assert written == []
 
     def test_a_gate_threshold_and_a_ranking_threshold_both_reach_this_one_command(self, batch):
@@ -162,7 +162,7 @@ class TestDatasetWideVariantsTsv:
 
         skips, written = _run(batch, ["--variants-per-parent", "2"])
 
-        assert skips == [("clone-1", ""), ("clone-2", "")]
+        assert skips == [("clone-1", "", ""), ("clone-2", "", "")]
         assert [key for key, _, _ in written] == ["clone-1", "clone-1", "clone-2", "clone-2"]
         assert [v.rank for _, _, v in written] == [1, 2, 1, 2]
 
@@ -175,14 +175,17 @@ class TestDatasetWideVariantsTsv:
         keys = [(clonotype, variant) for clonotype, variant, _ in written]
         assert len(set(keys)) == len(written) == 4
 
-    def test_two_parents_sharing_an_edit_string_get_different_variant_keys(self, batch):
+    def test_two_parents_rank_one_share_the_same_ordinal_variant_key(self, batch):
+        # `variantKey` is a per-parent ordinal, not content-addressed —
+        # two parents' rank-1 variant both render `v01`; only the
+        # `(clonotypeKey, variantKey)` pair, asserted unique above, tells
+        # them apart.
         _stage(batch, "clone-1")
         _stage(batch, "clone-2")
 
         _, written = _run(batch, ["--variants-per-parent", "1"])
 
-        assert len({v.changed_positions for _, _, v in written}) == 1
-        assert len({variant for _, variant, _ in written}) == 2
+        assert {variant for _, variant, _ in written} == {"v01"}
 
     def test_an_empty_roster_leaves_a_header_only_variants_tsv(self, batch):
         skips, written = _run(batch)
@@ -204,7 +207,7 @@ class TestNoReReportingAcrossPredecessors:
 
         skips, written = _run(batch)
 
-        assert skips == [("complete", "")]
+        assert skips == [("complete", "", "")]
         assert {key for key, _, _ in written} == {"complete"}
 
 

@@ -1,5 +1,5 @@
 """Unit tests for `variant_store.py` — the `variants.tsv` round trip, and
-the content-addressed `variantKey` the variant axis is built from."""
+the per-parent-ordinal `variantKey` the variant axis is built from."""
 
 import csv
 import io
@@ -11,12 +11,14 @@ BLOCK_ID = "block-abc"
 
 def _variant(
     rank=1,
+    chain="H,L",
     worst_confidence_angstroms=3.2,
     low_confidence_warning=False,
     changed_positions="H:N107D, H:G108S",
 ):
     return variant_store.Variant(
         rank=rank,
+        chain=chain,
         addressed_target="Deamidation (N[GS]) @ CDR1 H:107",
         changed_positions=changed_positions,
         variant_sequence="DSALA",
@@ -102,33 +104,35 @@ class TestOneFileHoldsEveryParent:
         assert [r["rank"] for r in _rows_of(path)] == ["1", "2", "1", "2"]
 
 
-class TestVariantKeyIsContentAddressed:
-    def test_the_same_inputs_reproduce_the_same_key(self):
-        first = variant_store.variant_key("clone-1", BLOCK_ID, "H:N107D")
-        second = variant_store.variant_key("clone-1", BLOCK_ID, "H:N107D")
+class TestVariantKeyIsAPerParentOrdinal:
+    def test_renders_zero_padded_to_two_digits_in_rank_order(self):
+        assert variant_store.variant_key(1) == "v01"
+        assert variant_store.variant_key(2) == "v02"
+        assert variant_store.variant_key(10) == "v10"
 
-        assert first == second
+    def test_one_parents_ranked_variants_get_v01_v02_in_rank_order(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+        two = [_variant(rank=1, changed_positions="H:N107D"),
+               _variant(rank=2, changed_positions="H:N108D")]
 
-    def test_two_variants_of_one_parent_with_different_edits_never_collide(self):
-        # The naive hash(parent + blockId) collides here — every variant of
-        # one parent shares both — which is why changedPositions is an
-        # ingredient.
-        first = variant_store.variant_key("clone-1", BLOCK_ID, "H:N107D")
-        second = variant_store.variant_key("clone-1", BLOCK_ID, "H:N108D")
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(str(path), "clone-1", BLOCK_ID, two)
 
-        assert first != second
+        assert [r["variantKey"] for r in _rows_of(path)] == ["v01", "v02"]
 
-    def test_two_parents_sharing_an_identical_edit_string_get_different_keys(self):
-        first = variant_store.variant_key("clone-1", BLOCK_ID, "H:N107D")
-        second = variant_store.variant_key("clone-2", BLOCK_ID, "H:N107D")
+    def test_block_id_is_its_own_column_not_a_key_ingredient(self, tmp_path):
+        # A different blockId changes the emitted `blockId` column, never
+        # the ordinal `variantKey` — the third axis and the variant axis
+        # are independent, per `073-decision-the-block-id-becomes-an-axis`.
+        path = tmp_path / "variants.tsv"
 
-        assert first != second
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(str(path), "clone-1", "block-abc", [_variant(rank=1)])
+        variant_store.append_variants_tsv(str(path), "clone-2", "block-xyz", [_variant(rank=1)])
 
-    def test_a_different_block_id_changes_the_key(self):
-        first = variant_store.variant_key("clone-1", "block-abc", "H:N107D")
-        second = variant_store.variant_key("clone-1", "block-xyz", "H:N107D")
-
-        assert first != second
+        rows = _rows_of(path)
+        assert [r["blockId"] for r in rows] == ["block-abc", "block-xyz"]
+        assert [r["variantKey"] for r in rows] == ["v01", "v01"]
 
     def test_clonotype_key_and_variant_key_are_unique_across_the_whole_file(self, tmp_path):
         path = tmp_path / "variants.tsv"

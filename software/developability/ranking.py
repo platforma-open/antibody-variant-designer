@@ -7,28 +7,39 @@ pass, and its own thresholds only order and truncate.
 
 There is no paratope model and no binding-affinity prediction anywhere in
 this package, so `binding_risk` is a band, not a score: a CDR edit at a
-position AntiFold tolerates poorly, or at a site the structure prediction
-itself was unsure about, is `High`; a framework edit with neither problem
-is `Low`; everything else is `Medium`. `low_tolerance_floor` is the
-perplexity below which a position counts as poorly tolerated for this
-banding — the same number, on the same scale, `candidates.Candidate.
-tolerance` already carries.
+low-tolerance position, or at a site the structure prediction itself was
+unsure about, is `High`; a framework edit with either problem is `Medium`;
+everything else is `Low`. A position counts as low-tolerance for `Candidate.
+tolerance`'s own antibody when its AntiFold perplexity sits in the bottom
+third of that antibody's own tolerance table, or at/below `low_tolerance_
+floor` — either arm alone is enough, and `_low_tolerance_positions` computes
+both over the whole table so filtering candidates first never shrinks the
+third.
+
+The rank key is a candidate's own structural tolerance (best first, ties
+broken by `changed_positions` for determinism) — the binding-risk band is
+reported alongside every variant, but it is not what orders them.
 
 `epistasis_rescore_top_k` exists because the per-candidate tolerance is
-the worst single edited position, which says nothing about a multi-edit
+the mean over its edited positions, which says nothing about a multi-edit
 candidate's edits interacting with each other. Re-scoring every candidate
 properly would need a model this package does not have, so instead only the
-leading `epistasis_rescore_top_k` candidates (by the initial
-band-then-tolerance order) are re-sorted among themselves, penalizing each
-extra edit past the first — a deliberately blunt proxy for an interaction
-effect this package cannot actually compute. The penalty only reorders
-that leading window; a candidate outside it never moves, and no
-candidate's reported structural tolerance changes because of it.
+leading `epistasis_rescore_top_k` candidates (by the initial tolerance
+order) are re-sorted among themselves, penalizing each extra edit past the
+first — a deliberately blunt proxy for an interaction effect this package
+cannot actually compute. The penalty only reorders that leading window; a
+candidate outside it never moves, and no candidate's reported structural
+tolerance changes because of it.
 
 Rendering a variant's sequence needs the residue index as well as the
 edits: the wild-type residues at every unedited position are what the edits
-are applied over, and the index is the only place they are.
+are applied over, and the index is the only place they are. The same index
+also derives whether the antibody is a VHH — no residue carries the `L`
+role — the same test `antifold.pick_chains` already makes, so this module
+never carries that as a boundary field.
 """
+
+import math
 
 import candidates
 import residue_store
@@ -44,19 +55,34 @@ STATUS = "unvalidated-hypothesis"
 # re-scoring the leading window — see the module docstring.
 EPISTASIS_EDIT_PENALTY = 1.0
 
-_BAND_ORDER = {"Low": 0, "Medium": 1, "High": 2}
+
+def _low_tolerance_positions(tolerance_lookup: dict, floor: float) -> set:
+    """The `(chain, imgt)` keys counting as low-tolerance for THIS
+    antibody: the bottom third of its own perplexity distribution, plus
+    everything at or below `floor`. The population is the whole tolerance
+    table — `rank_variants` already receives one parent's candidates only,
+    so this is that parent's full table, not the candidate set filtering
+    would shrink."""
+    perplexities = sorted(row["perplexity"] for row in tolerance_lookup.values())
+    n = len(perplexities)
+    threshold = perplexities[max(0, math.ceil(n / 3) - 1)] if n else None
+    return {
+        key
+        for key, row in tolerance_lookup.items()
+        if row["perplexity"] <= floor or (threshold is not None and row["perplexity"] <= threshold)
+    }
 
 
-def binding_risk(candidate: candidates.Candidate, low_tolerance_floor: float) -> str:
-    """`Low` / `Medium` / `High` from the candidate's region, its
-    structural tolerance against `low_tolerance_floor`, and its
-    low-confidence warning — see the module docstring for why this is a
-    band and not a number."""
+def binding_risk(candidate: candidates.Candidate, low_tolerance_positions: set) -> str:
+    """`Low` / `Medium` / `High` from the candidate's region, whether any
+    of its edited positions is low-tolerance, and its low-confidence
+    warning — see the module docstring for why this is a band and not a
+    number."""
     is_cdr = candidate.region is not None and candidate.region.startswith("CDR")
-    is_low_tolerance = candidate.tolerance < low_tolerance_floor
+    is_low_tolerance = any((e.chain, e.imgt) in low_tolerance_positions for e in candidate.edits)
     if is_cdr:
         return "High" if (is_low_tolerance or candidate.low_confidence) else "Medium"
-    return "Medium" if (is_low_tolerance and candidate.low_confidence) else "Low"
+    return "Medium" if is_low_tolerance else "Low"
 
 
 def _epistasis_adjusted_tolerance(candidate: candidates.Candidate) -> float:
@@ -82,24 +108,27 @@ def build_variant_sequence(
 def rank_variants(
     candidate_list: list[candidates.Candidate],
     residues: list[residue_store.Residue],
+    tolerance_lookup: dict,
     variants_per_parent: int,
     low_tolerance_floor: float,
     epistasis_rescore_top_k: int,
 ) -> list[variant_store.Variant]:
-    """Band every candidate, order by band then by tolerance (best first),
-    re-sort the leading `epistasis_rescore_top_k` window by the edit-count
-    penalty, then keep the top `variants_per_parent`. Rank restarts at 1
-    here, because one call already covers exactly one parent's
-    candidates."""
-    scored = [(c, binding_risk(c, low_tolerance_floor)) for c in candidate_list]
-    scored.sort(
-        key=lambda pair: (_BAND_ORDER[pair[1]], -pair[0].tolerance, pair[0].changed_positions)
-    )
+    """Order by structural tolerance (best first, ties broken by
+    `changed_positions` for determinism), re-sort the leading
+    `epistasis_rescore_top_k` window by the edit-count penalty, then keep
+    the top `variants_per_parent`. Rank restarts at 1 here, because one
+    call already covers exactly one parent's candidates. Band every
+    candidate for reporting, but the band decides no order here."""
+    low_tolerance_positions = _low_tolerance_positions(tolerance_lookup, low_tolerance_floor)
+    is_vhh = not any(r.chain_role == "L" for r in residues)
+    chain = "H" if is_vhh else "H,L"
+
+    scored = [(c, binding_risk(c, low_tolerance_positions)) for c in candidate_list]
+    scored.sort(key=lambda pair: (-pair[0].tolerance, pair[0].changed_positions))
 
     window, rest = scored[:epistasis_rescore_top_k], scored[epistasis_rescore_top_k:]
     window.sort(
         key=lambda pair: (
-            _BAND_ORDER[pair[1]],
             -_epistasis_adjusted_tolerance(pair[0]),
             pair[0].changed_positions,
         )
@@ -110,6 +139,7 @@ def rank_variants(
         variants.append(
             variant_store.Variant(
                 rank=rank,
+                chain=chain,
                 addressed_target=candidate.addressed_target,
                 changed_positions=candidate.changed_positions,
                 variant_sequence=build_variant_sequence(residues, candidate.edits),
