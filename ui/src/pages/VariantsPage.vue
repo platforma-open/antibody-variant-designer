@@ -41,7 +41,8 @@ const variantsTableOutput = computed(() => app.model.outputs.variantsTable);
 // `objective`, `variantId`) both change the header set AG-Grid would
 // otherwise reuse stale. v5 is the identity change: the three axes collapsed
 // into the variant's own clonotype key, and the parent moved into the
-// `parentCloneId` / `parentClonotypeKey` columns.
+// `parentCloneId` / `parentClonotypeKey` columns. v6 drops `Variant ID` from
+// the default view — a cached column order would keep showing it.
 //
 // It is `undefined` until a run produces a table. That is what makes the
 // placeholder work at all: only a null `sourceId` lets the settings report
@@ -52,7 +53,7 @@ const variantsTableOutput = computed(() => app.model.outputs.variantsTable);
 const variantsTableSettings = usePlDataTableSettingsV2({
   model: () => variantsTableOutput.value,
   sourceId: () =>
-    variantsTableOutput.value.ok && variantsTableOutput.value.value ? "avd-variants-v5" : undefined,
+    variantsTableOutput.value.ok && variantsTableOutput.value.value ? "avd-variants-v6" : undefined,
 });
 
 // The row-detail view's own value columns (`VARIANT_VALUE_COLUMNS`) are read

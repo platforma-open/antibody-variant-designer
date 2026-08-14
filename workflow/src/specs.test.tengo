@@ -53,10 +53,14 @@ TestVariantColumns := func() {
 	settings := specs.buildVariantsXsvSettings(BLOCK_ID)
 	byColumn := _byColumn(settings.columns)
 
-	// Sixteen value columns on one axis: A-0018's whole twelve, then the four
-	// identity columns that carry what the axes used to — the variant's own
-	// clone id, the parent binding in both spellings, and the ordinal.
-	test.isEqual(16, len(settings.columns))
+	// Fifteen value columns on one axis: A-0018's twelve less `variantId`,
+	// which the vendor's CSV carries and no table does, then the four identity
+	// columns that carry what the axes used to — the variant's own clone id,
+	// the parent binding in both spellings, and the ordinal.
+	test.isEqual(15, len(settings.columns))
+	for c in settings.columns {
+		test.isTrue(c.column != "variantId")
+	}
 
 	// The variant's readable id is spelled `pl7.app/label`, so it labels this
 	// group's axis for every table and every downstream consumer.
@@ -100,8 +104,6 @@ TestVariantColumns := func() {
 	test.isEqual("pl7.app/liabilities/lowConfidence", byColumn.lowConfidenceWarning.spec.name)
 	test.isEqual("pl7.app/antibodyVariantDesigner/status", byColumn.status.spec.name)
 
-	// The three columns this TODO adds.
-	test.isEqual("pl7.app/antibodyVariantDesigner/variantId", byColumn.variantId.spec.name)
 	test.isEqual("pl7.app/antibodyVariantDesigner/chain", byColumn.chain.spec.name)
 	test.isEqual("pl7.app/antibodyVariantDesigner/objective", byColumn.objective.spec.name)
 
@@ -115,6 +117,11 @@ TestVariantColumns := func() {
 	// Hidden is not absent: both stay in the data and in the CSV.
 	test.isEqual("hidden", byColumn.variantSequence.spec.annotations["pl7.app/table/visibility"])
 	test.isEqual("hidden", byColumn.status.spec.annotations["pl7.app/table/visibility"])
+
+	// The parent's raw key sits off the default view and stays switchable: the
+	// readable clone ids name the row on screen, but a key still has readers.
+	test.isEqual("optional",
+		byColumn.parentClonotypeKey.spec.annotations["pl7.app/table/visibility"])
 }
 
 TestLiabilityGroup := func() {
@@ -140,12 +147,21 @@ TestLiabilityGroup := func() {
 	// column, on a different axis, so the two cannot join by accident.
 	test.isEqual("String", byColumn.lowConfidence.spec.valueType)
 
-	// The parent's readable name, carried as a value column because the parent
-	// axis is upstream's and its label is out of the block's reach. Same name
-	// as the variant group's column, again on a different axis.
-	test.isEqual(
-		"pl7.app/antibodyVariantDesigner/parentCloneId", byColumn.parentCloneId.spec.name)
-	test.isEqual("Parent Clone Id", byColumn.parentCloneId.spec.annotations["pl7.app/label"])
+	// The parent's readable name LABELS the parent axis, rather than standing
+	// beside it: the block emits it because upstream's own label is out of the
+	// block's reach, and the grid renders a single-axis label column inside the
+	// axis's column.
+	test.isEqual("pl7.app/label", byColumn.parentCloneId.spec.name)
+
+	// The axis header follows the values it now shows — upstream's own
+	// "Clonotype ID" named the content hash the label replaced. The axis is
+	// relabelled through a copy: the caller hands the same spec to the variant
+	// group's parent binding, so a write into it would rename that too.
+	test.isEqual("Clone Id", settings.axes[0].spec.annotations["pl7.app/label"])
+	test.isEqual("Clonotype", CLONOTYPE_AXIS.annotations["pl7.app/label"])
+
+	// Region leads the value columns; the rest carry no priority.
+	test.isEqual("100000", byColumn.region.spec.annotations["pl7.app/table/orderPriority"])
 }
 
 TestEveryColumnCarriesTheBlockId := func() {
@@ -210,9 +226,15 @@ TestSynthesisCsvColumnOrder := func() {
 
 	// The contract is the declaration list's leading run, which is what lets
 	// the rows carry no position number: `csvColumnOrder`'s output is the
-	// import's own column order, unchanged — here, the whole list.
+	// import's own column order, unchanged. `variantId` is the one row the
+	// import does not carry at all, so it is skipped rather than matched.
 	imported := specs.buildVariantsXsvSettings(BLOCK_ID).columns
-	for i, c in order {
-		test.isEqual(imported[i].column, c.column)
+	i := 0
+	for c in order {
+		if c.column != "variantId" {
+			test.isEqual(imported[i].column, c.column)
+			i++
+		}
 	}
+	test.isEqual(11, i)
 }

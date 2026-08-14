@@ -11,7 +11,7 @@ import {
 import { computed, ref } from "vue";
 import BlockSettings from "../components/BlockSettings.vue";
 import { useApp } from "../app";
-import { LIABILITY_VALUE_COLUMNS } from "../columns";
+import { COL_LABEL, LIABILITY_VALUE_COLUMNS } from "../columns";
 import { findRowByKey, useTableRows } from "../composables/useTableRows";
 
 const app = useApp();
@@ -22,8 +22,10 @@ const liabilitiesTableOutput = computed(() => app.model.outputs.liabilitiesTable
 // cached column order rather than silently reusing a stale one. Bumped to v2
 // when the model started joining upstream's `pl7.app/label` ("Clone Id") onto
 // the parent axis — a new header AG-Grid would otherwise reuse stale. v3 is
-// the "Parent Clone Id" column the workflow now joins onto the flat table
-// instead, since that label is not reachable from the pool.
+// the "Parent Clone Id" column the workflow joins onto the flat table instead,
+// since that label is not reachable from the pool. v4 turns that column into
+// the parent axis's own label and puts Region first among the value columns:
+// one column leaves the header set and the rest change places.
 //
 // It is `undefined` until a run produces a table — see `VariantsPage.vue` for
 // why the running placeholder depends on that.
@@ -31,11 +33,11 @@ const liabilitiesTableSettings = usePlDataTableSettingsV2({
   model: () => liabilitiesTableOutput.value,
   sourceId: () =>
     liabilitiesTableOutput.value.ok && liabilitiesTableOutput.value.value
-      ? "avd-liabilities-v3"
+      ? "avd-liabilities-v4"
       : undefined,
 });
 
-const rowValueNames = Object.values(LIABILITY_VALUE_COLUMNS);
+const rowValueNames = [COL_LABEL, ...Object.values(LIABILITY_VALUE_COLUMNS)];
 const liabilityRows = useTableRows(liabilitiesTableOutput, rowValueNames);
 
 const selectedRowKey = ref<PTableKey>();
@@ -45,7 +47,7 @@ const selectedParentLabel = computed(() => {
   if (!row) return undefined;
   // The clonotype key is the fallback, never the first choice: it is the
   // parent's content hash, which names nothing a human recognises.
-  return String(row.values[LIABILITY_VALUE_COLUMNS.parentCloneId] ?? row.axesKey[0] ?? "");
+  return String(row.values[COL_LABEL] ?? row.axesKey[0] ?? "");
 });
 
 function selectParentRow(key?: PTableKey) {

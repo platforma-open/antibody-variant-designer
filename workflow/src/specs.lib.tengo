@@ -5,8 +5,11 @@
 // variant-keyed table can never show it and the Parents page has no other
 // source.
 //
-// The parent axis is passed in rather than built here, so upstream's own
-// `pl7.app/label` joins onto it and this block emits no label of its own.
+// The parent axis is passed in rather than built here, because a row of this
+// group IS one of upstream's clonotypes and must join back to it. Its label is
+// this block's own, though: upstream's `pl7.app/label` sits in the result pool
+// the block's table cannot read (`model/src/index.ts`), so the group carries a
+// label column built from the same value at import time.
 
 ll := import("@platforma-sdk/workflow-tengo:ll")
 slices := import("@platforma-sdk/workflow-tengo:slices")
@@ -87,6 +90,9 @@ BINDING_RISK_DEFAULT_CUTOFF := "[\"Low\",\"Medium\"]"
 // column. `csvHeader` names the header the vendor's contract fixes — a
 // spelling independent of both the PColumn name and the table's label.
 //
+// One row is `{column, csvHeader, csvOnly: true}` with no spec at all: the
+// vendor's form still wants it, no table does.
+//
 // **`A-0018`'s whole column set is this list, in the atom's own order**, so
 // the contract is the list itself, top to bottom, and every row declares a
 // `csvHeader` — that is why no row carries a position number: a number beside
@@ -101,21 +107,15 @@ variantColumns := func(blockId) {
 		{
 			column: "variantId",
 			csvHeader: "variantId",
-			// Built in `main.tpl.tengo`, not derived here: `<parentClonotypeId>:
-			// <variantKey>`, concatenated on the flat table before the axes exist.
-			// Visible: it is the one cell that identifies a row on its own, and
-			// the grid's search box only searches columns that are on screen
-			// (`ui-vue/.../sources/table-state-v2.ts:212` filters over the
-			// *visible* set).
-			spec: {
-				name: "pl7.app/antibodyVariantDesigner/variantId",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Variant ID",
-					"pl7.app/description": "`<parentClonotypeId>:<variantKey>` — the stable id that survives the synthesis → NGS round-trip."
-				}
-			}
+			// The vendor's row, and nothing else: `csvOnly` keeps it out of the
+			// PFrame, so no table ever shows it. `main.tpl.tengo` still builds
+			// it on the flat table as `<parentClonotypeId>:<variantKey>`, which
+			// is where the CSV reads it from.
+			//
+			// The variant carries its own `C-XXXXX` clone id now, and that is
+			// what identifies a row everywhere a human looks. This string stays
+			// only because the synthesis order form's header set is fixed.
+			csvOnly: true
 		},
 		{
 			column: "rank",
@@ -435,12 +435,17 @@ liabilityColumns := func(blockId) {
 		},
 		{
 			column: "region",
+			// First of the value columns, right behind the two axes: where the
+			// liability sits is what a reader groups the rows by. The rest carry
+			// no priority and fall in behind it alphabetically, which is the
+			// grid's own default.
 			spec: {
 				name: "pl7.app/liabilities/region",
 				valueType: "String",
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
-					"pl7.app/label": "Region"
+					"pl7.app/label": "Region",
+					"pl7.app/table/orderPriority": "100000"
 				}
 			}
 		},
@@ -485,25 +490,33 @@ liabilityColumns := func(blockId) {
 			}
 		},
 
-		// ── The identity column, after the six liability columns ──
+		// ── The parent axis's label, after the six liability columns ──
 		{
 			column: "parentCloneId",
-			// The parent in the spelling a human reads, joined onto the flat
-			// table in `main.tpl.tengo` from upstream's own `pl7.app/label` —
-			// the same column, from the same source, as the variant group's
-			// `parentCloneId`. It carries the same name on purpose: it is the
-			// same value, and the two sit on different axes so they cannot
-			// join. Without it this group's parent axis shows a content hash,
-			// because upstream's label lives in the result pool the block's
-			// table cannot read.
+			// The parent in the spelling a human reads (`C-EWOQA`), joined onto
+			// the flat table in `main.tpl.tengo` from upstream's own
+			// `pl7.app/label` — the same value the variant group's
+			// `parentCloneId` carries.
+			//
+			// Spelled `pl7.app/label`, so it LABELS the parent axis instead of
+			// standing beside it: the grid drops a single-axis label column from
+			// the displayed set and renders its values in that axis's own column
+			// (`ui-vue/.../sources/table-source-v2.ts:445-486`). Without it the
+			// axis shows the content hash, because upstream's label lives in the
+			// result pool the block's table cannot read.
+			//
+			// It labels an axis this block did not mint, which is the one thing
+			// the variant group's axis name avoids on purpose (see
+			// VARIANT_KEY_STRUCTURE above). It is safe in this direction: the
+			// value IS upstream's own label for that same axis, so a consumer
+			// holding both sees one spelling twice, never two spellings.
 			spec: {
-				name: "pl7.app/antibodyVariantDesigner/parentCloneId",
+				name: "pl7.app/label",
 				valueType: "String",
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
-					"pl7.app/label": "Parent Clone Id",
-					"pl7.app/description": "The clone this liability was found on, as upstream names it.",
-					"pl7.app/table/orderPriority": "110000"
+					"pl7.app/label": "Clone Id",
+					"pl7.app/description": "The clone this liability was found on, as upstream names it."
 				}
 			}
 		}
@@ -525,13 +538,20 @@ declaresCsvHeader := func(d) {
 	return !is_undefined(d.csvHeader)
 }
 
+// A row the vendor's CSV carries but no PColumn does. It holds a `csvHeader`
+// and no `spec`, so it stays in the contract order below while `buildXsvColumns`
+// leaves it out of the import.
+emitsPColumn := func(d) {
+	return is_undefined(d.csvOnly)
+}
+
 // A row to an `xsv` import entry: the header to read from, and the row's own
 // spec passed through untouched. `id` is left off — the importer defaults it to
 // `column` (`pframes/util.lib.tengo:118` declares it `id,?`, `:281-287` falls
 // back to `column`), so spelling it out is a second copy of the header that is
 // free to drift from it.
 buildXsvColumns := func(declarations) {
-	return slices.map(declarations, func(d) {
+	return slices.map(slices.filter(declarations, emitsPColumn), func(d) {
 		return {
 			column: d.column,
 			spec: d.spec
@@ -558,13 +578,43 @@ buildVariantsXsvSettings := func(blockId) {
 }
 
 /**
+ * Upstream's clonotype axis under the name its values now read as.
+ *
+ * The axis arrives labelled "Clonotype ID", which named a content hash. The
+ * `pl7.app/label` column above puts the short `C-XXXXX` in that same column,
+ * so the header has to follow the values. Only the annotation changes, and an
+ * axis is identified by name, type and domain alone — the relabelled axis
+ * still joins to upstream's.
+ *
+ * A copy, never a write into the caller's map: the same spec is handed to the
+ * variant group's parent binding in `main.tpl.tengo`.
+ */
+_labelledClonotypeAxis := func(clonotypeAxisSpec) {
+	out := {}
+	for k, v in clonotypeAxisSpec {
+		out[k] = v
+	}
+
+	annotations := {}
+	if !is_undefined(clonotypeAxisSpec.annotations) {
+		for k, v in clonotypeAxisSpec.annotations {
+			annotations[k] = v
+		}
+	}
+	annotations["pl7.app/label"] = "Clone Id"
+	out.annotations = annotations
+
+	return out
+}
+
+/**
  * `xsv.importFile` settings for `liabilities.tsv` — the liability group,
  * carrying every triaged liability including the declined ones.
  */
 buildLiabilitiesXsvSettings := func(blockId, clonotypeAxisSpec) {
 	return {
 		axes: [
-			{ column: "clonotypeKey", spec: clonotypeAxisSpec },
+			{ column: "clonotypeKey", spec: _labelledClonotypeAxis(clonotypeAxisSpec) },
 			{ column: "liabilityKey", spec: liabilityAxisSpec }
 		],
 		columns: buildXsvColumns(liabilityColumns(blockId)),

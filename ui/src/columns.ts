@@ -1,9 +1,10 @@
 /** PColumn value-column names this UI reads by name, kept in one place so
  *  the Variants/Parents pages and the comparison modal spell them alike. */
 
-/** The VARIANT's own `C-XXXXX` — the label of the variant group's axis. The
- *  liabilities table carries no label of its own: its axis is upstream's, so
- *  both pages read the parent through the `parentCloneId` column instead. */
+/** The `C-XXXXX` short id — the label of whichever axis the group is keyed on.
+ *  On the Variants table that is the variant's own; on the Parents table it is
+ *  the parent's, emitted by this block because upstream's label is out of the
+ *  model's reach. Both pages read the row's short id under this one name. */
 export const COL_LABEL = "pl7.app/label";
 
 /** Group A and B — the variant table's value columns. */
@@ -21,9 +22,10 @@ export const VARIANT_VALUE_COLUMNS = {
   parentClonotypeKey: "pl7.app/antibodyVariantDesigner/parentClonotypeKey",
 } as const;
 
-/** Group C — the parent-keyed liabilities table's value columns. */
+/** Group C — the parent-keyed liabilities table's value columns. The parent's
+ *  short id is not here: it is spelled `pl7.app/label` and read as `COL_LABEL`,
+ *  the same as the variant table's. */
 export const LIABILITY_VALUE_COLUMNS = {
-  parentCloneId: "pl7.app/antibodyVariantDesigner/parentCloneId",
   liabilityType: "pl7.app/liabilities/liabilityType",
   verdict: "pl7.app/liabilities/verdict",
   region: "pl7.app/liabilities/region",
