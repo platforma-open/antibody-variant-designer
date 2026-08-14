@@ -1,8 +1,9 @@
 // The emitted PColumn specs are a contract with every downstream block and
 // with the synthesis vendor, and nothing else in the build checks a spec
-// string. These cases pin the parts a rename would break silently: the
-// three variant-group axis names, one column name per group, the blockId
-// context domain on every column, and the CSV's full A-0018 header set.
+// string. These cases pin the parts a rename would break silently: each
+// group's axis names, one column name per group, the identity columns that
+// carry the parent binding, the blockId context domain on every column, and
+// the CSV's full A-0018 header set.
 
 test := import("@platforma-sdk/workflow-tengo:test")
 specs := import(":specs")
@@ -26,35 +27,45 @@ _byColumn := func(columns) {
 }
 
 TestVariantAxes := func() {
-	settings := specs.buildVariantsXsvSettings(BLOCK_ID, CLONOTYPE_AXIS)
+	settings := specs.buildVariantsXsvSettings(BLOCK_ID)
 
-	// The parent leads, because many variants map to one parent; the block id
-	// trails, third — the parent axis still leads
+	// One axis, the variant's own clonotype key — the group has a clonotype's
+	// shape, and the parent rides along as binding columns.
+	test.isEqual(1, len(settings.axes))
+	test.isEqual("variantCloneKey", settings.axes[0].column)
+	test.isEqual("String", settings.axes[0].spec.type)
+
+	// Never `pl7.app/vdj/clonotypeKey`: label discovery binds a label column
+	// to an axis by axis name alone, so reusing it would pull the PARENT's
+	// label onto this axis. Never `pl7.app/variantKey` either — four blocks
+	// compare that exact string to decide a row is peptide data.
+	test.isEqual("pl7.app/antibodyVariantDesigner/variantCloneKey", settings.axes[0].spec.name)
+
+	// The run identity lives in the axis domain now, not in a separate axis:
+	// two runs hash the same designed sequence to the same value, so only the
+	// domain keeps their rows apart
 	// (073-decision-the-block-id-becomes-an-axis-not-a-variant-key-ingredient).
-	test.isEqual(3, len(settings.axes))
-	test.isEqual("clonotypeKey", settings.axes[0].column)
-	test.isEqual("pl7.app/vdj/scClonotypeKey", settings.axes[0].spec.name)
-
-	// Never `pl7.app/variantKey` — four blocks compare that exact string to
-	// decide a row is peptide data.
-	test.isEqual("variantKey", settings.axes[1].column)
-	test.isEqual("pl7.app/antibodyVariantDesigner/variantKey", settings.axes[1].spec.name)
-	test.isEqual("String", settings.axes[1].spec.type)
-	test.isEqual("Variant ID", settings.axes[1].spec.annotations["pl7.app/label"])
-
-	// The run identity, its own axis — distinct from the `pl7.app/blockId`
-	// context domain every column also carries.
-	test.isEqual("blockId", settings.axes[2].column)
-	test.isEqual("pl7.app/antibodyVariantDesigner/blockKey", settings.axes[2].spec.name)
+	test.isEqual(BLOCK_ID, settings.axes[0].spec.domain["pl7.app/vdj/clonotypingRunId"])
+	test.isTrue(!is_undefined(settings.axes[0].spec.domain["pl7.app/vdj/clonotypeKey/structure"]))
 }
 
 TestVariantColumns := func() {
-	settings := specs.buildVariantsXsvSettings(BLOCK_ID, CLONOTYPE_AXIS)
+	settings := specs.buildVariantsXsvSettings(BLOCK_ID)
 	byColumn := _byColumn(settings.columns)
 
-	// Twelve value columns, on three axes — A-0018's whole set plus the
-	// block-id axis.
-	test.isEqual(12, len(settings.columns))
+	// Sixteen value columns on one axis: A-0018's whole twelve, then the four
+	// identity columns that carry what the axes used to — the variant's own
+	// clone id, the parent binding in both spellings, and the ordinal.
+	test.isEqual(16, len(settings.columns))
+
+	// The variant's readable id is spelled `pl7.app/label`, so it labels this
+	// group's axis for every table and every downstream consumer.
+	test.isEqual("pl7.app/label", byColumn.variantCloneId.spec.name)
+	test.isEqual("pl7.app/antibodyVariantDesigner/parentCloneId", byColumn.parentCloneId.spec.name)
+	test.isEqual(
+		"pl7.app/antibodyVariantDesigner/parentClonotypeKey",
+		byColumn.parentClonotypeKey.spec.name)
+	test.isEqual("pl7.app/antibodyVariantDesigner/variantKey", byColumn.variantKey.spec.name)
 
 	// The designed sequence reuses the sequence name every consumer reads,
 	// qualified by feature and alphabet rather than renamed.
@@ -65,7 +76,7 @@ TestVariantColumns := func() {
 	// The one column with a `domain`, and it holds only the two keys sequence
 	// consumers match on — never the block id.
 	test.isEqual(2, len(byColumn.variantSequence.spec.domain))
-	for c in specs.buildVariantsXsvSettings(BLOCK_ID, CLONOTYPE_AXIS).columns {
+	for c in specs.buildVariantsXsvSettings(BLOCK_ID).columns {
 		if c.column != "variantSequence" {
 			test.isTrue(is_undefined(c.spec.domain))
 		}
@@ -117,7 +128,7 @@ TestLiabilityGroup := func() {
 	test.isEqual("liabilityKey", settings.axes[1].column)
 	test.isEqual("pl7.app/antibodyVariantDesigner/liabilityKey", settings.axes[1].spec.name)
 
-	test.isEqual(6, len(settings.columns))
+	test.isEqual(7, len(settings.columns))
 	test.isEqual("pl7.app/liabilities/liabilityType", byColumn.liabilityType.spec.name)
 	test.isEqual("pl7.app/liabilities/verdict", byColumn.verdict.spec.name)
 	test.isEqual("pl7.app/liabilities/region", byColumn.region.spec.name)
@@ -128,11 +139,18 @@ TestLiabilityGroup := func() {
 	// The same name and the same "yes"/"no" grammar as the variant group's
 	// column, on a different axis, so the two cannot join by accident.
 	test.isEqual("String", byColumn.lowConfidence.spec.valueType)
+
+	// The parent's readable name, carried as a value column because the parent
+	// axis is upstream's and its label is out of the block's reach. Same name
+	// as the variant group's column, again on a different axis.
+	test.isEqual(
+		"pl7.app/antibodyVariantDesigner/parentCloneId", byColumn.parentCloneId.spec.name)
+	test.isEqual("Parent Clone Id", byColumn.parentCloneId.spec.annotations["pl7.app/label"])
 }
 
 TestEveryColumnCarriesTheBlockId := func() {
 	both := append(
-		specs.buildVariantsXsvSettings(BLOCK_ID, CLONOTYPE_AXIS).columns,
+		specs.buildVariantsXsvSettings(BLOCK_ID).columns,
 		specs.buildLiabilitiesXsvSettings(BLOCK_ID, CLONOTYPE_AXIS).columns...)
 
 	// Reusing a shared segment is only safe because of this key: two blocks
@@ -149,7 +167,7 @@ TestEveryColumnCarriesTheBlockId := func() {
 
 TestNoValueTypeIsBooleanOrObject := func() {
 	both := append(
-		specs.buildVariantsXsvSettings(BLOCK_ID, CLONOTYPE_AXIS).columns,
+		specs.buildVariantsXsvSettings(BLOCK_ID).columns,
 		specs.buildLiabilitiesXsvSettings(BLOCK_ID, CLONOTYPE_AXIS).columns...)
 
 	// Booleans travel as "yes"/"no" strings and no column carries JSON.
@@ -170,8 +188,9 @@ TestSynthesisCsvColumnOrder := func() {
 	// selection.
 	order := specs.csvColumnOrder(BLOCK_ID)
 
-	// All twelve variant columns declare a `csvHeader` — the full A-0018 set,
-	// `humannessScore` held back for V1.
+	// Twelve of the sixteen variant columns declare a `csvHeader` — the full
+	// A-0018 set, `humannessScore` held back for V1. The four identity
+	// columns sit after that run, so the vendor's set cannot grow by accident.
 	test.isEqual(12, len(order))
 
 	headers := []
@@ -192,7 +211,7 @@ TestSynthesisCsvColumnOrder := func() {
 	// The contract is the declaration list's leading run, which is what lets
 	// the rows carry no position number: `csvColumnOrder`'s output is the
 	// import's own column order, unchanged — here, the whole list.
-	imported := specs.buildVariantsXsvSettings(BLOCK_ID, CLONOTYPE_AXIS).columns
+	imported := specs.buildVariantsXsvSettings(BLOCK_ID).columns
 	for i, c in order {
 		test.isEqual(imported[i].column, c.column)
 	}

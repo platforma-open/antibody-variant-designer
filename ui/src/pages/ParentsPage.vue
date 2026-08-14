@@ -2,22 +2,40 @@
 import type { PlStructureViewerProps } from "@milaboratories/structure-viewer";
 import { PlStructureViewer } from "@milaboratories/structure-viewer";
 import type { PTableKey } from "@platforma-sdk/model";
-import { PlAgDataTableV2, PlBlockPage, usePlDataTableSettingsV2 } from "@platforma-sdk/ui-vue";
+import {
+  PlAgDataTableV2,
+  PlBlockPage,
+  PlTooltip,
+  usePlDataTableSettingsV2,
+} from "@platforma-sdk/ui-vue";
 import { computed, ref } from "vue";
+import BlockSettings from "../components/BlockSettings.vue";
 import { useApp } from "../app";
-import { COL_LABEL, LIABILITY_VALUE_COLUMNS } from "../columns";
+import { LIABILITY_VALUE_COLUMNS } from "../columns";
 import { findRowByKey, useTableRows } from "../composables/useTableRows";
 
 const app = useApp();
 
 const liabilitiesTableOutput = computed(() => app.model.outputs.liabilitiesTable);
 
+// `sourceId` is versioned so a PColumn shape change invalidates AG-Grid's
+// cached column order rather than silently reusing a stale one. Bumped to v2
+// when the model started joining upstream's `pl7.app/label` ("Clone Id") onto
+// the parent axis — a new header AG-Grid would otherwise reuse stale. v3 is
+// the "Parent Clone Id" column the workflow now joins onto the flat table
+// instead, since that label is not reachable from the pool.
+//
+// It is `undefined` until a run produces a table — see `VariantsPage.vue` for
+// why the running placeholder depends on that.
 const liabilitiesTableSettings = usePlDataTableSettingsV2({
   model: () => liabilitiesTableOutput.value,
-  sourceId: () => "avd-liabilities-v1",
+  sourceId: () =>
+    liabilitiesTableOutput.value.ok && liabilitiesTableOutput.value.value
+      ? "avd-liabilities-v3"
+      : undefined,
 });
 
-const rowValueNames = [COL_LABEL, ...Object.values(LIABILITY_VALUE_COLUMNS)];
+const rowValueNames = Object.values(LIABILITY_VALUE_COLUMNS);
 const liabilityRows = useTableRows(liabilitiesTableOutput, rowValueNames);
 
 const selectedRowKey = ref<PTableKey>();
@@ -25,7 +43,9 @@ const selectedRow = computed(() => findRowByKey(liabilityRows.value, selectedRow
 const selectedParentLabel = computed(() => {
   const row = selectedRow.value;
   if (!row) return undefined;
-  return String(row.values[COL_LABEL] ?? row.axesKey[0] ?? "");
+  // The clonotype key is the fallback, never the first choice: it is the
+  // parent's content hash, which names nothing a human recognises.
+  return String(row.values[LIABILITY_VALUE_COLUMNS.parentCloneId] ?? row.axesKey[0] ?? "");
 });
 
 function selectParentRow(key?: PTableKey) {
@@ -41,14 +61,25 @@ const viewerProps = ref<PlStructureViewerProps>();
 
 <template>
   <PlBlockPage title="Antibody Variant Designer — Parents">
-    <!-- Every triaged liability, including the ones triage declined to
-         fix — buried and hard-to-fix/structural sites — which never appear
-         on the variant-keyed Variants page. -->
+    <template #after-title>
+      <PlTooltip class="info" position="top">
+        <template #tooltip>
+          Every triaged liability for each parent, including the ones triage declined to fix —
+          buried sites and hard-to-fix/structural faults. A declined liability produces no variant,
+          so this is the only page that shows it; the Variants page never carries a row for it.
+        </template>
+      </PlTooltip>
+    </template>
+    <template #append>
+      <BlockSettings />
+    </template>
+
     <PlAgDataTableV2
       v-model="app.model.data.liabilitiesTableState"
       :settings="liabilitiesTableSettings"
       :show-export-button="true"
       not-ready-text="Run on a 3D structures dataset to see per-parent liabilities"
+      running-text="Scanning liabilities and reading fold tolerance for each parent."
       no-rows-text="No liabilities"
       @row-double-clicked="selectParentRow"
     />

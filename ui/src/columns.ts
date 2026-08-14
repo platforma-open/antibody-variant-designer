@@ -1,9 +1,12 @@
 /** PColumn value-column names this UI reads by name, kept in one place so
  *  the Variants/Parents pages and the comparison modal spell them alike. */
 
+/** The VARIANT's own `C-XXXXX` — the label of the variant group's axis. The
+ *  liabilities table carries no label of its own: its axis is upstream's, so
+ *  both pages read the parent through the `parentCloneId` column instead. */
 export const COL_LABEL = "pl7.app/label";
 
-/** Group A and B — the variant table's nine value columns. */
+/** Group A and B — the variant table's value columns. */
 export const VARIANT_VALUE_COLUMNS = {
   rank: "pl7.app/score",
   addressedTarget: "pl7.app/liabilities/addressedTarget",
@@ -14,10 +17,13 @@ export const VARIANT_VALUE_COLUMNS = {
   bindingRisk: "pl7.app/vdj/bindingRisk",
   lowConfidenceWarning: "pl7.app/liabilities/lowConfidence",
   status: "pl7.app/antibodyVariantDesigner/status",
+  parentCloneId: "pl7.app/antibodyVariantDesigner/parentCloneId",
+  parentClonotypeKey: "pl7.app/antibodyVariantDesigner/parentClonotypeKey",
 } as const;
 
-/** Group C — the parent-keyed liabilities table's six value columns. */
+/** Group C — the parent-keyed liabilities table's value columns. */
 export const LIABILITY_VALUE_COLUMNS = {
+  parentCloneId: "pl7.app/antibodyVariantDesigner/parentCloneId",
   liabilityType: "pl7.app/liabilities/liabilityType",
   verdict: "pl7.app/liabilities/verdict",
   region: "pl7.app/liabilities/region",

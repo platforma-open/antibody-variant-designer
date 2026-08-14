@@ -39,18 +39,28 @@ const variantsTableOutput = computed(() => app.model.outputs.variantsTable);
 // v2 when the variant axis gained a label; bumped again to v3 for TODO-3.2 —
 // a third axis (the run's block id) and three new value columns (`chain`,
 // `objective`, `variantId`) both change the header set AG-Grid would
-// otherwise reuse stale.
+// otherwise reuse stale. v5 is the identity change: the three axes collapsed
+// into the variant's own clonotype key, and the parent moved into the
+// `parentCloneId` / `parentClonotypeKey` columns.
+//
+// It is `undefined` until a run produces a table. That is what makes the
+// placeholder work at all: only a null `sourceId` lets the settings report
+// `pending: !model.stable` (`ui-vue/.../PlAgDataTable/types.ts:82`), and only
+// `pending` picks the running skeleton over the "not computed" cat
+// (`PlAgDataTableV2.vue:378`). A constant string here pins the grid to the
+// not-ready overlay for the whole run, so `running-text` below never shows.
 const variantsTableSettings = usePlDataTableSettingsV2({
   model: () => variantsTableOutput.value,
-  sourceId: () => "avd-variants-v3",
+  sourceId: () =>
+    variantsTableOutput.value.ok && variantsTableOutput.value.value ? "avd-variants-v5" : undefined,
 });
 
 // The row-detail view's own value columns (`VARIANT_VALUE_COLUMNS`) are read
 // once for the clicked row's comparison modal — `PlAgDataTableV2`'s click
 // events hand back only the axis key, never the row's other cells.
 // `findRowByKey`/`useTableRows` compare `axesKey` element-by-element and
-// never assume a fixed axis count, so the grid's third axis (block id) needs
-// no change here.
+// never assume a fixed axis count, so collapsing the three axes into the
+// variant's own clonotype key needs no change here.
 const rowValueNames = [COL_LABEL, ...Object.values(VARIANT_VALUE_COLUMNS)];
 const variantRows = useTableRows(variantsTableOutput, rowValueNames);
 
@@ -70,7 +80,11 @@ const comparisonProps = computed(() => {
   if (!row) return undefined;
   const v = row.values;
   return {
-    parentLabel: String(v[COL_LABEL] ?? row.axesKey[0] ?? ""),
+    // The parent, not the row: `pl7.app/label` on this table is the variant's
+    // own clone id now, and `axesKey[0]` is the variant's content hash.
+    parentLabel: String(
+      v[VARIANT_VALUE_COLUMNS.parentCloneId] ?? v[VARIANT_VALUE_COLUMNS.parentClonotypeKey] ?? "",
+    ),
     rank: v[VARIANT_VALUE_COLUMNS.rank] === null ? null : Number(v[VARIANT_VALUE_COLUMNS.rank]),
     addressedTarget: String(v[VARIANT_VALUE_COLUMNS.addressedTarget] ?? ""),
     changedPositions: String(v[VARIANT_VALUE_COLUMNS.changedPositions] ?? ""),
