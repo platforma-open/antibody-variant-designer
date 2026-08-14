@@ -79,16 +79,13 @@ export type SkipReason =
   | "backend-failed"
   | "no-candidate-cleared-motif";
 
-export type SkipSummaryRow = {
+/** One skipped parent, for the Skipped page.
+ *  `detail` is free text and empty for every reason except `backend-failed`
+ *  ([[068-decision-capture-the-caught-exception-text-in-the-skip-tsv]]):
+ *  the other six reasons are named, deterministic conditions already fully
+ *  explained by the reason itself. */
+export type SkippedClonotype = {
+  clonotypeKey: string;
   reason: SkipReason;
-  count: number;
-};
-
-/** Run-level reduce over the three skip outputs: per clonotype, the first
- *  non-empty reason in step order. One row per reason, including zero
- *  counts, so the UI can render every reason into a `PlAlert` without
- *  re-deriving the reason list itself. */
-export type SkipSummary = {
-  rows: SkipSummaryRow[];
-  totalSkipped: number;
+  detail: string;
 };
