@@ -1,19 +1,19 @@
 """End-to-end tests for `antifold.py` against the real vendored AntiFold
-package. Skipped whenever torch is absent — the whole `antifold` extra
-target's python (3.12), never this repo's default dev environment, so these
-never run under `uv run --group dev pytest`.
+package. The only test file in this package, and the only one that needs the
+heavy set: run it with `uv run --extra antifold --group e2e pytest -m e2e`.
+Every other test of this module is a unit test and lives in the
+developability package's suite, which never installs torch — so this file
+skips itself whenever torch is absent.
 
-`developability/antifold.py` and the vendored `vendor/AntiFold/antifold/`
-package share the literal name `antifold`. Every other test file gets away
-with `import antifold` meaning our own script only because none of them
-ever let `_run_model` execute for real — the moment it does, its own
-internal `import antifold.antiscripts` resolves against whatever `antifold`
-already means in `sys.modules`, which is our flat script if any sibling
-test file imported it first in this session. `_isolated_antifold_module`
-loads our script under a private name and clears any such stale binding
-around each test, so this file's result never depends on collection order
-and never leaks a changed `sys.modules['antifold']` into a test that runs
-after it.
+`src/antifold.py` and the vendored `src/vendor/AntiFold/antifold/` package
+share the literal name `antifold`. Our flat script wins that name whenever
+it is imported first, and then AntiFold's own internal `import
+antifold.antiscripts` resolves against the script instead of the package —
+which only bites once `_run_model` runs for real, as it does here and
+nowhere else. `_isolated_antifold_module` loads our script under a private
+name and clears any such stale binding around each test, so this file's
+result never depends on what imported `antifold` before it, and it never
+leaves a changed `sys.modules['antifold']` behind.
 
 No real checkpoint is needed: `_load_IF1_local()` alone builds a full,
 untrained model, and every case here only checks that AntiFold's own
@@ -31,7 +31,7 @@ pytest.importorskip("torch")
 
 pytestmark = pytest.mark.e2e
 
-_SCRIPT_PATH = Path(__file__).parent.parent / "developability" / "antifold.py"
+_SCRIPT_PATH = Path(__file__).parent.parent / "src" / "antifold.py"
 
 
 @pytest.fixture

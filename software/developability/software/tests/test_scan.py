@@ -76,7 +76,7 @@ def _run_scan(batch, pdb_text, extra_args=None):
     """The one-antibody case, which most of these tests are."""
     entry = _stage(batch, "clonotype-1", pdb_text)
     skips, triaged_dir, out_liabilities = _run(batch, extra_args)
-    [(_, reason)] = skips
+    [(_, reason, _detail)] = skips
     return reason, Path(triaged_dir, f"{entry.stem}.json"), out_liabilities
 
 
@@ -175,7 +175,7 @@ class TestLowConfidenceFallsBackToBFactor:
 
         skips, triaged_dir, _ = _run(batch, ["--per-residue-confidence", confidence_tsv])
 
-        assert skips == [("clonotype-1", "")]
+        assert skips == [("clonotype-1", "", "")]
         [hit] = liability_store.read_triaged(str(Path(triaged_dir, f"{entry.stem}.json")))
         assert hit.low_confidence is False
 
@@ -190,7 +190,7 @@ class TestLowConfidenceFallsBackToBFactor:
 
         skips, _, _ = _run(batch, ["--per-residue-confidence", confidence_tsv])
 
-        assert skips == [("clonotype-1", "no-liability-survived-triage")]
+        assert skips == [("clonotype-1", "no-liability-survived-triage", "")]
 
 
 class TestActOnFixabilityIsWired:
@@ -225,7 +225,7 @@ class TestClonotypeFilter:
 
         # The filtered-out clonotype gets no skip row at all — it was never
         # in scope, which is not the same as having failed.
-        assert skips == [("clone-1", ""), ("clone-2", "")]
+        assert skips == [("clone-1", "", ""), ("clone-2", "", "")]
         assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"clone-1", "clone-2"}
 
     def test_an_absent_filter_attempts_the_whole_roster(self, batch):
@@ -234,7 +234,7 @@ class TestClonotypeFilter:
 
         skips, _, _ = _run(batch)
 
-        assert skips == [("clone-1", ""), ("clone-2", "")]
+        assert skips == [("clone-1", "", ""), ("clone-2", "", "")]
 
 
 class TestBatchCli:
@@ -250,7 +250,7 @@ class TestBatchCli:
 
         skips, _, out_liabilities = _run(batch)
 
-        assert skips == [("clone-1", ""), ("clone-2", "")]
+        assert skips == [("clone-1", "", ""), ("clone-2", "", "")]
         assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"clone-1", "clone-2"}
 
     def test_clonotype_key_and_liability_key_identify_a_row_across_the_file(self, batch):
@@ -276,8 +276,8 @@ class TestBatchCli:
 
         skips, _, out_liabilities = _run(batch)
 
-        assert skips == [("indexed", ""), ("not-imgt", "structure-not-imgt")]
-        assert [reason for _, reason in skips].count("no-liability-survived-triage") == 0
+        assert skips == [("indexed", "", ""), ("not-imgt", "structure-not-imgt", "")]
+        assert [reason for _, reason, _detail in skips].count("no-liability-survived-triage") == 0
         # It never reached triage, so it contributes no Parents-page rows
         # either — the liabilities TSV holds only what was actually scanned.
         assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"indexed"}
@@ -300,7 +300,7 @@ class TestBatchCli:
 
         skips, _, _ = _run(batch)
 
-        assert skips == [("present", ""), ("absent", "no-structure")]
+        assert skips == [("present", "", ""), ("absent", "no-structure", "")]
 
     def test_an_empty_roster_leaves_a_header_only_liabilities_tsv(self, batch):
         skips, _, out_liabilities = _run(batch)

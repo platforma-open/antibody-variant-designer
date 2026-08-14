@@ -1,8 +1,9 @@
 """Unit tests for `batch.py` — the loop the five entrypoints share, and the
 attribution rules that replace one-exec-per-antibody."""
 
-import batch
 import pytest
+
+import batch
 import roster
 import skip_store
 
@@ -17,7 +18,7 @@ class TestOneRowPerAttemptedClonotype:
 
         batch.run(_entries("a", "b"), lambda _e: "", str(out_skip))
 
-        assert skip_store.read_skips(str(out_skip)) == [("a", ""), ("b", "")]
+        assert skip_store.read_skips(str(out_skip)) == [("a", "", ""), ("b", "", "")]
 
     def test_a_reason_is_recorded_against_its_own_clonotype(self, tmp_path):
         out_skip = tmp_path / "skip.tsv"
@@ -28,9 +29,9 @@ class TestOneRowPerAttemptedClonotype:
         batch.run(_entries("a", "b", "c"), one, str(out_skip))
 
         assert skip_store.read_skips(str(out_skip)) == [
-            ("a", ""),
-            ("b", "no-structure"),
-            ("c", ""),
+            ("a", "", ""),
+            ("b", "no-structure", ""),
+            ("c", "", ""),
         ]
 
     def test_returning_none_writes_no_row_so_a_prior_skip_is_not_double_counted(self, tmp_path):
@@ -41,7 +42,7 @@ class TestOneRowPerAttemptedClonotype:
 
         batch.run(_entries("a", "b"), one, str(out_skip))
 
-        assert skip_store.read_skips(str(out_skip)) == [("b", "")]
+        assert skip_store.read_skips(str(out_skip)) == [("b", "", "")]
 
     def test_an_empty_roster_leaves_a_header_only_skip_tsv_and_exits_zero(self, tmp_path):
         out_skip = tmp_path / "skip.tsv"
@@ -81,9 +82,9 @@ class TestExceptionsPropagateUnlessTheStepOptsIn:
         assert rc == 0
         assert seen == ["first", "middle", "last"]
         assert skip_store.read_skips(str(out_skip)) == [
-            ("first", ""),
-            ("middle", "backend-failed"),
-            ("last", ""),
+            ("first", "", ""),
+            ("middle", "backend-failed", "torch exploded"),
+            ("last", "", ""),
         ]
         # The clonotype key must reach stderr — an exec log naming only the
         # exception cannot be traced back to one antibody.

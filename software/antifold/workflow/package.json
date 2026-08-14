@@ -1,0 +1,21 @@
+{
+  "name": "@platforma-open/milaboratories.antibody-variant-designer.software-antifold.workflow",
+  "version": "1.0.0",
+  "description": "Exec recipe for the AntiFold tolerance read, with its weights asset",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "shx rm -rf dist && pl-tengo build",
+    "check": "pl-tengo check"
+  },
+  "dependencies": {
+    "@platforma-open/milaboratories.antibody-variant-designer.software-antifold": "workspace:*",
+    "@platforma-open/milaboratories.antibody-variant-designer.software-developability.workflow": "workspace:*",
+    "@platforma-open/milaboratories.antifold-weights-assets": "^1.0.0",
+    "@platforma-sdk/workflow-tengo": "catalog:"
+  },
+  "devDependencies": {
+    "@platforma-sdk/tengo-builder": "catalog:",
+    "shx": "catalog:"
+  }
+}

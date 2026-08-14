@@ -1,0 +1,164 @@
+// The exec recipe for the `read-tolerance` entrypoint — one exec that reads
+// AntiFold's per-position tolerance for every antibody in the roster.
+//
+// It ships in the piece that owns the software it runs, so the flag names, the
+// workdir paths and the output shape are versioned in the same commit as the
+// python that reads and writes them. Two things it hides are worth naming,
+// because a caller has no way to get them right on its own: the weights asset
+// and the mount point the python's `--weights` path is relative to, and the GPU
+// leg's `vram`, which sizes to the checkpoint this code loads.
+//
+// It is a package beside the software rather than a library inside it — see the
+// note at the top of the developability piece's `index-and-scan.lib.tengo` for
+// the seam that forces it.
+
+ll := import("@platforma-sdk/workflow-tengo:ll")
+assets := import("@platforma-sdk/workflow-tengo:assets")
+exec := import("@platforma-sdk/workflow-tengo:exec")
+validation := import("@platforma-sdk/workflow-tengo:validation")
+
+workdir := import("@platforma-open/milaboratories.antibody-variant-designer.software-developability.workflow:workdir")
+
+f := exec.formula
+
+antifoldSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software-antifold:read-tolerance")
+weightsAsset := assets.importAsset("@platforma-open/milaboratories.antifold-weights-assets:antifold")
+
+TOLERANCE_DIR := "tolerance"
+SKIP_FILE := "skip.tsv"
+
+// Where the weights asset is mounted, and the checkpoint path inside it that
+// the python is given. One constant pair, because the two must agree and only
+// this file sees both.
+WEIGHTS_MOUNT := "models"
+WEIGHTS_FILE := "models/model.pt"
+
+// The tag the RAM formula measures. Only the staged structures carry it: the
+// residues and triaged files are small per-antibody sidecars, and the model
+// never sees either of them.
+STRUCTURE_TAG := "structures"
+
+// Host RAM the process holds before it reads a single structure: the torch and
+// esm imports, the 540.6 MiB checkpoint, and the second copy of the weights that
+// exists while `load_IF1_checkpoint` applies the state dict.
+BASE_RAM := f.gib(4)
+
+// What one antibody costs while the model runs on it, per byte of its PDB text.
+// ESM-IF1's per-residue activations dominate — 30 neighbours in 512 dimensions
+// across 8 encoder layers — so the multiplier is large. It is an upper-bound
+// estimate, not a measurement.
+RAM_PER_STRUCTURE_BYTE := 1024
+
+// The most this recipe ever asks for. The multiplier above is deliberately
+// generous, so a structure far larger than an antibody must be able to raise the
+// request without pushing it past what a machine running this block has.
+RAM_CEILING := f.gib(12)
+
+// What a backend that cannot evaluate a formula at run time gets instead. It is
+// also the amount this recipe asked for unconditionally before it could measure.
+FALLBACK_RAM := "8GiB"
+
+// Constant where the RAM is not: the cores go to torch's own threads inside one
+// forward pass, and that pass is the same size whatever the dataset holds.
+DEFAULT_CPU := 4
+
+// Not exposed as a parameter: it sizes to the checkpoint AntiFold loads, not to
+// the load the caller hands it.
+VRAM := "6GiB"
+
+/**
+ * The RAM to ask for, given how many antibodies the staged structures hold.
+ *
+ * `batch.py` runs one antibody at a time and releases it before the next one
+ * starts, so the peak is BASE_RAM plus the LARGEST single structure. The average
+ * stands in for the largest: a tag is measured by its total bytes and the DSL has
+ * no maximum, so dividing by the antibody count keeps this term tracking how big
+ * one structure is rather than how many of them arrived.
+ *
+ * The same amount is asked for on both legs. The CPU fallback has to make
+ * progress on the host footprint AntiFold runs on when there is no GPU, and on
+ * the GPU leg the structure is still parsed on the host before it is moved.
+ */
+ramFor := func(count) {
+	// An empty roster would divide by zero. It also loads no model at all, so
+	// what it is left asking for — BASE_RAM — is already more than it needs.
+	divisor := count > 0 ? count : 1
+	return f.size(STRUCTURE_TAG, { default: 0 }).
+		dividedBy(divisor).
+		times(RAM_PER_STRUCTURE_BYTE).
+		plus(BASE_RAM).
+		atMost(RAM_CEILING).
+		staticFallback(FALLBACK_RAM)
+}
+
+// What `run` accepts. Closed on purpose — see the note on the same constant in
+// the developability piece's `index-and-scan.lib.tengo`.
+ARGS := {
+	"__options__,closed": "",
+	roster: [{
+		"__options__,closed": "",
+		clonotypeKey: "string",
+		filename: "string"
+	}],
+	// Each a `workdir path -> blob` map, as `tpl.inputs()` flattens a staged
+	// directory.
+	pdbs: { any: validation.resource() },
+	residues: { any: validation.resource() },
+	// Read only as a gate, never opened. An antibody absent here has no
+	// actionable liability, or was already named upstream, so the model call on
+	// it would be pure waste.
+	triaged: { any: validation.resource() },
+	// Both optional, and an override wins over the recipe: `ramFor` sizes the RAM
+	// and DEFAULT_CPU the cores for whichever dimension the caller leaves out.
+	// There is no `vram` — it sizes to the checkpoint, not to the
+	// load the caller hands it.
+	"cpu,?": "number",
+	"ram,?": "string"
+}
+
+/**
+ * Read AntiFold's per-position tolerance for every runnable antibody.
+ *
+ * @return {tolerance: fileSet, skip: file, skipContent: content}
+ */
+run := func(args) {
+	validation.assertType(args, ARGS, "read-tolerance: bad args")
+
+	cpu := is_undefined(args.cpu) ? DEFAULT_CPU : args.cpu
+	ram := is_undefined(args.ram) ? ramFor(len(args.roster)) : args.ram
+
+	result := exec.builder().
+		software(antifoldSw).
+		resources({
+			queue: "heavy",
+			onCPU: { cpu: cpu, ram: ram },
+			onGPU: { cpu: cpu, ram: ram, vram: VRAM }
+		}).
+		printErrStreamToStdout().
+		addAsset(weightsAsset, WEIGHTS_MOUNT).
+		addFiles(args.pdbs, { tag: STRUCTURE_TAG }).
+		addFiles(args.residues).
+		addFiles(args.triaged).
+		writeFile(workdir.INDEX_FILE, workdir.renderIndex(args.roster)).
+		arg("--pdb-dir").arg("pdbs").
+		arg("--pdb-index").arg(workdir.INDEX_FILE).
+		arg("--residues-dir").arg("residues").
+		arg("--triaged-dir").arg("triaged").
+		arg("--weights").arg(WEIGHTS_FILE).
+		arg("--out-tolerance-dir").arg(TOLERANCE_DIR).
+		arg("--out-skip").arg(SKIP_FILE).
+		saveFileSet("tolerance", workdir.dirPattern(TOLERANCE_DIR)).
+		saveFile(SKIP_FILE).
+		saveFileContent(SKIP_FILE).
+		run()
+
+	return {
+		tolerance: result.getFileSet("tolerance"),
+		skip: result.getFile(SKIP_FILE),
+		skipContent: result.getFileContent(SKIP_FILE)
+	}
+}
+
+export ll.toStrict({
+	run: run
+})

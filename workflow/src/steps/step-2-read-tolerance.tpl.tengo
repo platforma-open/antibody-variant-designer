@@ -14,21 +14,18 @@
 // work, and skipping it is the only saving available on the run's dominant
 // term. Absence in `triaged/` already means either "nothing actionable" or
 // "already named upstream", so one check serves both.
+//
+// The exec recipe itself — the weights asset and its mount point, the flag
+// names, the two-leg CPU/GPU shape — lives in the AntiFold wrapper package.
+// What stays here is the block's side of the contract: which inputs are valid,
+// what the step is named to produce, and how an Advanced Settings override
+// reaches the recipe.
 
 self := import("@platforma-sdk/workflow-tengo:tpl")
 
-assets := import("@platforma-sdk/workflow-tengo:assets")
-exec := import("@platforma-sdk/workflow-tengo:exec")
-
 validation := import("@platforma-sdk/workflow-tengo:validation")
 
-workdir := import(":steps.workdir")
-
-antifoldSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software:read-tolerance")
-weightsAsset := assets.importAsset("@platforma-open/milaboratories.antifold-weights-assets:antifold")
-
-TOLERANCE_DIR := "tolerance"
-SKIP_FILE := "skip.tsv"
+readTolerance := import("@platforma-open/milaboratories.antibody-variant-designer.software-antifold.workflow:read-tolerance")
 
 self.validateInputs({
 	"__options__,closed": "",
@@ -44,10 +41,10 @@ self.validateInputs({
 	// Read only as a gate — never opened. An antibody absent here has no
 	// actionable liability, or was already named upstream.
 	triaged: { any: validation.resource() },
-	// Advanced Settings → Resource Allocation. Either may be unset — the
-	// default below wins for the dimension the operator left empty. `vram`
-	// stays fixed: it sizes to the checkpoint AntiFold loads, not to load,
-	// so it is not exposed here.
+	// Advanced Settings → Resource Allocation. Either may be unset — the recipe
+	// sizes the dimension the operator left empty from the data it is handed.
+	// `vram` is not exposed at all: it sizes to the checkpoint AntiFold loads,
+	// not to the load this block hands it, so the recipe holds it fixed.
 	resources: {
 		"__options__,closed": "",
 		"cpu,?": "number",
@@ -58,45 +55,12 @@ self.validateInputs({
 self.defineOutputs("tolerance", "skip", "skipContent")
 
 self.body(func(inputs) {
-	cpuOverride := inputs.resources.cpu
-	memOverride := is_undefined(inputs.resources.mem) ? undefined : string(inputs.resources.mem) + "GiB"
-	cpu := is_undefined(cpuOverride) ? 4 : cpuOverride
-	ram := is_undefined(memOverride) ? "8GiB" : memOverride
-
-	result := exec.builder().
-		software(antifoldSw).
-		// The DEFAULT pair is fixed, not a data-scaled formula: the loop is
-		// sequential, so the peak is the model plus one V-domain however many
-		// antibodies the run holds. An Advanced Settings override applies to
-		// both legs identically — the CPU fallback still has to make progress
-		// on the same host footprint AntiFold runs on when there's no GPU.
-		// `vram` stays fixed: it sizes to the checkpoint AntiFold loads.
-		resources({
-			queue: "heavy",
-			onCPU: { cpu: cpu, ram: ram },
-			onGPU: { cpu: cpu, ram: ram, vram: "6GiB" }
-		}).
-		printErrStreamToStdout().
-		addAsset(weightsAsset, "models").
-		addFiles(inputs.pdbs).
-		addFiles(inputs.residues).
-		addFiles(inputs.triaged).
-		writeFile(workdir.INDEX_FILE, workdir.renderIndex(inputs.roster)).
-		arg("--pdb-dir").arg("pdbs").
-		arg("--pdb-index").arg(workdir.INDEX_FILE).
-		arg("--residues-dir").arg("residues").
-		arg("--triaged-dir").arg("triaged").
-		arg("--weights").arg("models/model.pt").
-		arg("--out-tolerance-dir").arg(TOLERANCE_DIR).
-		arg("--out-skip").arg(SKIP_FILE).
-		saveFileSet("tolerance", workdir.dirPattern(TOLERANCE_DIR)).
-		saveFile(SKIP_FILE).
-		saveFileContent(SKIP_FILE).
-		run()
-
-	return {
-		tolerance: result.getFileSet("tolerance"),
-		skip: result.getFile(SKIP_FILE),
-		skipContent: result.getFileContent(SKIP_FILE)
-	}
+	return readTolerance.run({
+		roster: inputs.roster,
+		pdbs: inputs.pdbs,
+		residues: inputs.residues,
+		triaged: inputs.triaged,
+		cpu: inputs.resources.cpu,
+		ram: is_undefined(inputs.resources.mem) ? undefined : string(inputs.resources.mem) + "GiB"
+	})
 })

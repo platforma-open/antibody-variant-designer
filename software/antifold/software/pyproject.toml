@@ -1,0 +1,73 @@
+[project]
+name = "antibody-variant-designer-antifold"
+version = "0.1.0"
+description = "AntiFold wrapper: loads the mounted checkpoint once and reads per-position tolerance."
+requires-python = ">=3.12"
+# Deliberately empty, with the real set as the `antifold` extra below. Every
+# `uv run` in this package would otherwise install torch and its closure —
+# about 2 GiB — before it could lint one file. The extra is what `deps:export`
+# compiles and what the run environment installs; the local commands that need
+# it name it (`uv run --extra antifold --group e2e pytest -m e2e`).
+dependencies = []
+
+[project.optional-dependencies]
+# Every entry is module-level on the import chain of the only three AntiFold
+# functions this package calls — `_load_IF1_local`, `load_IF1_checkpoint`,
+# `get_pdbs_logits`.
+#
+# Three packages the vendored tree references are deliberately absent.
+# `anarci` is imported only by `src/vendor/AntiFold/antifold/_anarci/ImmunoPDB.py`,
+# a standalone CLI script nothing imports. `torch_scatter` is a function-local
+# import inside a branch guarded by `autoregressive_x is not None`, which the
+# encoder-only forward never takes — upstream's own comment says it "isn't used
+# in ESM-IF1". `torchvision` is function-local in a dataset-download helper
+# that is dead code here.
+#
+# torch_geometric is held at >= 2.3 on purpose: from that line it implements
+# scatter with native torch ops, so importing `MessagePassing` no longer drags
+# `torch_scatter` back in.
+antifold = [
+    "torch==2.2.*",
+    "torch_geometric>=2.3,<2.5",
+    "numpy==1.26.*",
+    "pandas==2.*",
+    # Upper bound, not decoration: `deps:export` compiles with `--no-deps`, so uv
+    # resolves each top-level pin on its own and never checks them against each
+    # other. scipy 1.18 requires numpy>=2.0.0, which contradicts the numpy pin
+    # above, and pip refuses the exported file with ResolutionImpossible; scipy
+    # 1.17 publishes no cp312 wheel. 1.16 is the newest line that accepts numpy
+    # 1.26 (its floor is 1.25.2) and ships one.
+    "scipy>=1,<1.17",
+    "biotite==0.38.*",
+    "biopython==1.83",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.1",
+]
+# Split from `dev` so linting stays cheap: the e2e file is the only test here,
+# and it is skipped without torch, so pytest is worth installing only for the
+# run that also asks for the `antifold` extra.
+e2e = [
+    "pytest>=9.0.2",
+]
+
+[tool.ruff]
+extend = "../../ruff.toml"
+# `../../developability/software/src` is here for the same reason it is on `pythonpath`
+# below: `antifold.py` imports that package's stores as bare names, and they
+# must sort as first-party here exactly as they do there.
+src = ["src", "../../developability/software/src", "tests"]
+# Vendored third-party source (BSD 3-Clause, commit 789d467) — ours to run,
+# not ours to restyle.
+extend-exclude = ["src/vendor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `antifold.py` imports the developability package's stores at module level, so
+# this package's own source is not enough to load it.
+pythonpath = ["src", "../../developability/software/src", "tests"]
+markers = [
+    "e2e: end-to-end tests that run the real vendored AntiFold",
+]

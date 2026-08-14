@@ -10,8 +10,8 @@
     "format": "/usr/bin/env emacs --script ./format.el || echo 'No emacs.'"
   },
   "dependencies": {
-    "@platforma-open/milaboratories.antibody-variant-designer.software": "workspace:*",
-    "@platforma-open/milaboratories.antifold-weights-assets": "^1.0.0",
+    "@platforma-open/milaboratories.antibody-variant-designer.software-developability.workflow": "workspace:*",
+    "@platforma-open/milaboratories.antibody-variant-designer.software-antifold.workflow": "workspace:*",
     "@platforma-open/milaboratories.software-liability-definitions": "^1.1.0",
     "@platforma-sdk/workflow-tengo": "catalog:"
   },

@@ -1,0 +1,113 @@
+// What each recipe asks the scheduler for, evaluated against the SDK's own
+// formula evaluator. Nothing else in the build runs these expressions: the
+// builder only records them, and the backend evaluates them when the exec is
+// allocated. These cases pin the two things that would otherwise be found on a
+// real dataset — that a structure term follows how big one antibody is rather
+// than how many arrived, and that the request stays inside the ceiling.
+
+test := import("@platforma-sdk/workflow-tengo:test")
+exec := import("@platforma-sdk/workflow-tengo:exec")
+
+indexAndScan := import(":index-and-scan")
+buildVariants := import(":build-variants")
+
+f := exec.formula
+
+GIB := 1073741824
+
+// Stands in for the backend's blob-size lookup. `resolveAst` has already turned
+// each tag into the list of file names carrying it, so a name -> bytes map is all
+// the evaluator needs from us.
+_resolver := func(sizes) {
+	return {
+		size: func(files) {
+			total := 0
+			for name in files {
+				total += sizes[name]
+			}
+			return total
+		}
+	}
+}
+
+// The bytes a recipe asks for, given which staged files carry which tag and how
+// big each one is.
+_ram := func(formula, tagMap, sizes) {
+	return f.evaluateResource(f.resolveAst(formula, tagMap, []), _resolver(sizes), "ram")
+}
+
+// Four antibodies of the same size, so the average is exactly one of them.
+_fourStructures := {
+	structures: ["a.pdb", "b.pdb", "c.pdb", "d.pdb"]
+}
+_fourStructureSizes := {
+	"a.pdb": 200000,
+	"b.pdb": 200000,
+	"c.pdb": 200000,
+	"d.pdb": 200000
+}
+
+TestIndexAndScanHoldsOneStructureAndTheWholeConfidenceTable := func() {
+	sizes := {
+		"a.pdb": 200000,
+		"b.pdb": 200000,
+		"c.pdb": 200000,
+		"d.pdb": 200000,
+		"confidence.tsv": 50000000
+	}
+	ram := _ram(
+		indexAndScan.ramFor(4),
+		{ structures: _fourStructures.structures, confidence: ["confidence.tsv"] },
+		sizes
+	)
+	// One structure at a time, but the whole confidence table for the whole run.
+	test.isEqual(200000 * 32 + 50000000 * 16 + GIB, ram)
+}
+
+TestIndexAndScanFollowsStructureSizeNotDatasetSize := func() {
+	names := []
+	sizes := {}
+	for i := 0; i < 40; i++ {
+		name := "s" + string(i) + ".pdb"
+		names = append(names, name)
+		sizes[name] = 200000
+	}
+	// Ten times the antibodies at the same size each: the request must not move,
+	// because the loop still only ever holds one of them.
+	test.isEqual(
+		_ram(indexAndScan.ramFor(4), _fourStructures, _fourStructureSizes),
+		_ram(indexAndScan.ramFor(40), { structures: names }, sizes)
+	)
+}
+
+TestIndexAndScanStaysInsideItsCeiling := func() {
+	// A structure far larger than any antibody. The multiplier is deliberately
+	// generous, so without the ceiling this would ask for 64 GiB.
+	ram := _ram(indexAndScan.ramFor(1), { structures: ["huge.pdb"] }, { "huge.pdb": 2 * GIB })
+	test.isEqual(12 * GIB, ram)
+}
+
+TestIndexAndScanWithNothingStagedAsksForItsBase := func() {
+	// An empty roster measures no tag at all, and must not divide by zero.
+	test.isEqual(GIB, _ram(indexAndScan.ramFor(0), {}, {}))
+}
+
+TestBuildVariantsCountsAllThreeOfAnAntibodysFiles := func() {
+	tagMap := { "per-antibody": ["a.tsv", "a.json", "a.triaged.json"] }
+	sizes := { "a.tsv": 50000, "a.json": 8000, "a.triaged.json": 2000 }
+	// One antibody, so the average is the whole tag: the tolerance matrix, the
+	// residue index and the triaged liabilities together.
+	test.isEqual((50000 + 8000 + 2000) * 64 + GIB, _ram(buildVariants.ramFor(1), tagMap, sizes))
+}
+
+TestBuildVariantsStaysInsideItsCeiling := func() {
+	tagMap := { "per-antibody": ["huge.tsv"] }
+	test.isEqual(8 * GIB, _ram(buildVariants.ramFor(1), tagMap, { "huge.tsv": GIB }))
+}
+
+TestBothRecipesCarryAStaticFallback := func() {
+	// Without one, a backend that cannot evaluate a formula fails the exec rather
+	// than falling back to a fixed request.
+	test.isEqual("4GiB", f.fallbackOf(indexAndScan.ramFor(4)))
+	test.isEqual("4GiB", f.fallbackOf(buildVariants.ramFor(4)))
+}

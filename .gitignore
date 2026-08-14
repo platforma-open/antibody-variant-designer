@@ -8,6 +8,10 @@ log/
 .turbo
 vite.config.*.timestamp-*
 software/**/*.tgz
+# Staged by software/antifold/software/scripts/stage-build.sh: the
+# developability source copied in beside the wrapper's own, which is what both
+# of its artifacts point at.
+software/antifold/software/build/
 __pycache__/
 *.pyc
 .DS_Store

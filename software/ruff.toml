@@ -1,0 +1,32 @@
+# The lint rules both software packages share. Each package's pyproject.toml
+# reaches this file with `[tool.ruff] extend = "../../ruff.toml"` and adds only
+# what is its own — the AntiFold package adds the vendored tree to the excludes.
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # import order
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "SIM",  # simplify
+    "C4",   # comprehensions
+    "RET",  # return
+    "PTH",  # use pathlib
+    "ARG",  # unused arguments
+    "RUF",
+]
+ignore = [
+    # Greek letters and math signs in docstrings are intended scientific notation.
+    "RUF002",
+    "RUF003",
+]
+
+[lint.per-file-ignores]
+# `**/` on purpose: a relative pattern in this file would anchor to this
+# file's own directory, which holds no tests — only the packages below it
+# do. Each package sets `src` itself, for the same anchoring reason.
+"**/tests/*" = ["ARG"]  # pytest fixtures arrive as unused-looking arguments

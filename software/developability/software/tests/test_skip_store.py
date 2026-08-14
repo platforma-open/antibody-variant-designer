@@ -6,7 +6,7 @@ import skip_store
 
 class TestSkipTsvRoundTrips:
     def test_write_then_read_returns_equal_rows(self, tmp_path):
-        rows = [("clone-1", ""), ("clone-2", "no-structure")]
+        rows = [("clone-1", "", ""), ("clone-2", "no-structure", "")]
         path = tmp_path / "skip.tsv"
 
         skip_store.write_skips(str(path), rows)
@@ -19,14 +19,25 @@ class TestSkipTsvRoundTrips:
         # step already named its reason".
         path = tmp_path / "skip.tsv"
 
-        skip_store.write_skips(str(path), [("clone-1", "")])
+        skip_store.write_skips(str(path), [("clone-1", "", "")])
 
-        assert skip_store.read_skips(str(path)) == [("clone-1", "")]
+        assert skip_store.read_skips(str(path)) == [("clone-1", "", "")]
+
+    def test_a_reason_can_carry_free_text_detail(self, tmp_path):
+        # `backend-failed` is the one reason a caught exception's message
+        # fills in; every other reason writes an empty detail.
+        path = tmp_path / "skip.tsv"
+
+        skip_store.write_skips(str(path), [("clone-1", "backend-failed", "CUDA out of memory")])
+
+        assert skip_store.read_skips(str(path)) == [
+            ("clone-1", "backend-failed", "CUDA out of memory")
+        ]
 
     def test_empty_list_leaves_a_header_only_file(self, tmp_path):
         path = tmp_path / "skip.tsv"
 
         skip_store.write_skips(str(path), [])
 
-        assert path.read_text() == "clonotypeKey\treason\n"
+        assert path.read_text() == "clonotypeKey\treason\tdetail\n"
         assert skip_store.read_skips(str(path)) == []

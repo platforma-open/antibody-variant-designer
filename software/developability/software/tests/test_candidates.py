@@ -2,8 +2,9 @@
 lives in `variants.py`, tested in `test_variants.py`."""
 
 
-import candidates
 import pytest
+
+import candidates
 import residue_store
 import tolerance_store
 import triage

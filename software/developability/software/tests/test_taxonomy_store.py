@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 import taxonomy_store
 
 LIABILITIES = [

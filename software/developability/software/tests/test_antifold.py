@@ -16,8 +16,9 @@ import socket
 from pathlib import Path
 
 import antifold
-import liability_store
 import pytest
+
+import liability_store
 import residue_store
 import skip_store
 import tolerance_store
@@ -280,7 +281,7 @@ class TestMainWiresTheJoinAndWritesTheTsv:
 
         skips, out_dir = _run(batch, _weights(batch))
 
-        assert skips == [("clone-1", "")]
+        assert skips == [("clone-1", "", "")]
         assert captured["h_chain"] == "H"
         assert captured["l_chain"] is None
         assert captured["nanobody_mode"] is True
@@ -316,7 +317,7 @@ class TestBatchCli:
         skips, _ = _run(batch, _weights(batch))
 
         assert len(loads) == 1
-        assert skips == [("clone-1", ""), ("clone-2", ""), ("clone-3", "")]
+        assert skips == [("clone-1", "", ""), ("clone-2", "", ""), ("clone-3", "", "")]
 
     def test_a_middle_antibody_raising_is_named_and_the_others_still_finish(
         self, batch, monkeypatch, capsys
@@ -339,9 +340,9 @@ class TestBatchCli:
         skips, out_dir = _run(batch, _weights(batch))
 
         assert skips == [
-            ("first", ""),
-            ("middle", "backend-failed"),
-            ("last", ""),
+            ("first", "", ""),
+            ("middle", "backend-failed", "torch exploded"),
+            ("last", "", ""),
         ]
         assert Path(out_dir, "first.tsv").is_file()
         assert not Path(out_dir, "middle.tsv").exists()
@@ -367,7 +368,7 @@ class TestBatchCli:
 
         skips, _ = _run(batch, _weights(batch))
 
-        assert skips == [("indexed", "")]
+        assert skips == [("indexed", "", "")]
         assert len(seen) == 1
 
     def test_an_antibody_with_nothing_actionable_is_gated_out_of_the_model_call(
@@ -390,7 +391,7 @@ class TestBatchCli:
 
         skips, out_dir = _run(batch, _weights(batch))
 
-        assert skips == [("actionable", "")]
+        assert skips == [("actionable", "", "")]
         assert [Path(p).stem for p in seen] == ["actionable"]
         assert not Path(out_dir, "nothing-to-fix.tsv").exists()
 

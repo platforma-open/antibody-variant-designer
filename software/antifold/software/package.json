@@ -1,0 +1,58 @@
+{
+  "name": "@platforma-open/milaboratories.antibody-variant-designer.software-antifold",
+  "version": "1.0.0",
+  "description": "AntiFold wrapper: loads the mounted checkpoint once and reads per-position tolerance",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bash scripts/stage-build.sh && block-tools software build",
+    "check": "uv run --group dev ruff check .",
+    "deps:export": "bash scripts/deps-export.sh",
+    "prepublishOnly": "pl-pkg prepublish"
+  },
+  "dependencies": {
+    "@platforma-open/milaboratories.antibody-variant-designer.software-developability": "workspace:*"
+  },
+  "devDependencies": {
+    "@platforma-open/milaboratories.runenv-python-3": "catalog:",
+    "@platforma-sdk/block-tools": "catalog:",
+    "@platforma-sdk/package-builder": "catalog:"
+  },
+  "block-software": {
+    "artifacts": {
+      "antifold": {
+        "type": "python",
+        "registry": "platforma-open",
+        "environment": "@platforma-open/milaboratories.runenv-python-3:3.12.10",
+        "dependencies": {
+          "toolset": "pip",
+          "requirements": "requirements-antifold.txt"
+        },
+        "root": "./build"
+      },
+      "antifold-docker": {
+        "type": "docker",
+        "context": "./build",
+        "dockerfile": "Dockerfile"
+      }
+    },
+    "entrypoints": {
+      "read-tolerance": {
+        "binary": {
+          "artifact": "antifold",
+          "cmd": [
+            "python",
+            "{pkg}/antifold.py"
+          ]
+        },
+        "docker": {
+          "artifact": "antifold-docker",
+          "cmd": [
+            "python",
+            "{pkg}/antifold.py"
+          ]
+        }
+      }
+    }
+  }
+}

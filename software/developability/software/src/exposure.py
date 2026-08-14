@@ -20,6 +20,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import freesasa
+
 import residue_store
 
 _REFS_PATH = Path(__file__).parent / "data" / "heavy_atom_max_sasa.tsv"

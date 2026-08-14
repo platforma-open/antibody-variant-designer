@@ -3,8 +3,9 @@ the dataset-wide `variants.tsv` it writes."""
 
 from pathlib import Path
 
-import liability_store
 import pytest
+
+import liability_store
 import residue_store
 import skip_store
 import tolerance_store

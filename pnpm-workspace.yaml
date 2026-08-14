@@ -1,7 +1,10 @@
 packages:
   - block
   - model
-  - software
+  - software/developability/software
+  - software/developability/workflow
+  - software/antifold/software
+  - software/antifold/workflow
   - test
   - ui
   - workflow

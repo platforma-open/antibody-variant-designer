@@ -1,0 +1,155 @@
+// The exec recipe for the `build-variants` entrypoint — one exec that builds
+// candidate substitutions, re-scans each, and ranks what survives.
+//
+// It ships in this package rather than inside the software package for the
+// reason spelled out at the top of `index-and-scan.lib.tengo`.
+
+ll := import("@platforma-sdk/workflow-tengo:ll")
+assets := import("@platforma-sdk/workflow-tengo:assets")
+exec := import("@platforma-sdk/workflow-tengo:exec")
+validation := import("@platforma-sdk/workflow-tengo:validation")
+
+workdir := import(":workdir")
+
+f := exec.formula
+
+variantsSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software-developability:build-variants")
+
+VARIANTS_FILE := "variants.tsv"
+SKIP_FILE := "skip.tsv"
+
+// The tag the RAM formula measures. All three staged directories carry it: an
+// iteration reads one antibody's tolerance matrix, its residues and its triaged
+// liabilities together, and none of the three dominates the other two.
+PER_ANTIBODY_TAG := "per-antibody"
+
+// What the process holds before it reads any of the caller's data: the
+// interpreter and the liability taxonomy.
+BASE_RAM := f.gib(1)
+
+// What one antibody costs, per byte of the three files it arrives as: the parsed
+// tolerance matrix, and the candidates and variants built from it. The variant
+// count is bounded by the params rather than by the data, so it needs no term of
+// its own. An upper-bound estimate, not a measurement.
+RAM_PER_ANTIBODY_BYTE := 64
+
+// The most this recipe ever asks for. The multiplier above is deliberately
+// generous, so an unusually large antibody must be able to raise the request
+// without pushing it past what a machine running this block has.
+RAM_CEILING := f.gib(8)
+
+// What a backend that cannot evaluate a formula at run time gets instead. It is
+// also the amount this recipe asked for unconditionally before it could measure.
+FALLBACK_RAM := "4GiB"
+
+// Constant where the RAM is not: this is one sequential pass, and nothing in it
+// spreads across cores whatever the dataset holds.
+DEFAULT_CPU := 2
+
+/**
+ * The RAM to ask for, given how many antibodies the staged files hold.
+ *
+ * `batch.py` runs one antibody at a time and releases it before the next one
+ * starts, and every row it produces is appended rather than accumulated, so the
+ * peak is BASE_RAM plus the largest single antibody. The average stands in for
+ * the largest — see the same note in `index-and-scan.lib.tengo`.
+ */
+ramFor := func(count) {
+	// An empty roster would divide by zero, and leaves the base — which is all a
+	// run with nothing to design against needs.
+	divisor := count > 0 ? count : 1
+	return f.size(PER_ANTIBODY_TAG, { default: 0 }).
+		dividedBy(divisor).
+		times(RAM_PER_ANTIBODY_BYTE).
+		plus(BASE_RAM).
+		atMost(RAM_CEILING).
+		staticFallback(FALLBACK_RAM)
+}
+
+// What `run` accepts. Closed on purpose — see the note on the same constant in
+// `index-and-scan.lib.tengo`.
+ARGS := {
+	"__options__,closed": "",
+	roster: [{
+		"__options__,closed": "",
+		clonotypeKey: "string",
+		filename: "string"
+	}],
+	// Each a `workdir path -> blob` map, as `tpl.inputs()` flattens a staged
+	// directory.
+	triaged: { any: validation.resource() },
+	tolerance: { any: validation.resource() },
+	residues: { any: validation.resource() },
+	definitions: validation.resource(),
+	// The third ingredient of the content-addressed variantKey, alongside the
+	// parent key and the edit set.
+	blockId: "string",
+	params: {
+		"__options__,closed": "",
+		maxEditsPerVariant: "number",
+		candidateResiduesPerPosition: "number",
+		variantsPerParent: "number",
+		lowToleranceFloor: "number",
+		epistasisRescoreTopK: "number"
+	},
+	// Both optional, and an override wins over the recipe: `ramFor` sizes the RAM
+	// and DEFAULT_CPU the cores for whichever dimension the caller leaves out.
+	"cpu,?": "number",
+	"ram,?": "string"
+}
+
+/**
+ * Build, gate and rank the variants of every antibody in the roster.
+ *
+ * @return {variants: file, skip: file, skipContent: content}
+ */
+run := func(args) {
+	validation.assertType(args, ARGS, "build-variants: bad args")
+
+	result := exec.builder().
+		software(variantsSw).
+		resources({
+			queue: "medium",
+			onCPU: {
+				cpu: is_undefined(args.cpu) ? DEFAULT_CPU : args.cpu,
+				ram: is_undefined(args.ram) ? ramFor(len(args.roster)) : args.ram
+			}
+		}).
+		printErrStreamToStdout().
+		addFiles(args.triaged, { tag: PER_ANTIBODY_TAG }).
+		addFiles(args.tolerance, { tag: PER_ANTIBODY_TAG }).
+		addFiles(args.residues, { tag: PER_ANTIBODY_TAG }).
+		writeFile(workdir.INDEX_FILE, workdir.renderIndex(args.roster)).
+		addFile("definitions.json", args.definitions).
+		arg("--pdb-index").arg(workdir.INDEX_FILE).
+		arg("--triaged-dir").arg("triaged").
+		arg("--tolerance-dir").arg("tolerance").
+		arg("--residues-dir").arg("residues").
+		arg("--definitions").arg("definitions.json").
+		arg("--block-id").arg(args.blockId).
+		arg("--out-variants").arg(VARIANTS_FILE).
+		arg("--out-skip").arg(SKIP_FILE).
+		arg("--max-edits-per-variant").arg(string(args.params.maxEditsPerVariant)).
+		arg("--candidate-residues-per-position").
+		arg(string(args.params.candidateResiduesPerPosition)).
+		arg("--variants-per-parent").arg(string(args.params.variantsPerParent)).
+		arg("--low-tolerance-floor").arg(string(args.params.lowToleranceFloor)).
+		arg("--epistasis-rescore-top-k").arg(string(args.params.epistasisRescoreTopK)).
+		saveFile(VARIANTS_FILE).
+		saveFile(SKIP_FILE).
+		saveFileContent(SKIP_FILE).
+		run()
+
+	return {
+		variants: result.getFile(VARIANTS_FILE),
+		skip: result.getFile(SKIP_FILE),
+		skipContent: result.getFileContent(SKIP_FILE)
+	}
+}
+
+export ll.toStrict({
+	run: run,
+	// Exported for `resources.test.tengo`, which pins what it computes. A caller
+	// never needs it: `run` applies it unless the caller overrides `ram`.
+	ramFor: ramFor
+})

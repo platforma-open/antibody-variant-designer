@@ -143,7 +143,11 @@ importers:
         specifier: 'catalog:'
         version: 2.12.10(@types/node@26.1.2)
 
-  software:
+  software/antifold/software:
+    dependencies:
+      '@platforma-open/milaboratories.antibody-variant-designer.software-developability':
+        specifier: workspace:*
+        version: link:../../developability/software
     devDependencies:
       '@platforma-open/milaboratories.runenv-python-3':
         specifier: 'catalog:'
@@ -154,6 +158,56 @@ importers:
       '@platforma-sdk/package-builder':
         specifier: 'catalog:'
         version: 3.14.2
+
+  software/antifold/workflow:
+    dependencies:
+      '@platforma-open/milaboratories.antibody-variant-designer.software-antifold':
+        specifier: workspace:*
+        version: link:../software
+      '@platforma-open/milaboratories.antibody-variant-designer.software-developability.workflow':
+        specifier: workspace:*
+        version: link:../../developability/workflow
+      '@platforma-open/milaboratories.antifold-weights-assets':
+        specifier: ^1.0.0
+        version: 1.0.0
+      '@platforma-sdk/workflow-tengo':
+        specifier: 'catalog:'
+        version: 6.8.2
+    devDependencies:
+      '@platforma-sdk/tengo-builder':
+        specifier: 'catalog:'
+        version: 4.0.21
+      shx:
+        specifier: 'catalog:'
+        version: 0.4.0
+
+  software/developability/software:
+    devDependencies:
+      '@platforma-open/milaboratories.runenv-python-3':
+        specifier: 'catalog:'
+        version: 1.8.2
+      '@platforma-sdk/block-tools':
+        specifier: 'catalog:'
+        version: 2.12.10(@types/node@26.1.2)
+      '@platforma-sdk/package-builder':
+        specifier: 'catalog:'
+        version: 3.14.2
+
+  software/developability/workflow:
+    dependencies:
+      '@platforma-open/milaboratories.antibody-variant-designer.software-developability':
+        specifier: workspace:*
+        version: link:../software
+      '@platforma-sdk/workflow-tengo':
+        specifier: 'catalog:'
+        version: 6.8.2
+    devDependencies:
+      '@platforma-sdk/tengo-builder':
+        specifier: 'catalog:'
+        version: 4.0.21
+      shx:
+        specifier: 'catalog:'
+        version: 0.4.0
 
   test:
     dependencies:
@@ -210,12 +264,12 @@ importers:
 
   workflow:
     dependencies:
-      '@platforma-open/milaboratories.antibody-variant-designer.software':
+      '@platforma-open/milaboratories.antibody-variant-designer.software-antifold.workflow':
         specifier: workspace:*
-        version: link:../software
-      '@platforma-open/milaboratories.antifold-weights-assets':
-        specifier: ^1.0.0
-        version: 1.0.0
+        version: link:../software/antifold/workflow
+      '@platforma-open/milaboratories.antibody-variant-designer.software-developability.workflow':
+        specifier: workspace:*
+        version: link:../software/developability/workflow
       '@platforma-open/milaboratories.software-liability-definitions':
         specifier: ^1.1.0
         version: 1.1.0

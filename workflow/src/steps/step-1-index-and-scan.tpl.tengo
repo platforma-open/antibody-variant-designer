@@ -10,22 +10,18 @@
 // holds a file only for the antibodies that got that far; absence is how a
 // later step learns an antibody was already named. `liabilities.tsv` is
 // dataset-wide and leaves the pipeline as a PFrame, not as a step input.
+//
+// The exec recipe itself — flag names, workdir paths, output shape, resource
+// sizing — lives in the software package that owns the entrypoint. What
+// stays here is the block's side of the contract: which inputs are valid, what
+// the step is named to produce, and how an Advanced Settings override reaches
+// the recipe.
 
 self := import("@platforma-sdk/workflow-tengo:tpl")
 
-assets := import("@platforma-sdk/workflow-tengo:assets")
-exec := import("@platforma-sdk/workflow-tengo:exec")
-
 validation := import("@platforma-sdk/workflow-tengo:validation")
 
-workdir := import(":steps.workdir")
-
-scanSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software:index-and-scan")
-
-RESIDUES_DIR := "residues"
-TRIAGED_DIR := "triaged"
-LIABILITIES_FILE := "liabilities.tsv"
-SKIP_FILE := "skip.tsv"
+indexAndScan := import("@platforma-open/milaboratories.antibody-variant-designer.software-developability.workflow:index-and-scan")
 
 self.validateInputs({
 	"__options__,closed": "",
@@ -53,8 +49,8 @@ self.validateInputs({
 		cdrConfThresh: "number",
 		actOnFixability: "string"
 	},
-	// Advanced Settings → Resource Allocation. Either may be unset — the
-	// default below wins for the dimension the operator left empty.
+	// Advanced Settings → Resource Allocation. Either may be unset — the recipe
+	// sizes the dimension the operator left empty from the data it is handed.
 	resources: {
 		"__options__,closed": "",
 		"cpu,?": "number",
@@ -65,66 +61,14 @@ self.validateInputs({
 self.defineOutputs("residues", "triaged", "liabilities", "skip", "skipContent")
 
 self.body(func(inputs) {
-	// `pdbs` arrives already flattened by `tpl.inputs()`: a `path -> blob`
-	// map whose keys are the workdir paths the producer used, so
-	// `addFiles` restages it verbatim.
-	cpuOverride := inputs.resources.cpu
-	memOverride := is_undefined(inputs.resources.mem) ? undefined : string(inputs.resources.mem) + "GiB"
-
-	cmd := exec.builder().
-		software(scanSw).
-		resources({
-			queue: "medium",
-			onCPU: {
-				cpu: is_undefined(cpuOverride) ? 2 : cpuOverride,
-				ram: is_undefined(memOverride) ? "4GiB" : memOverride
-			}
-		}).
-		printErrStreamToStdout().
-		addFiles(inputs.pdbs).
-		writeFile(workdir.INDEX_FILE, workdir.renderIndex(inputs.roster)).
-		addFile("definitions.json", inputs.definitions).
-		arg("--pdb-dir").arg("pdbs").
-		arg("--pdb-index").arg(workdir.INDEX_FILE).
-		arg("--definitions").arg("definitions.json").
-		arg("--out-residues-dir").arg(RESIDUES_DIR).
-		arg("--out-triaged-dir").arg(TRIAGED_DIR).
-		arg("--out-liabilities").arg(LIABILITIES_FILE).
-		arg("--out-skip").arg(SKIP_FILE).
-		arg("--rsasa-buried-cutoff").arg(string(inputs.params.rsasaBuriedCutoff)).
-		arg("--fr-confidence-gating-threshold").arg(string(inputs.params.frConfThresh)).
-		arg("--cdr-confidence-gating-threshold").arg(string(inputs.params.cdrConfThresh)).
-		arg("--act-on-fixability").arg(inputs.params.actOnFixability)
-
-	// Both sidecars are optional dataset-wide TSVs, not directories: an
-	// older upstream emits no per-residue confidence at all, and an absent
-	// filter means the whole roster is in scope. Each flag is omitted
-	// entirely when its input never arrived, rather than passed pointing at
-	// an empty file.
-	if !is_undefined(inputs.confidence) {
-		cmd = cmd.
-			addFile("confidence.tsv", inputs.confidence).
-			arg("--per-residue-confidence").arg("confidence.tsv")
-	}
-	if !is_undefined(inputs.clonotypeFilter) {
-		cmd = cmd.
-			addFile("clonotype_filter.tsv", inputs.clonotypeFilter).
-			arg("--clonotype-filter").arg("clonotype_filter.tsv")
-	}
-
-	result := cmd.
-		saveFileSet("residues", workdir.dirPattern(RESIDUES_DIR)).
-		saveFileSet("triaged", workdir.dirPattern(TRIAGED_DIR)).
-		saveFile(LIABILITIES_FILE).
-		saveFile(SKIP_FILE).
-		saveFileContent(SKIP_FILE).
-		run()
-
-	return {
-		residues: result.getFileSet("residues"),
-		triaged: result.getFileSet("triaged"),
-		liabilities: result.getFile(LIABILITIES_FILE),
-		skip: result.getFile(SKIP_FILE),
-		skipContent: result.getFileContent(SKIP_FILE)
-	}
+	return indexAndScan.run({
+		roster: inputs.roster,
+		pdbs: inputs.pdbs,
+		definitions: inputs.definitions,
+		confidence: inputs.confidence,
+		clonotypeFilter: inputs.clonotypeFilter,
+		params: inputs.params,
+		cpu: inputs.resources.cpu,
+		ram: is_undefined(inputs.resources.mem) ? undefined : string(inputs.resources.mem) + "GiB"
+	})
 })

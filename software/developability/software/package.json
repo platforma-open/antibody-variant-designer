@@ -1,7 +1,7 @@
 {
-  "name": "@platforma-open/milaboratories.antibody-variant-designer.software",
+  "name": "@platforma-open/milaboratories.antibody-variant-designer.software-developability",
   "version": "1.0.0",
-  "description": "Block Software",
+  "description": "Residue indexing, liability scan and triage, candidate generation and ranking",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,7 +17,7 @@
   },
   "block-software": {
     "artifacts": {
-      "design-script": {
+      "developability": {
         "type": "python",
         "registry": "platforma-open",
         "environment": "@platforma-open/milaboratories.runenv-python-3:3.12.10",
@@ -25,72 +25,41 @@
           "toolset": "pip",
           "requirements": "requirements.txt"
         },
-        "root": "./developability"
+        "root": "./src"
       },
-      "design-script-with-antifold": {
-        "type": "python",
-        "registry": "platforma-open",
-        "environment": "@platforma-open/milaboratories.runenv-python-3:3.12.10",
-        "dependencies": {
-          "toolset": "pip",
-          "requirements": "requirements-antifold.txt"
-        },
-        "root": "./developability"
-      },
-      "design-script-docker": {
+      "developability-docker": {
         "type": "docker",
-        "context": "./developability",
+        "context": "./src",
         "dockerfile": "Dockerfile"
-      },
-      "design-script-with-antifold-docker": {
-        "type": "docker",
-        "context": "./developability",
-        "dockerfile": "Dockerfile-antifold"
       }
     },
     "entrypoints": {
       "index-and-scan": {
         "binary": {
-          "artifact": "design-script",
+          "artifact": "developability",
           "cmd": [
             "python",
             "{pkg}/scan.py"
           ]
         },
         "docker": {
-          "artifact": "design-script-docker",
+          "artifact": "developability-docker",
           "cmd": [
             "python",
             "{pkg}/scan.py"
-          ]
-        }
-      },
-      "read-tolerance": {
-        "binary": {
-          "artifact": "design-script-with-antifold",
-          "cmd": [
-            "python",
-            "{pkg}/antifold.py"
-          ]
-        },
-        "docker": {
-          "artifact": "design-script-with-antifold-docker",
-          "cmd": [
-            "python",
-            "{pkg}/antifold.py"
           ]
         }
       },
       "build-variants": {
         "binary": {
-          "artifact": "design-script",
+          "artifact": "developability",
           "cmd": [
             "python",
             "{pkg}/variants.py"
           ]
         },
         "docker": {
-          "artifact": "design-script-docker",
+          "artifact": "developability-docker",
           "cmd": [
             "python",
             "{pkg}/variants.py"

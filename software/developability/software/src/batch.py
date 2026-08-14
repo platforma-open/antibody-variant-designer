@@ -7,7 +7,9 @@ row names the antibody. The loop is deliberately **sequential** — an
 iteration's state is released before the next one starts, and rows are
 appended as they are produced rather than accumulated — because that is
 what holds the peak footprint at one antibody (plus, for the tolerance
-step, the model) and keeps the fixed resource sizing valid.
+step, the model). Each step's Tengo recipe asks for exactly that shape — a
+fixed base plus one antibody — so a change that started accumulating across
+iterations would have to raise the RAM those recipes request.
 
 A `process_one` returning `None` means the antibody's inputs are absent
 because an earlier step already named its reason. No row is written for it,
@@ -37,7 +39,7 @@ def run(
     fault can still be named after the antibody that caused it. Every other
     step leaves exceptions propagating, so a bug fails the exec loudly
     instead of degrading into a dataset of skip rows."""
-    rows: list[tuple[str, str]] = []
+    rows: list[tuple[str, str, str]] = []
     for entry in entries:
         try:
             reason = process_one(entry)
@@ -45,9 +47,9 @@ def run(
             if error_reason is None:
                 raise
             print(f"{entry.clonotype_key}: {exc}", file=sys.stderr)
-            rows.append((entry.clonotype_key, error_reason))
+            rows.append((entry.clonotype_key, error_reason, str(exc)))
             continue
         if reason is not None:
-            rows.append((entry.clonotype_key, reason))
+            rows.append((entry.clonotype_key, reason, ""))
     skip_store.write_skips(out_skip, rows)
     return 0
