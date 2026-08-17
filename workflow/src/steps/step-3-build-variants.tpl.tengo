@@ -8,8 +8,10 @@
 // candidate files written out and staged back in.
 //
 // `variants.tsv` is dataset-wide and leaves the pipeline as a PFrame. Its
-// `variantKey` is content-addressed over the parent, the block and the edit
-// set, which is why the block id has to reach the process that writes it.
+// `variantKey` is a per-parent ordinal — `v01`, `v02`, … in rank order — so no
+// block id reaches this process: run identity lands on the emitted columns as a
+// spec domain after the exec, which is what lets two blocks over one dataset
+// share this run.
 //
 // The exec recipe itself — flag names, workdir paths, output shape, resource
 // sizing — lives in the software package that owns the entrypoint. What
@@ -36,9 +38,6 @@ self.validateInputs({
 	tolerance: { any: validation.resource() },
 	residues: { any: validation.resource() },
 	definitions: validation.resource(),
-	// The third ingredient of the variantKey hash, alongside the parent key
-	// and the edit set.
-	blockId: "string",
 	params: {
 		"__options__,closed": "",
 		maxEditsPerVariant: "number",
@@ -65,7 +64,6 @@ self.body(func(inputs) {
 		tolerance: inputs.tolerance,
 		residues: inputs.residues,
 		definitions: inputs.definitions,
-		blockId: inputs.blockId,
 		params: inputs.params,
 		cpu: inputs.resources.cpu,
 		ram: is_undefined(inputs.resources.mem) ? undefined : string(inputs.resources.mem) + "GiB"

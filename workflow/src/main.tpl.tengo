@@ -32,6 +32,23 @@ step2ReadToleranceTpl := assets.importTemplate(":steps.step-2-read-tolerance")
 step3BuildVariantsTpl := assets.importTemplate(":steps.step-3-build-variants")
 
 /**
+ * Advanced Settings → Resource Allocation, as the render options every step
+ * passes it with. Either dimension may be unset; the step keeps its own fixed
+ * default for the one the operator left empty.
+ *
+ * It rides `metaInputs` because a resource request cannot change one byte of
+ * what the step computes, while a regular input is a cache key — meta inputs
+ * "are not accounted in deduplication and recovering"
+ * (`render.lib.tengo:26-29`), which is also where the SDK keeps the exec's own
+ * quota and its cpu/ram formulas (`exec/index.lib.tengo:1422-1444`) and where
+ * `xsv.exportFrame` keeps the same two knobs (`pframes/xsv.lib.tengo:249-254`).
+ * As a regular input it made tuning a slow run discard the run being tuned.
+ */
+_resourceRail := func(cpu, mem) {
+	return { metaInputs: { resources: { cpu: cpu, mem: mem } } }
+}
+
+/**
  * Residues, triaged sites, and the parent-keyed liabilities TSV — including
  * declined liabilities the Parents page needs.
  * Optional confidence / subset sidecars are single dataset-wide TSVs.
@@ -45,14 +62,9 @@ _scanLiabilities := func(pdbIndex, pdbs, definitions, args, columns, resolvedSub
 			rsasaBuriedCutoff: args.rsasaBuriedCutoff,
 			frConfThresh: args.frConfThresh,
 			cdrConfThresh: args.cdrConfThresh,
+			// A set, already sorted by the model's `.args()` so that the same set
+			// is the same key — see `_resourceRail` on why a key matters here.
 			actOnFixability: text.join(args.actOnFixability, ",")
-		},
-		// Advanced Settings → Resource Allocation. Either may be unset; the
-		// step keeps its own fixed default for the dimension the operator
-		// left empty.
-		resources: {
-			cpu: args.indexAndScanCpu,
-			mem: args.indexAndScanMem
 		}
 	}
 
@@ -68,7 +80,8 @@ _scanLiabilities := func(pdbIndex, pdbs, definitions, args, columns, resolvedSub
 		inputs.clonotypeFilter = xsv.exportFrame([resolvedSubset], "tsv", { mem: "1GiB", cpu: 1 })
 	}
 
-	return render.create(step1ScanLiabilitiesTpl, inputs)
+	return render.create(
+		step1ScanLiabilitiesTpl, inputs, _resourceRail(args.indexAndScanCpu, args.indexAndScanMem))
 }
 
 /**
@@ -79,37 +92,32 @@ _readTolerance := func(pdbIndex, pdbs, residues, triaged, args) {
 		pdbIndex: pdbIndex,
 		pdbs: pdbs,
 		residues: residues,
-		triaged: triaged,
-		resources: {
-			cpu: args.readToleranceCpu,
-			mem: args.readToleranceMem
-		}
-	})
+		triaged: triaged
+	}, _resourceRail(args.readToleranceCpu, args.readToleranceMem))
 }
 
 /**
  * Ranked variant hypotheses that cleared the re-scan gate.
+ *
+ * The block id is deliberately absent: it reaches the emitted columns as a spec
+ * domain applied after this exec, never as an exec input, so two blocks over one
+ * dataset share this run.
  */
-_buildVariants := func(pdbIndex, triaged, tolerance, residues, definitions, blockId, args) {
+_buildVariants := func(pdbIndex, triaged, tolerance, residues, definitions, args) {
 	return render.create(step3BuildVariantsTpl, {
 		pdbIndex: pdbIndex,
 		triaged: triaged,
 		tolerance: tolerance,
 		residues: residues,
 		definitions: definitions,
-		blockId: blockId,
 		params: {
 			maxEditsPerVariant: args.maxEditsPerVariant,
 			candidateResiduesPerPosition: args.candidateResiduesPerPosition,
 			variantsPerParent: args.variantsPerParent,
 			lowToleranceFloor: args.lowToleranceFloor,
 			epistasisRescoreTopK: args.epistasisRescoreTopK
-		},
-		resources: {
-			cpu: args.buildVariantsCpu,
-			mem: args.buildVariantsMem
 		}
-	})
+	}, _resourceRail(args.buildVariantsCpu, args.buildVariantsMem))
 }
 
 wf.prepare(func(args) {
@@ -191,7 +199,6 @@ wf.body(func(args) {
 		tolerance.output("tolerance"),
 		liabilities.output("residues"),
 		definitions,
-		blockId,
 		args)
 
 	// The parent's label as a two-column frame `pt` can join on, with both

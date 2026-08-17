@@ -152,7 +152,14 @@ export const platforma = BlockModelV3.create(dataModel)
       primaryRef: data.dataset.primary,
       subsetRef: data.dataset.primary.filter,
       rsasaBuriedCutoff: data.rsasaBuriedCutoff,
-      actOnFixability: data.actOnFixability,
+      // A set, and the args are the run's content key: the workflow hands this
+      // list to step 1's exec, and the backend canonicalizes a JSON resource's
+      // map keys but never a list's element order. The UI appends in click
+      // order, so without this the same two fixability classes picked in the
+      // other order are a different key — re-running step 1 and, behind it,
+      // the AntiFold pass. Sorted and uniqued here because `.args()` is where
+      // the key is authored.
+      actOnFixability: [...new Set(data.actOnFixability)].sort(),
       maxEditsPerVariant: data.maxEditsPerVariant,
       frConfThresh: data.frConfThresh,
       cdrConfThresh: data.cdrConfThresh,

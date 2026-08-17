@@ -82,9 +82,6 @@ ARGS := {
 	tolerance: { any: validation.resource() },
 	residues: { any: validation.resource() },
 	definitions: validation.resource(),
-	// The third ingredient of the content-addressed variantKey, alongside the
-	// parent key and the edit set.
-	blockId: "string",
 	params: {
 		"__options__,closed": "",
 		maxEditsPerVariant: "number",
@@ -127,7 +124,6 @@ run := func(args) {
 		arg("--tolerance-dir").arg("tolerance").
 		arg("--residues-dir").arg("residues").
 		arg("--definitions").arg("definitions.json").
-		arg("--block-id").arg(args.blockId).
 		arg("--out-variants").arg(VARIANTS_FILE).
 		arg("--out-skip").arg(SKIP_FILE).
 		arg("--max-edits-per-variant").arg(string(args.params.maxEditsPerVariant)).

@@ -1,10 +1,15 @@
 """Read/write for `variants.tsv`, written by `ranking.py` — the block's
 final artifact, the one file downstream imports as a PFrame.
 
-One dataset-wide file for the whole run, so every row carries the three
-axis values as columns: `clonotypeKey` for the parent, `variantKey` for the
-variant, and `blockId` for the run. `xsv.importFile` builds each axis from
-a column, and there is nowhere else a per-row axis value could come from.
+One dataset-wide file for the whole run, so every row carries its axis
+values as columns: `clonotypeKey` for the parent and `variantKey` for the
+variant. `xsv.importFile` builds each axis from a column, and there is
+nowhere else a per-row axis value could come from.
+
+**The run carries no column here.** Run identity is a spec domain the
+workflow applies to the emitted columns after this process has run, so no
+block id reaches it — which is what lets two blocks over one dataset share
+this exec instead of computing the same variants twice.
 
 `variantKey` is a per-parent ordinal — `v01`, `v02`, … in the rank order
 `ranking.rank_variants` fixed, zero-padded to two digits. The key therefore
@@ -23,7 +28,6 @@ OBJECTIVE = "liability"
 TSV_COLUMNS = [
     "clonotypeKey",
     "variantKey",
-    "blockId",
     "rank",
     "objective",
     "chain",
@@ -63,8 +67,8 @@ def _low_confidence_warning_str(variant: Variant) -> str:
 def variant_key(rank: int) -> str:
     """The per-parent ordinal variant axis value — `v01`, `v02`, … in rank
     order. No hash, no `blockId`: uniqueness across parents already comes
-    from pairing this with `clonotypeKey`, and `pl7.app/blockId` is its own
-    axis rather than an ingredient folded into this one."""
+    from pairing this with `clonotypeKey`, and run identity is a domain on
+    the emitted axis rather than an ingredient folded into this one."""
     return f"v{rank:02d}"
 
 
@@ -74,9 +78,7 @@ def write_variants_header(path: str) -> None:
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
 
 
-def append_variants_tsv(
-    path: str, clonotype_key: str, block_id: str, variants: list[Variant]
-) -> None:
+def append_variants_tsv(path: str, clonotype_key: str, variants: list[Variant]) -> None:
     """Append one parent's ranked variants, computing each row's
     `variantKey` here from its rank — this is the one place a variant's
     rank and its parent are both in hand at once."""
@@ -87,7 +89,6 @@ def append_variants_tsv(
             [
                 clonotype_key,
                 variant_key(v.rank),
-                block_id,
                 v.rank,
                 OBJECTIVE,
                 v.chain,
@@ -107,10 +108,8 @@ def append_variants_tsv(
 
 def read_variants_tsv(path: str) -> list[tuple[str, str, Variant]]:
     """`(clonotype_key, variant_key, variant)` per row, in file order.
-    `blockId` and `objective` round-trip through the file but not through
-    `Variant` — `blockId` is the caller's own argument to
-    `append_variants_tsv`, not a per-variant property, and `objective` is
-    the fixed constant `OBJECTIVE`."""
+    `objective` round-trips through the file but not through `Variant` — it
+    is the fixed constant `OBJECTIVE`."""
     variants = []
     with Path(path).open(newline="") as fh:
         for row in csv.DictReader(fh, delimiter="\t"):

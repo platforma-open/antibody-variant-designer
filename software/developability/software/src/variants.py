@@ -80,9 +80,6 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="taxonomy JSON; the re-scan needs the identical detector",
     )
-    parser.add_argument(
-        "--block-id", required=True, help="the third ingredient of the variantKey hash"
-    )
     parser.add_argument("--out-variants", required=True)
     parser.add_argument("--out-skip", required=True)
     parser.add_argument(
@@ -141,9 +138,7 @@ def main(argv: list[str] | None = None) -> int:
             args.low_tolerance_floor,
             args.epistasis_rescore_top_k,
         )
-        variant_store.append_variants_tsv(
-            args.out_variants, entry.clonotype_key, args.block_id, variants
-        )
+        variant_store.append_variants_tsv(args.out_variants, entry.clonotype_key, variants)
         return reason
 
     return batch.run(pdb_index.read_index(args.pdb_index), one, args.out_skip)

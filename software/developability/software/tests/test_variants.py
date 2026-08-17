@@ -13,8 +13,6 @@ import triage
 import variant_store
 import variants
 
-BLOCK_ID = "block-abc"
-
 TAXONOMY = [
     {"id": "deamidation_ng", "name": "Deamidation (N[GS])", "liabilityType": "deamidation",
      "motif": r"N[GS]", "riskLevel": "High", "fixability": "fixable"},
@@ -104,7 +102,6 @@ def _run(batch, extra_args=None):
             "--residues-dir", batch.dir("residues"),
             "--pdb-index", batch.index,
             "--definitions", definitions,
-            "--block-id", BLOCK_ID,
             "--out-variants", out_variants,
             "--out-skip", out_skip,
         ]
@@ -224,7 +221,6 @@ class TestMainRequiresTheTaxonomy:
                     "--residues-dir", batch.dir("residues"),
                     "--pdb-index", batch.index,
                     "--definitions", missing,
-                    "--block-id", BLOCK_ID,
                     "--out-variants", batch.path("variants.tsv"),
                     "--out-skip", batch.path("skip.tsv"),
                 ]

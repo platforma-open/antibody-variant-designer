@@ -6,8 +6,6 @@ import io
 
 import variant_store
 
-BLOCK_ID = "block-abc"
-
 
 def _variant(
     rank=1,
@@ -40,7 +38,7 @@ class TestVariantsTsvRoundTrips:
         path = tmp_path / "variants.tsv"
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", BLOCK_ID, [original])
+        variant_store.append_variants_tsv(str(path), "clone-1", [original])
         [(clonotype_key, _, rehydrated)] = variant_store.read_variants_tsv(str(path))
 
         assert clonotype_key == "clone-1"
@@ -51,7 +49,7 @@ class TestVariantsTsvRoundTrips:
 
         variant_store.write_variants_header(str(path))
         variant_store.append_variants_tsv(
-            str(path), "clone-1", BLOCK_ID, [_variant(worst_confidence_angstroms=None)]
+            str(path), "clone-1", [_variant(worst_confidence_angstroms=None)]
         )
         [(_, _, rehydrated)] = variant_store.read_variants_tsv(str(path))
 
@@ -64,7 +62,6 @@ class TestVariantsTsvRoundTrips:
         variant_store.append_variants_tsv(
             str(path),
             "clone-1",
-            BLOCK_ID,
             [
                 _variant(rank=1, low_confidence_warning=True, changed_positions="H:N107D"),
                 _variant(rank=2, low_confidence_warning=False, changed_positions="H:N108D"),
@@ -87,8 +84,8 @@ class TestOneFileHoldsEveryParent:
         path = tmp_path / "variants.tsv"
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", BLOCK_ID, [_variant()])
-        variant_store.append_variants_tsv(str(path), "clone-2", BLOCK_ID, [_variant()])
+        variant_store.append_variants_tsv(str(path), "clone-1", [_variant()])
+        variant_store.append_variants_tsv(str(path), "clone-2", [_variant()])
 
         assert [r["clonotypeKey"] for r in _rows_of(path)] == ["clone-1", "clone-2"]
 
@@ -98,8 +95,8 @@ class TestOneFileHoldsEveryParent:
                _variant(rank=2, changed_positions="H:N108D")]
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", BLOCK_ID, two)
-        variant_store.append_variants_tsv(str(path), "clone-2", BLOCK_ID, two)
+        variant_store.append_variants_tsv(str(path), "clone-1", two)
+        variant_store.append_variants_tsv(str(path), "clone-2", two)
 
         assert [r["rank"] for r in _rows_of(path)] == ["1", "2", "1", "2"]
 
@@ -116,23 +113,24 @@ class TestVariantKeyIsAPerParentOrdinal:
                _variant(rank=2, changed_positions="H:N108D")]
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", BLOCK_ID, two)
+        variant_store.append_variants_tsv(str(path), "clone-1", two)
 
         assert [r["variantKey"] for r in _rows_of(path)] == ["v01", "v02"]
 
-    def test_block_id_is_its_own_column_not_a_key_ingredient(self, tmp_path):
-        # A different blockId changes the emitted `blockId` column, never
-        # the ordinal `variantKey` — the third axis and the variant axis
-        # are independent.
+    def test_no_run_identity_column_reaches_the_file(self, tmp_path):
+        # Run identity is a spec domain the workflow applies after this
+        # process, so nothing per-run enters the file or this process's
+        # arguments — that is what makes two blocks over one dataset share
+        # the exec instead of computing the same variants twice.
         path = tmp_path / "variants.tsv"
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", "block-abc", [_variant(rank=1)])
-        variant_store.append_variants_tsv(str(path), "clone-2", "block-xyz", [_variant(rank=1)])
+        variant_store.append_variants_tsv(str(path), "clone-1", [_variant(rank=1)])
 
         rows = _rows_of(path)
-        assert [r["blockId"] for r in rows] == ["block-abc", "block-xyz"]
-        assert [r["variantKey"] for r in rows] == ["v01", "v01"]
+        assert "blockId" not in variant_store.TSV_COLUMNS
+        assert "blockId" not in rows[0]
+        assert [r["variantKey"] for r in rows] == ["v01"]
 
     def test_clonotype_key_and_variant_key_are_unique_across_the_whole_file(self, tmp_path):
         path = tmp_path / "variants.tsv"
@@ -140,8 +138,8 @@ class TestVariantKeyIsAPerParentOrdinal:
                _variant(rank=2, changed_positions="H:N108D")]
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", BLOCK_ID, two)
-        variant_store.append_variants_tsv(str(path), "clone-2", BLOCK_ID, two)
+        variant_store.append_variants_tsv(str(path), "clone-1", two)
+        variant_store.append_variants_tsv(str(path), "clone-2", two)
 
         rows = _rows_of(path)
         keys = [(r["clonotypeKey"], r["variantKey"]) for r in rows]
