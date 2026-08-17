@@ -1,11 +1,13 @@
 // Antibody Variant Designer, workflow entry point.
 //
 // Resolves the structures dataset (and its optional Lead Selection subset),
-// stages every PDB blob into the roster the three steps share, runs the
+// stages every PDB blob into the PDB index the three steps share, runs the
 // shared liability taxonomy once, wires `index-and-scan` -> `read-tolerance`
 // -> `build-variants`, and imports the two dataset-wide TSVs the last two
 // steps leave behind as PFrames. No per-residue logic and no step body live
-// here — that is entirely the steps' concern.
+// here — that is entirely the steps' concern. What those two TSVs must gain
+// before the import lives in `spec-helpers.lib.tengo`, so this file holds the
+// wiring and nothing else.
 
 wf := import("@platforma-sdk/workflow-tengo:workflow")
 assets := import("@platforma-sdk/workflow-tengo:assets")
@@ -17,26 +19,26 @@ maps := import("@platforma-sdk/workflow-tengo:maps")
 pframes := import("@platforma-sdk/workflow-tengo:pframes")
 pSpec := import("@platforma-sdk/workflow-tengo:pframes.spec")
 xsv := import("@platforma-sdk/workflow-tengo:pframes.xsv")
-pt := import("@platforma-sdk/workflow-tengo:pt")
 text := import("text")
 json := import("json")
 
 specs := import(":specs")
+specHelpers := import(":spec-helpers")
 
 definitionsSw := assets.importSoftware("@platforma-open/milaboratories.software-liability-definitions:main")
 
-Step1ScanLiabilitiesTpl := assets.importTemplate(":steps.step-1-index-and-scan")
-Step2ReadToleranceTpl := assets.importTemplate(":steps.step-2-read-tolerance")
-Step3BuildVariantsTpl := assets.importTemplate(":steps.step-3-build-variants")
+step1ScanLiabilitiesTpl := assets.importTemplate(":steps.step-1-index-and-scan")
+step2ReadToleranceTpl := assets.importTemplate(":steps.step-2-read-tolerance")
+step3BuildVariantsTpl := assets.importTemplate(":steps.step-3-build-variants")
 
 /**
  * Residues, triaged sites, and the parent-keyed liabilities TSV — including
  * declined liabilities the Parents page needs.
  * Optional confidence / subset sidecars are single dataset-wide TSVs.
  */
-ScanLiabilities := func(roster, pdbs, definitions, args, columns, resolvedSubset) {
+_scanLiabilities := func(pdbIndex, pdbs, definitions, args, columns, resolvedSubset) {
 	inputs := {
-		roster: roster,
+		pdbIndex: pdbIndex,
 		pdbs: pdbs,
 		definitions: definitions,
 		params: {
@@ -66,15 +68,15 @@ ScanLiabilities := func(roster, pdbs, definitions, args, columns, resolvedSubset
 		inputs.clonotypeFilter = xsv.exportFrame([resolvedSubset], "tsv", { mem: "1GiB", cpu: 1 })
 	}
 
-	return render.create(Step1ScanLiabilitiesTpl, inputs)
+	return render.create(step1ScanLiabilitiesTpl, inputs)
 }
 
 /**
  * Per-position structural tolerance for every antibody that still has work.
  */
-_readTolerance := func(roster, pdbs, residues, triaged, args) {
-	return render.create(Step2ReadToleranceTpl, {
-		roster: roster,
+_readTolerance := func(pdbIndex, pdbs, residues, triaged, args) {
+	return render.create(step2ReadToleranceTpl, {
+		pdbIndex: pdbIndex,
 		pdbs: pdbs,
 		residues: residues,
 		triaged: triaged,
@@ -88,9 +90,9 @@ _readTolerance := func(roster, pdbs, residues, triaged, args) {
 /**
  * Ranked variant hypotheses that cleared the re-scan gate.
  */
-_buildVariants := func(roster, triaged, tolerance, residues, definitions, blockId, args) {
-	return render.create(Step3BuildVariantsTpl, {
-		roster: roster,
+_buildVariants := func(pdbIndex, triaged, tolerance, residues, definitions, blockId, args) {
+	return render.create(step3BuildVariantsTpl, {
+		pdbIndex: pdbIndex,
 		triaged: triaged,
 		tolerance: tolerance,
 		residues: residues,
@@ -110,146 +112,6 @@ _buildVariants := func(roster, triaged, tolerance, residues, definitions, blockI
 	})
 }
 
-/**
- * `C-XXXXX` from a clonotype key, by upstream's own recipe — digits dropped,
- * first five characters, uppercased, with a `-N` suffix when two keys in the
- * frame share that prefix
- * (`mixcr-clonotyping/workflow/src/clonotype-label.lib.tengo:87-115`). Copied
- * rather than imported: the lib lives in another block's repo, and matching
- * upstream's spelling exactly is the whole point.
- *
- * Returns the frame with `outCol` added; the two working columns are dropped
- * again before it returns.
- */
-_withDerivedCloneId := func(df, keyCol, outCol) {
-	prefixCol := outCol + "_prefix_tmp"
-	rankCol := outCol + "_rank_tmp"
-
-	df = df.withColumns(
-		pt.col(keyCol).
-			strReplace("\\d", "", { replaceAll: true }).
-			strSlice(0, 5).
-			strToUpper().
-			alias(prefixCol))
-	df = df.withColumns(
-		pt.rank(pt.col(keyCol)).over(pt.col(prefixCol)).alias(rankCol))
-	df = df.withColumns(
-		pt.when(pt.col(rankCol).gt(pt.lit(1))).
-			then(pt.concatStr(
-				[pt.lit("C"), pt.col(prefixCol), pt.col(rankCol).cast("String")],
-				{ delimiter: "-" })).
-			otherwise(pt.concatStr([pt.lit("C"), pt.col(prefixCol)], { delimiter: "-" })).
-			alias(outCol))
-
-	return df.withoutColumns(prefixCol, rankCol)
-}
-
-/**
- * `parentCloneId` beside every row's `clonotypeKey` — upstream's own label
- * when the dataset carries one, derived from the key when it does not. Both
- * flat tables gain the column through this one function, so the Variants page
- * and the Parents page always name one parent alike.
- *
- * A left join: a parent the label frame does not mention keeps its rows with
- * an empty cell, rather than losing a designed variant or a liability.
- *
- * The derived branch runs on the DISTINCT key set and joins the result back,
- * never on the table itself. `_withDerivedCloneId` ranks a key inside its
- * prefix group, and both tables hold several rows per parent — every variant
- * of one parent, every liability of one antibody — so a repeated key would
- * rank above 1 and take a `-N` suffix it has not earned.
- */
-_withParentCloneId := func(ptWf, df, parentLabels) {
-	ids := undefined
-	if is_undefined(parentLabels) {
-		ids = _withDerivedCloneId(
-			df.select(pt.col("clonotypeKey")).unique({ subset: "clonotypeKey" }),
-			"clonotypeKey",
-			"parentCloneId")
-	} else {
-		ids = ptWf.frame(parentLabels)
-	}
-	return df.join(ids, { on: ["clonotypeKey"], how: "left" })
-}
-
-/**
- * The flat `liabilities.tsv` with the parent's readable clone id joined on,
- * before `xsv.importFile` turns its first column into an axis.
- *
- * The liability group keeps upstream's own clonotype axis, and upstream's
- * `pl7.app/label` for that axis lives in the result pool the block's table
- * cannot read (`model/src/index.ts`, `tableFromAccessorOutput`). So the
- * Parents page can name a parent only through a value column of this block's
- * own — the same column, from the same source, the variant group carries.
- */
-_withParentIdOnLiabilities := func(liabilitiesFile, parentLabels) {
-	ptWf := pt.workflow().mem("1GiB").cpu(1)
-	df := _withParentCloneId(
-		ptWf,
-		ptWf.frame(liabilitiesFile, { xsvType: "tsv", inferSchema: false }),
-		parentLabels)
-	df.save("liabilities-with-id.tsv")
-	return ptWf.run().getFile("liabilities-with-id.tsv")
-}
-
-/**
- * Everything the flat `variants.tsv` must gain before `xsv.importFile` turns
- * a column into an axis — this is the only stage where the values are plain
- * columns, and `xsv.exportFrame` can relabel a PColumn but never compute one.
- *
- *   variantCloneKey     sha256 of `<parentKey>#<designed sequence>`,
- *                       base64-alphanumeric, 120 bits — upstream's
- *                       clonotype-key recipe (`mixcr-export.tpl.tengo:64-68`),
- *                       and the group's only axis. The parent is an
- *                       ingredient because it is part of what the row IS: two
- *                       parents that differ only at the one liability being
- *                       fixed converge on the same designed sequence, and
- *                       hashing the sequence alone would collide their rows
- *                       on a single axis value
- *   variantCloneId      `C-XXXXX` derived from that key
- *   parentClonotypeKey  the parent's key, renamed from the flat `clonotypeKey`
- *   parentCloneId       the parent's own `C-XXXXX`, joined from upstream's
- *                       label column when it exists; derived from the parent
- *                       key as a fallback when the dataset carries no label
- *   variantId           `<parentClonotypeId>:vNN` — the vendor's synthesis id
- *
- * The synthesis CSV is built here too, off the same flat table: a PColumn's
- * `axesSpec` must match the physical axis set its data was partitioned with
- * at `xsv.importFile` time, so re-speccing the imported columns for export
- * crashes at read time
- * (080-fact-export-axesspec-must-match-physical-partition-count). The flat
- * table has no axes to get wrong.
- */
-_withIdentityAndCsv := func(variantsFile, parentLabels, blockId) {
-	ptWf := pt.workflow().mem("1GiB").cpu(1)
-	rawDf := ptWf.frame(variantsFile, { xsvType: "tsv", inferSchema: false })
-
-	df := rawDf.withColumns(
-		pt.col("clonotypeKey").alias("parentClonotypeKey"),
-		pt.concatStr([pt.col("clonotypeKey"), pt.col("variantKey")], { delimiter: ":" }).alias("variantId"),
-		pt.concatStr(
-			[pt.col("clonotypeKey").fillNull(""), pt.col("variantSequence").fillNull("")],
-			{ delimiter: "#" }).
-			hash("sha256", "base64_alphanumeric", 120).
-			alias("variantCloneKey"))
-	df = _withDerivedCloneId(df, "variantCloneKey", "variantCloneId")
-
-	df = _withParentCloneId(ptWf, df, parentLabels)
-	df.save("variants-with-id.tsv")
-
-	csvSelect := [pt.col("clonotypeKey").alias(specs.CSV_PARENT_HEADER)]
-	for c in specs.csvColumnOrder(blockId) {
-		csvSelect = append(csvSelect, pt.col(c.column).alias(c.csvHeader))
-	}
-	df.select(csvSelect...).save("synthesis.csv")
-
-	result := ptWf.run()
-	return {
-		variantsWithId: result.getFile("variants-with-id.tsv"),
-		synthesisCsv: result.getFile("synthesis.csv")
-	}
-}
-
 wf.prepare(func(args) {
 	// Anchor on the PDB column so upstream's per-residue confidence
 	// auto-discovers on the same clonotype axis. There is no subset filter
@@ -264,7 +126,7 @@ wf.prepare(func(args) {
 			name: "pl7.app/structure/confidence/perResidue"
 		},
 		"perResidueConfidence")
-	// The parent's readable clone id, on the same clonotype axis. It is a
+	// The parent's readable clonotype id, on the same clonotype axis. It is a
 	// value this block cannot compute: the `-N` collision suffix is ranked
 	// over the producing block's whole clonotype set, not over our subset.
 	bb.addMulti(
@@ -295,17 +157,17 @@ wf.body(func(args) {
 	clonotypeAxis := pdbAxes[0]
 
 	// Each ResourceMap key is a JSON-encoded [clonotypeKey] array; each value
-	// is a Blob ref to a PDB file. One sorted pass builds the roster every
+	// is a Blob ref to a PDB file. One sorted pass builds the PDB index every
 	// step shares and the path -> blob map `pdbs` restages into each exec —
 	// sorted keys keep every step's input canonical so the pure step dedups.
 	inputsMap := pdbCol.data.inputs()
-	roster := []
+	pdbIndex := []
 	pdbs := {}
 	for keyJson in maps.getKeys(inputsMap) {
 		clonotypeKey := json.decode(keyJson)[0]
 		bareName := clonotypeKey + ".pdb"
 		pdbs["pdbs/" + bareName] = inputsMap[keyJson].getValue()
-		roster = append(roster, { clonotypeKey: clonotypeKey, filename: bareName })
+		pdbIndex = append(pdbIndex, { clonotypeKey: clonotypeKey, filename: bareName })
 	}
 
 	// The shared liability taxonomy, read once per run and handed to steps
@@ -320,11 +182,11 @@ wf.body(func(args) {
 		run()
 	definitions := definitionsResult.getFile("definitions.json")
 
-	liabilities := ScanLiabilities(roster, pdbs, definitions, args, args.columns, args.resolvedSubset)
+	liabilities := _scanLiabilities(pdbIndex, pdbs, definitions, args, args.columns, args.resolvedSubset)
 	tolerance := _readTolerance(
-		roster, pdbs, liabilities.output("residues"), liabilities.output("triaged"), args)
+		pdbIndex, pdbs, liabilities.output("residues"), liabilities.output("triaged"), args)
 	variants := _buildVariants(
-		roster,
+		pdbIndex,
 		liabilities.output("triaged"),
 		tolerance.output("tolerance"),
 		liabilities.output("residues"),
@@ -340,7 +202,7 @@ wf.body(func(args) {
 	if !is_undefined(parentLabelCols) && len(parentLabelCols) > 0 {
 		labelTsv := pframes.tsvFileBuilder()
 		labelTsv.setAxisHeader(clonotypeAxis.name, "clonotypeKey")
-		labelTsv.add(parentLabelCols[0], { header: "parentCloneId" })
+		labelTsv.add(parentLabelCols[0], { header: "parentClonotypeId" })
 		labelTsv.mem("1GiB")
 		labelTsv.cpu(1)
 		parentLabels = labelTsv.buildForPT()
@@ -381,8 +243,8 @@ wf.body(func(args) {
 	}
 	liabilitiesPf := liabilitiesPfBuilder.build()
 
-	// The synthesis CSV: `A-0018`'s fixed column set, already built off the
-	// flat table in `_withVariantIdAndCsv` — see its docstring for why.
+	// The synthesis CSV: the vendor's fixed column set, already built off the
+	// flat table in `spec-helpers.lib.tengo` — see its docstring for why.
 	synthesisCsv := variantsBuilt.synthesisCsv
 
 	return {

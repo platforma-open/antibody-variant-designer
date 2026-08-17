@@ -1,0 +1,68 @@
+// The `C-XXXXX` short id a clonotype is known by, from its key.
+//
+// **A copy of another block's file, kept under that block's own name.** The
+// original is `mixcr-clonotyping/workflow/src/clonotype-label.lib.tengo`, and
+// three more blocks carry the same file byte for byte —
+// `mixcr-amplicon-alignment`, `import-vdj-data` and
+// `miltenyi-tcr-bcr-clonotyping`. `peptide-extraction` and
+// `synthetic-repertoire-profiler` carry the same recipe under `P-` and `V-`.
+// Copied rather than imported because a tengo library cannot cross a block
+// repo, and matching upstream's spelling exactly is the whole point: this
+// block shows an id beside ids the producing block minted, and a reader must
+// not be able to tell which came from where.
+//
+// The function name and signature are upstream's, `pt` injected and all, so a
+// diff against the original is one file against one file. Only the second form
+// upstream exports is left out — `generateClonotypeLabelSteps`, which emits
+// raw PTabler step JSON for callers that assemble steps by hand.
+
+ll := import("@platforma-sdk/workflow-tengo:ll")
+
+/**
+ * `C-XXXXX` from a clonotype key — digits dropped, first five characters,
+ * uppercased, with a `-N` suffix when two keys in the frame share that prefix.
+ *
+ * The suffix is ranked over the rows the frame holds, so a caller whose table
+ * repeats a key must derive on the DISTINCT key set and join the result back.
+ * A repeated key ranks above 1 and takes a suffix it has not earned otherwise.
+ *
+ * @param df: frame - a `pt` frame holding `clonotypeKeyCol`
+ * @param clonotypeKeyCol: string - the key column to derive from
+ * @param clonotypeLabelCol: string - the column to write the id into
+ * @param pt: module - the `pt` module, injected as upstream injects it
+ * @return frame - `df` with `clonotypeLabelCol` added; the two working columns
+ *                 it needs are dropped again before it returns.
+ */
+addClonotypeLabelColumnsPt := func(df, clonotypeKeyCol, clonotypeLabelCol, pt) {
+	prefixTempCol := clonotypeLabelCol + "_prefix_temp"
+	rankTempCol := clonotypeLabelCol + "_rank_temp"
+
+	// Add prefix_temp column (digits removed, first 5 chars, uppercased)
+	df = df.withColumns(
+		pt.col(clonotypeKeyCol).
+			strReplace("\\d", "", { replaceAll: true }).
+			strSlice(0, 5).
+			strToUpper().
+			alias(prefixTempCol))
+
+	// Add rank_temp column - rank of the clonotypeKeyCol within each prefixTempCol group
+	df = df.withColumns(
+		pt.rank(pt.col(clonotypeKeyCol)).
+			over(pt.col(prefixTempCol)).
+			alias(rankTempCol))
+
+	// Add final clonotypeLabelCol column (C-XXXXX or C-XXXXX-RANK)
+	df = df.withColumns(
+		pt.when(pt.col(rankTempCol).gt(pt.lit(1))).
+			then(pt.concatStr(
+				[pt.lit("C"), pt.col(prefixTempCol), pt.col(rankTempCol).cast("String")],
+				{ delimiter: "-" })).
+			otherwise(pt.concatStr([pt.lit("C"), pt.col(prefixTempCol)], { delimiter: "-" })).
+			alias(clonotypeLabelCol))
+
+	return df.withoutColumns(prefixTempCol, rankTempCol)
+}
+
+export ll.toStrict({
+	addClonotypeLabelColumnsPt: addClonotypeLabelColumnsPt
+})

@@ -1,0 +1,150 @@
+// What the two flat TSVs must gain before `xsv.importFile` turns their columns
+// into PColumns.
+//
+// This is the only stage where the values are plain columns: `xsv.exportFrame`
+// can relabel a PColumn but never compute one, and a PColumn's `axesSpec` must
+// match the physical axis set its data was partitioned with at import time.
+// Every derived column therefore has to exist before the import, which is what
+// these functions build.
+//
+// `specs.lib.tengo` names the columns; this file fills them. The `C-XXXXX`
+// recipe itself lives in `clonotype-label.lib.tengo`, under the name four
+// other blocks carry it by.
+
+ll := import("@platforma-sdk/workflow-tengo:ll")
+pt := import("@platforma-sdk/workflow-tengo:pt")
+
+clonotypeLabel := import(":clonotype-label")
+specs := import(":specs")
+
+/**
+ * `parentClonotypeId` beside every row's `clonotypeKey` — upstream's own label
+ * when the dataset carries one, derived from the key when it does not. Both
+ * flat tables gain the column through this one function, so the Variants page
+ * and the Parents page always name one parent alike.
+ *
+ * A left join: a parent the label frame does not mention keeps its rows with
+ * an empty cell, rather than losing a designed variant or a liability.
+ *
+ * The derived branch runs on the DISTINCT key set and joins the result back,
+ * never on the table itself. `clonotype-label.lib.tengo` ranks a key inside its
+ * prefix group, and both tables hold several rows per parent — every variant
+ * of one parent, every liability of one antibody — so a repeated key would
+ * rank above 1 and take a `-N` suffix it has not earned.
+ *
+ * @param ptWf: workflow - the `pt` workflow the frames belong to
+ * @param df: frame - a flat table holding a `clonotypeKey` column
+ * @param parentLabels: frame | undefined - upstream's label as a two-column
+ *                      frame (`clonotypeKey`, `parentClonotypeId`); undefined
+ *                      when the dataset carries no label column
+ * @return frame - `df` with `parentClonotypeId` joined on
+ */
+_withParentClonotypeId := func(ptWf, df, parentLabels) {
+	ids := undefined
+	if is_undefined(parentLabels) {
+		ids = clonotypeLabel.addClonotypeLabelColumnsPt(
+			df.select(pt.col("clonotypeKey")).unique({ subset: "clonotypeKey" }),
+			"clonotypeKey",
+			"parentClonotypeId",
+			pt)
+	} else {
+		ids = ptWf.frame(parentLabels)
+	}
+	return df.join(ids, { on: ["clonotypeKey"], how: "left" })
+}
+
+/**
+ * The flat `liabilities.tsv` with the parent's readable clonotype id joined on,
+ * before `xsv.importFile` turns its first column into an axis.
+ *
+ * The liability group keeps upstream's own clonotype axis, and upstream's
+ * `pl7.app/label` for that axis lives in the result pool the block's table
+ * cannot read (`model/src/index.ts`, `tableFromAccessorOutput`). So the
+ * Parents page can name a parent only through a value column of this block's
+ * own — the same column, from the same source, the variant group carries.
+ *
+ * @param liabilitiesFile: reference - the flat `liabilities.tsv` step 1 wrote
+ * @param parentLabels: frame | undefined - as in `_withParentClonotypeId`
+ * @return reference - the same table with `parentClonotypeId` added
+ */
+withParentIdOnLiabilities := func(liabilitiesFile, parentLabels) {
+	ptWf := pt.workflow().mem("1GiB").cpu(1)
+	df := _withParentClonotypeId(
+		ptWf,
+		ptWf.frame(liabilitiesFile, { xsvType: "tsv", inferSchema: false }),
+		parentLabels)
+	df.save("liabilities-with-id.tsv")
+	return ptWf.run().getFile("liabilities-with-id.tsv")
+}
+
+/**
+ * Everything the flat `variants.tsv` must gain before `xsv.importFile` turns
+ * a column into an axis, and the synthesis CSV built off the same flat table
+ * — for the reason the file header gives: the flat table has no axes to get
+ * wrong.
+ *
+ * @param variantsFile: reference - the flat `variants.tsv` step 3 wrote
+ * @param parentLabels: frame | undefined - as in `_withParentClonotypeId`
+ * @param blockId: string - this run's block id, which fixes the CSV's column
+ *                 order through `specs.csvColumnOrder`
+ * @return object - the two files, and the columns the first one gained
+ *           {
+ *             variantsWithId: reference - the flat table, now carrying
+ *                 {
+ *                   variantClonotypeKey: sha256 of `<parentKey>#<designed sequence>`,
+ *                       base64-alphanumeric, 120 bits — upstream's clonotype-key
+ *                       recipe (`mixcr-export.tpl.tengo:64-68`), and the group's
+ *                       only axis. The parent is an ingredient because it is part
+ *                       of what the row IS: two parents that differ only at the one
+ *                       liability being fixed converge on the same designed
+ *                       sequence, and hashing the sequence alone would collide
+ *                       their rows on a single axis value
+ *                   variantClonotypeId: `C-XXXXX` derived from that key
+ *                   parentClonotypeKey: the parent's key, renamed from the flat
+ *                       `clonotypeKey`
+ *                   parentClonotypeId: the parent's own `C-XXXXX`, joined from
+ *                       upstream's label column when it exists; derived from the
+ *                       parent key as a fallback when the dataset carries no label
+ *                   variantId: `<parentClonotypeId>:vNN` — the vendor's synthesis id
+ *                 }
+ *             synthesisCsv: reference - the vendor's fixed column set
+ *           }
+ */
+withIdentityAndCsv := func(variantsFile, parentLabels, blockId) {
+	ptWf := pt.workflow().mem("1GiB").cpu(1)
+	rawDf := ptWf.frame(variantsFile, { xsvType: "tsv", inferSchema: false })
+
+	df := rawDf.withColumns(
+		pt.col("clonotypeKey").alias("parentClonotypeKey"),
+		pt.concatStr([pt.col("clonotypeKey"), pt.col("variantKey")], { delimiter: ":" }).alias("variantId"),
+		pt.concatStr(
+			[pt.col("clonotypeKey").fillNull(""), pt.col("variantSequence").fillNull("")],
+			{ delimiter: "#" }).
+			hash("sha256", "base64_alphanumeric", 120).
+			alias("variantClonotypeKey"))
+	df = clonotypeLabel.addClonotypeLabelColumnsPt(
+		df, "variantClonotypeKey", "variantClonotypeId", pt)
+
+	df = _withParentClonotypeId(ptWf, df, parentLabels)
+	df.save("variants-with-id.tsv")
+
+	// The parent's machine key under the header the vendor's order form fixes,
+	// and the only CSV header `specs.csvColumnOrder` does not name: it renames a
+	// column the import turns into an axis, not one of the variant columns.
+	csvSelect := [pt.col("clonotypeKey").alias("parentClonotypeId")]
+	for c in specs.csvColumnOrder(blockId) {
+		csvSelect = append(csvSelect, pt.col(c.column).alias(c.csvHeader))
+	}
+	df.select(csvSelect...).save("synthesis.csv")
+
+	result := ptWf.run()
+	return {
+		variantsWithId: result.getFile("variants-with-id.tsv"),
+		synthesisCsv: result.getFile("synthesis.csv")
+	}
+}
+
+export ll.toStrict({
+	withParentIdOnLiabilities: withParentIdOnLiabilities,
+	withIdentityAndCsv: withIdentityAndCsv
+})
