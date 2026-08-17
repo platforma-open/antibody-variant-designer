@@ -123,7 +123,7 @@ class TestVariantKeyIsAPerParentOrdinal:
     def test_block_id_is_its_own_column_not_a_key_ingredient(self, tmp_path):
         # A different blockId changes the emitted `blockId` column, never
         # the ordinal `variantKey` — the third axis and the variant axis
-        # are independent, per `073-decision-the-block-id-becomes-an-axis`.
+        # are independent.
         path = tmp_path / "variants.tsv"
 
         variant_store.write_variants_header(str(path))

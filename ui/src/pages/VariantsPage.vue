@@ -19,11 +19,10 @@ const app = useApp();
 
 // The grid's own built-in Export button would export only the *visible*
 // columns of whichever table handle backs the grid — missing
-// `variantSequence` and `status`, both hidden by design
-// ([[039-decision-hide-variantsequence-and-status]]), and spelling
+// `variantSequence` and `status`, both hidden by design, and spelling
 // axes/headers by their table labels rather than the vendor's fixed contract
 // headers. So this table renders no export button of its own; the one
-// "Export" control on this page always downloads the fixed A-0018 synthesis
+// "Export" control on this page always downloads the vendor's fixed synthesis
 // CSV instead.
 const { downloading: exportingCsv, download } = useFileDownload();
 async function exportSynthesisCsv() {

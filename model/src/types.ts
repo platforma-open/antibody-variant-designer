@@ -25,9 +25,9 @@ export type BlockData = {
   liabilitiesTableState: PlDataTableStateV2;
   /** Advanced Settings → Resource Allocation. Unset means the workflow's
    *  own fixed size for that step; set overrides it. Never data-scaled —
-   *  the pipeline itself never derives these from input size
-   *  ([[015-decision-request-gpu-directly]]), so a value here is only ever
-   *  the operator's own choice, the same "leave empty to use the default"
+   *  the pipeline itself never derives these from input size, so a value
+   *  here is only ever the operator's own choice, the same
+   *  "leave empty to use the default"
    *  contract `sequence-embeddings` and `cell-ranger` use. */
   indexAndScanCpu?: number;
   indexAndScanMem?: number;
@@ -80,8 +80,7 @@ export type SkipReason =
   | "no-candidate-cleared-motif";
 
 /** One skipped parent, for the Skipped page.
- *  `detail` is free text and empty for every reason except `backend-failed`
- *  ([[068-decision-capture-the-caught-exception-text-in-the-skip-tsv]]):
+ *  `detail` is free text and empty for every reason except `backend-failed`:
  *  the other six reasons are named, deterministic conditions already fully
  *  explained by the reason itself. */
 export type SkippedClonotype = {
