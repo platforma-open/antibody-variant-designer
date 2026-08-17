@@ -16,6 +16,7 @@
 ll := import("@platforma-sdk/workflow-tengo:ll")
 assets := import("@platforma-sdk/workflow-tengo:assets")
 exec := import("@platforma-sdk/workflow-tengo:exec")
+execConstants := import("@platforma-sdk/workflow-tengo:exec.constants")
 validation := import("@platforma-sdk/workflow-tengo:validation")
 
 workdir := import(":workdir")
@@ -75,7 +76,7 @@ DEFAULT_CPU := 2
  * than how many of them arrived.
  */
 ramFor := func(count) {
-	// An empty roster would divide by zero, and leaves the base — which is all a
+	// An empty index would divide by zero, and leaves the base — which is all a
 	// run with nothing to scan needs.
 	divisor := count > 0 ? count : 1
 	return f.size(STRUCTURE_TAG, { default: 0 }).
@@ -93,7 +94,7 @@ ARGS := {
 	"__options__,closed": "",
 	// Sorted-key order, so the exec input stays canonical and a pure step
 	// dedups.
-	roster: [{
+	pdbIndex: [{
 		"__options__,closed": "",
 		clonotypeKey: "string",
 		filename: "string"
@@ -106,7 +107,7 @@ ARGS := {
 	// because an older upstream emits no per-residue confidence at all, and
 	// each antibody then falls back to its own B-factor column.
 	"confidence,?": validation.resource(),
-	// Absent means the whole roster is in scope.
+	// Absent means the whole index is in scope.
 	"clonotypeFilter,?": validation.resource(),
 	params: {
 		"__options__,closed": "",
@@ -123,7 +124,7 @@ ARGS := {
 }
 
 /**
- * Index, scan and triage every antibody in the roster.
+ * Index, scan and triage every antibody in the PDB index.
  *
  * @return {residues: fileSet, triaged: fileSet, liabilities: file,
  *          skip: file, skipContent: content}
@@ -134,15 +135,15 @@ run := func(args) {
 	cmd := exec.builder().
 		software(scanSw).
 		resources({
-			queue: "medium",
+			queue: execConstants.MEDIUM_QUEUE,
 			onCPU: {
 				cpu: is_undefined(args.cpu) ? DEFAULT_CPU : args.cpu,
-				ram: is_undefined(args.ram) ? ramFor(len(args.roster)) : args.ram
+				ram: is_undefined(args.ram) ? ramFor(len(args.pdbIndex)) : args.ram
 			}
 		}).
 		printErrStreamToStdout().
 		addFiles(args.pdbs, { tag: STRUCTURE_TAG }).
-		writeFile(workdir.INDEX_FILE, workdir.renderIndex(args.roster)).
+		writeFile(workdir.INDEX_FILE, workdir.renderIndex(args.pdbIndex)).
 		addFile("definitions.json", args.definitions).
 		arg("--pdb-dir").arg("pdbs").
 		arg("--pdb-index").arg(workdir.INDEX_FILE).

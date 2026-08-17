@@ -19,13 +19,13 @@ so summing the five skip files counts it once rather than twice.
 import sys
 from collections.abc import Callable
 
-import roster
+import pdb_index
 import skip_store
 
 
 def run(
-    entries: list[roster.Entry],
-    process_one: Callable[[roster.Entry], str | None],
+    entries: list[pdb_index.Entry],
+    process_one: Callable[[pdb_index.Entry], str | None],
     out_skip: str,
     error_reason: str | None = None,
 ) -> int:

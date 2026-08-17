@@ -42,8 +42,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import batch
+import pdb_index
 import residue_store
-import roster
 import tolerance_store
 
 _VENDOR_DIR = str(Path(__file__).parent / "vendor" / "AntiFold")
@@ -246,7 +246,7 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="scan.py's --out-triaged-dir, read as a gate only — never opened",
     )
-    parser.add_argument("--pdb-index", required=True, help="the roster")
+    parser.add_argument("--pdb-index", required=True, help="the pdb_index")
     parser.add_argument("--weights", required=True, help="mounted models/model.pt")
     parser.add_argument("--out-tolerance-dir", required=True)
     parser.add_argument("--out-skip", required=True)
@@ -266,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = Path(args.out_tolerance_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    entries = roster.read_roster(args.pdb_index)
+    entries = pdb_index.read_index(args.pdb_index)
     # A missing triaged file is a gate, not an error: it means triage left this
     # antibody nothing actionable, or the index phase skipped it. Either way
     # exec 1 already named the reason and no variant can come from it, so the
@@ -283,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     # would buy a model no antibody uses.
     model = load_model(str(weights_path)) if runnable else None
 
-    def one(entry: roster.Entry) -> str:
+    def one(entry: pdb_index.Entry) -> str:
         return process_one(
             model,
             str(pdb_dir / entry.filename),

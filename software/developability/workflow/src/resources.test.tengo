@@ -88,7 +88,7 @@ TestIndexAndScanStaysInsideItsCeiling := func() {
 }
 
 TestIndexAndScanWithNothingStagedAsksForItsBase := func() {
-	// An empty roster measures no tag at all, and must not divide by zero.
+	// An empty index measures no tag at all, and must not divide by zero.
 	test.isEqual(GIB, _ram(indexAndScan.ramFor(0), {}, {}))
 }
 

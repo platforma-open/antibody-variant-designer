@@ -35,8 +35,8 @@ import cysteine
 import exposure
 import liability_store
 import motifs
+import pdb_index
 import residue_store
-import roster
 import structure
 import taxonomy_store
 import triage
@@ -87,7 +87,7 @@ def _load_confidence_tsv(path: str | None) -> dict[str, list[dict]]:
 
 def _load_clonotype_filter(path: str | None) -> set[str] | None:
     """The optional Lead Selection subset, exported as one dataset-wide TSV.
-    `None` means no filter was picked — process the whole roster. A picked
+    `None` means no filter was picked — process the whole pdb_index. A picked
     filter yields a (possibly empty) keep set; a clonotype whose value is
     falsy is treated as not selected, same grammar as the sibling block's
     `--clonotype-filter`."""
@@ -190,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="the staged blobs — the index phase parses them and freesasa reads them again",
     )
-    parser.add_argument("--pdb-index", required=True, help="the roster")
+    parser.add_argument("--pdb-index", required=True, help="the pdb_index")
     parser.add_argument("--out-residues-dir", required=True)
     parser.add_argument(
         "--definitions", required=True, help="taxonomy JSON from the shared package"
@@ -207,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         dest="clonotype_filter",
         help="optional dataset-wide TSV naming the subset to process; omitted means the "
-        "whole roster",
+        "whole pdb_index",
     )
     parser.add_argument("--out-triaged-dir", required=True)
     parser.add_argument("--out-liabilities", required=True)
@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     liability_store.write_liabilities_header(args.out_liabilities)
 
-    def one(entry: roster.Entry) -> str | None:
+    def one(entry: pdb_index.Entry) -> str | None:
         # A picked filter narrows which parents this step attempts; a
         # filtered-out clonotype gets no skip row at all, since it was never
         # in scope rather than having failed.

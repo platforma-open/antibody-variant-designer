@@ -214,7 +214,7 @@ class TestClonotypeFilter:
             + make_pdb(v_domain("H", cys_at=(104,), overrides={30: "ASN", 31: "GLY"}))
         )
 
-    def test_a_roster_of_three_with_two_kept_attempts_only_those_two(self, batch):
+    def test_an_index_of_three_with_two_kept_attempts_only_those_two(self, batch):
         _stage(batch, "clone-1", self._actionable())
         _stage(batch, "clone-2", self._actionable())
         _stage(batch, "clone-3", self._actionable())
@@ -228,7 +228,7 @@ class TestClonotypeFilter:
         assert skips == [("clone-1", "", ""), ("clone-2", "", "")]
         assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"clone-1", "clone-2"}
 
-    def test_an_absent_filter_attempts_the_whole_roster(self, batch):
+    def test_an_absent_filter_attempts_the_whole_index(self, batch):
         _stage(batch, "clone-1", self._actionable())
         _stage(batch, "clone-2", self._actionable())
 
@@ -292,7 +292,7 @@ class TestBatchCli:
         assert not Path(batch.dir("residues"), "not-imgt.json").exists()
         assert not Path(triaged_dir, "not-imgt.json").exists()
 
-    def test_a_rostered_clonotype_with_no_staged_blob_is_no_structure(self, batch):
+    def test_an_indexed_clonotype_with_no_staged_blob_is_no_structure(self, batch):
         # A clonotype the upstream block failed for has no ResourceMap entry
         # at all, so its blob is simply absent — never a null one.
         _stage(batch, "present", self._actionable())
@@ -302,7 +302,7 @@ class TestBatchCli:
 
         assert skips == [("present", "", ""), ("absent", "no-structure", "")]
 
-    def test_an_empty_roster_leaves_a_header_only_liabilities_tsv(self, batch):
+    def test_an_empty_index_leaves_a_header_only_liabilities_tsv(self, batch):
         skips, _, out_liabilities = _run(batch)
 
         assert skips == []

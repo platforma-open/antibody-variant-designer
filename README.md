@@ -32,7 +32,7 @@ pipeline is readable without opening python.
 flowchart LR
   U["3D Structure Prediction<br/>pdb + per-residue confidence"] --> M
   T["software-liability-definitions<br/>definitions.json"] --> M
-  M["main.tpl.tengo<br/>roster + pdbs/"] --> S1
+  M["main.tpl.tengo<br/>pdb_index + pdbs/"] --> S1
   S1["1. index-and-scan<br/>onCPU"] --> S2["2. read-tolerance<br/>onCPU / onGPU"] --> S3["3. build-variants<br/>onCPU"]
   S3 --> O["variants PFrame<br/>liabilities PFrame<br/>synthesis CSV"]
   S1 --> O
@@ -54,12 +54,12 @@ failed job.
 **Intermediates are plain files staged workdir to workdir.** No PColumn spec
 exists for any of them and nothing imports them — only what the UI reads becomes
 a PFrame. Each intermediate is one file per clonotype in a directory, named from
-the roster, and a directory crosses an exec boundary as a `saveFileSet` capture
+the PDB index, and a directory crosses an exec boundary as a `saveFileSet` capture
 restaged with `addFiles`, never as a path.
 
 | Artifact | Producer → consumer | Format | Read/write by |
 |---|---|---|---|
-| `pdb_index.tsv` | `main.tpl.tengo` → every step | `clonotypeKey ⇥ filename`, the full ResourceMap in sorted-key order | `roster.py` |
+| `pdb_index.tsv` | `main.tpl.tengo` → every step | `clonotypeKey ⇥ filename`, the full ResourceMap in sorted-key order | `pdb_index.py` |
 | `definitions.json` | taxonomy exec → steps 1, 3 | the taxonomy package's document — `schemaVersion` / `liabilities` / `fixabilityWeights` | `taxonomy_store.py` |
 | `per_residue_confidence.tsv` | `main.tpl.tengo` → step 1 | clonotype key + JSON records, zero or one per run | `--per-residue-confidence` |
 | `clonotype_filter.tsv` | `main.tpl.tengo` → step 1 | the optional Lead Selection subset, zero or one per run | `--clonotype-filter` |

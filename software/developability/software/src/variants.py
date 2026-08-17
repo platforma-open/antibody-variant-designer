@@ -22,9 +22,9 @@ from pathlib import Path
 import batch
 import candidates
 import liability_store
+import pdb_index
 import ranking
 import residue_store
-import roster
 import taxonomy_store
 import tolerance_store
 import variant_store
@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--triaged-dir", required=True, help="scan.py's --out-triaged-dir")
     parser.add_argument("--tolerance-dir", required=True, help="antifold.py's --out-tolerance-dir")
     parser.add_argument("--residues-dir", required=True, help="structure.py's output directory")
-    parser.add_argument("--pdb-index", required=True, help="the roster")
+    parser.add_argument("--pdb-index", required=True, help="the pdb_index")
     parser.add_argument(
         "--definitions",
         required=True,
@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     residues_dir = Path(args.residues_dir)
     variant_store.write_variants_header(args.out_variants)
 
-    def one(entry: roster.Entry) -> str | None:
+    def one(entry: pdb_index.Entry) -> str | None:
         triaged_path = triaged_dir / f"{entry.stem}.json"
         tolerance_path = tolerance_dir / f"{entry.stem}.tsv"
         residues_path = residues_dir / f"{entry.stem}.json"
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return reason
 
-    return batch.run(roster.read_roster(args.pdb_index), one, args.out_skip)
+    return batch.run(pdb_index.read_index(args.pdb_index), one, args.out_skip)
 
 
 if __name__ == "__main__":

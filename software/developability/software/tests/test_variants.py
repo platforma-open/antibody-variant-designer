@@ -188,7 +188,7 @@ class TestDatasetWideVariantsTsv:
 
         assert {variant for _, variant, _ in written} == {"v01"}
 
-    def test_an_empty_roster_leaves_a_header_only_variants_tsv(self, batch):
+    def test_an_empty_index_leaves_a_header_only_variants_tsv(self, batch):
         skips, written = _run(batch)
 
         assert skips == []

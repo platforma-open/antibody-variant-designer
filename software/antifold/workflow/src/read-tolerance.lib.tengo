@@ -1,5 +1,5 @@
 // The exec recipe for the `read-tolerance` entrypoint — one exec that reads
-// AntiFold's per-position tolerance for every antibody in the roster.
+// AntiFold's per-position tolerance for every antibody in the PDB index.
 //
 // It ships in the piece that owns the software it runs, so the flag names, the
 // workdir paths and the output shape are versioned in the same commit as the
@@ -15,6 +15,7 @@
 ll := import("@platforma-sdk/workflow-tengo:ll")
 assets := import("@platforma-sdk/workflow-tengo:assets")
 exec := import("@platforma-sdk/workflow-tengo:exec")
+execConstants := import("@platforma-sdk/workflow-tengo:exec.constants")
 validation := import("@platforma-sdk/workflow-tengo:validation")
 
 workdir := import("@platforma-open/milaboratories.antibody-variant-designer.software-developability.workflow:workdir")
@@ -80,7 +81,7 @@ VRAM := "6GiB"
  * the GPU leg the structure is still parsed on the host before it is moved.
  */
 ramFor := func(count) {
-	// An empty roster would divide by zero. It also loads no model at all, so
+	// An empty index would divide by zero. It also loads no model at all, so
 	// what it is left asking for — BASE_RAM — is already more than it needs.
 	divisor := count > 0 ? count : 1
 	return f.size(STRUCTURE_TAG, { default: 0 }).
@@ -95,7 +96,7 @@ ramFor := func(count) {
 // the developability piece's `index-and-scan.lib.tengo`.
 ARGS := {
 	"__options__,closed": "",
-	roster: [{
+	pdbIndex: [{
 		"__options__,closed": "",
 		clonotypeKey: "string",
 		filename: "string"
@@ -125,12 +126,12 @@ run := func(args) {
 	validation.assertType(args, ARGS, "read-tolerance: bad args")
 
 	cpu := is_undefined(args.cpu) ? DEFAULT_CPU : args.cpu
-	ram := is_undefined(args.ram) ? ramFor(len(args.roster)) : args.ram
+	ram := is_undefined(args.ram) ? ramFor(len(args.pdbIndex)) : args.ram
 
 	result := exec.builder().
 		software(antifoldSw).
 		resources({
-			queue: "heavy",
+			queue: execConstants.HEAVY_QUEUE,
 			onCPU: { cpu: cpu, ram: ram },
 			onGPU: { cpu: cpu, ram: ram, vram: VRAM }
 		}).
@@ -139,7 +140,7 @@ run := func(args) {
 		addFiles(args.pdbs, { tag: STRUCTURE_TAG }).
 		addFiles(args.residues).
 		addFiles(args.triaged).
-		writeFile(workdir.INDEX_FILE, workdir.renderIndex(args.roster)).
+		writeFile(workdir.INDEX_FILE, workdir.renderIndex(args.pdbIndex)).
 		arg("--pdb-dir").arg("pdbs").
 		arg("--pdb-index").arg(workdir.INDEX_FILE).
 		arg("--residues-dir").arg("residues").

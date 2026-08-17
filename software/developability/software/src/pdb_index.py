@@ -1,4 +1,4 @@
-"""Read/write for `pdb_index.tsv`, the roster every batch entrypoint loops
+"""Read/write for `pdb_index.tsv`, the pdb_index every batch entrypoint loops
 over.
 
 Two columns, `clonotypeKey` and `filename`, written once per run by the
@@ -20,7 +20,7 @@ COLUMNS = ["clonotypeKey", "filename"]
 
 @dataclass(frozen=True)
 class Entry:
-    """One roster row: which clonotype, and the bare filename of its staged
+    """One pdb_index row: which clonotype, and the bare filename of its staged
     PDB. `stem` is what every per-clonotype artifact is named after."""
 
     clonotype_key: str
@@ -31,7 +31,7 @@ class Entry:
         return Path(self.filename).stem
 
 
-def write_roster(path: str, entries: list[Entry]) -> None:
+def write_index(path: str, entries: list[Entry]) -> None:
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
     writer.writerow(COLUMNS)
@@ -40,7 +40,7 @@ def write_roster(path: str, entries: list[Entry]) -> None:
     Path(path).write_text(buf.getvalue())
 
 
-def read_roster(path: str) -> list[Entry]:
+def read_index(path: str) -> list[Entry]:
     """In file order, which the workflow writes sorted by key — every step
     iterates in this order so a batch's exec input stays canonical."""
     with Path(path).open(newline="") as fh:

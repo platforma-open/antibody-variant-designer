@@ -70,7 +70,7 @@ def variant_key(rank: int) -> str:
 
 def write_variants_header(path: str) -> None:
     """Start the run's one dataset-wide file, before the batch loop, so an
-    empty roster still leaves a header-only TSV."""
+    empty pdb_index still leaves a header-only TSV."""
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
 
 

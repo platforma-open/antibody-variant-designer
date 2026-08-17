@@ -407,7 +407,7 @@ class TestBatchCli:
 
         assert skips == []
 
-    def test_an_empty_roster_never_loads_the_checkpoint(self, batch, monkeypatch):
+    def test_an_empty_index_never_loads_the_checkpoint(self, batch, monkeypatch):
         def _fail_if_called(*_args, **_kwargs):
             raise AssertionError("nothing runnable — the 540 MiB load buys nothing")
 

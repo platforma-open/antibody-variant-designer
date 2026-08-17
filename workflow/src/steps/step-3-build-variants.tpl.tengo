@@ -25,9 +25,9 @@ buildVariants := import("@platforma-open/milaboratories.antibody-variant-designe
 
 self.validateInputs({
 	"__options__,closed": "",
-	// The roster, verbatim as `main.tpl.tengo` built it from the PDB
+	// The PDB index, verbatim as `main.tpl.tengo` built it from the PDB
 	// ResourceMap's sorted keys.
-	roster: [{
+	pdbIndex: [{
 		"__options__,closed": "",
 		clonotypeKey: "string",
 		filename: "string"
@@ -60,7 +60,7 @@ self.defineOutputs("variants", "skip", "skipContent")
 
 self.body(func(inputs) {
 	return buildVariants.run({
-		roster: inputs.roster,
+		pdbIndex: inputs.pdbIndex,
 		triaged: inputs.triaged,
 		tolerance: inputs.tolerance,
 		residues: inputs.residues,

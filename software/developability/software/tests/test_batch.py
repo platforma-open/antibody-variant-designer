@@ -4,12 +4,12 @@ attribution rules that replace one-exec-per-antibody."""
 import pytest
 
 import batch
-import roster
+import pdb_index
 import skip_store
 
 
 def _entries(*keys):
-    return [roster.Entry(clonotype_key=k, filename=f"{k}.pdb") for k in keys]
+    return [pdb_index.Entry(clonotype_key=k, filename=f"{k}.pdb") for k in keys]
 
 
 class TestOneRowPerAttemptedClonotype:
@@ -44,7 +44,7 @@ class TestOneRowPerAttemptedClonotype:
 
         assert skip_store.read_skips(str(out_skip)) == [("b", "", "")]
 
-    def test_an_empty_roster_leaves_a_header_only_skip_tsv_and_exits_zero(self, tmp_path):
+    def test_an_empty_index_leaves_a_header_only_skip_tsv_and_exits_zero(self, tmp_path):
         out_skip = tmp_path / "skip.tsv"
 
         rc = batch.run([], lambda _e: "", str(out_skip))

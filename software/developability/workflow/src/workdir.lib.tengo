@@ -1,7 +1,7 @@
 // How every entrypoint of this block expects its workdir to be laid out.
 //
 // It lives in the developability piece rather than in the block's own workflow
-// because it is this software's command-line contract: `roster.py` parses the
+// because it is this software's command-line contract: `pdb_index.py` parses the
 // TSV that `renderIndex` writes, and each entrypoint's `--out-*-dir` flag writes
 // the directory that `dirPattern` captures. The two recipes next to this file
 // use it, and so does the AntiFold recipe, whose package depends on this one.
@@ -22,13 +22,13 @@
 ll := import("@platforma-sdk/workflow-tengo:ll")
 text := import("text")
 
-// The roster's filename inside every step's workdir.
+// The index's filename inside every step's workdir.
 INDEX_FILE := "pdb_index.tsv"
 
 COLUMNS := ["clonotypeKey", "filename"]
 
 /**
- * Render the roster as the TSV every entrypoint parses.
+ * Render the PDB index as the TSV every entrypoint parses.
  *
  * @param entries: [{clonotypeKey: string, filename: string}] - in the caller's
  *                 order, which is sorted-key order, so the exec input stays
