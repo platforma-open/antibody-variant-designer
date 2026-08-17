@@ -111,7 +111,7 @@ function reduceSkippedClonotypes(stepSkipTsvs: readonly string[]): SkippedClonot
 // (`pl-tree/src/snapshot.ts:153`).
 //
 // The cost of staying local is the row label: upstream's `pl7.app/label`
-// ("Clone Id", `C-EWOQA`) lives in the pool, so the grid shows the raw
+// ("Clonotype Id", `C-EWOQA`) lives in the pool, so the grid shows the raw
 // content hash instead. Joining it needs the offending pool column named and
 // excluded first, not a different call shape.
 //
@@ -219,9 +219,10 @@ export const platforma = BlockModelV3.create(dataModel)
   .outputWithStatus("variantsTable", (ctx): PlDataTableModel | undefined =>
     tableFromAccessorOutput(ctx, "variantsData", ctx.data.variantsTableState),
   )
-  // Six value columns on the [parent clonotype, liabilityKey] axes,
-  // including the liabilities triage declined — the Parents page's only
-  // source for those rows.
+  // One row per parent, on the [parent clonotype] axis alone: a coarse
+  // verdict plus a joined summary of every triaged liability, including the
+  // ones triage declined — the Parents page's only source for those.
+  // 082-decision-the-liabilities-group-drops-to-one-axis
   .outputWithStatus("liabilitiesTable", (ctx): PlDataTableModel | undefined =>
     tableFromAccessorOutput(ctx, "liabilitiesData", ctx.data.liabilitiesTableState),
   )

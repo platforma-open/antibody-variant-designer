@@ -2,9 +2,10 @@
 
 `triaged.json` carries only the liabilities `candidates.py` may act on —
 verdict `"exposed"` — since that is the exact `actionable` set this file
-carries across unchanged. `liabilities.tsv` carries every triaged
-liability, including the ones triage declined, because the Parents page
-has no other source for them.
+carries across unchanged. `liabilities.tsv` carries one row per parent, a
+coarse verdict plus a summary of every triaged liability including the ones
+triage declined, because the Parents page has no other source for them
+(`082-decision-the-liabilities-group-drops-to-one-axis`).
 
 Each `Triaged` site round-trips as full `residue_store.Residue` rows rather
 than bare offsets: `candidates.py` needs each edited residue's chain, IMGT
@@ -23,13 +24,8 @@ import triage
 
 TSV_COLUMNS = [
     "clonotypeKey",
-    "liabilityKey",
-    "liabilityType",
     "verdict",
-    "region",
-    "rsasa",
-    "lowConfidence",
-    "fixability",
+    "summary",
 ]
 
 
@@ -43,10 +39,6 @@ def liability_key(triaged: triage.Triaged) -> str:
     within a parent."""
     start = triaged.site[0]
     return f"{triaged.liability_type}@{start.chain}{start.imgt}"
-
-
-def _low_confidence_str(triaged: triage.Triaged) -> str:
-    return "yes" if triaged.low_confidence else "no"
 
 
 def write_triaged(path: str, triaged_list: list[triage.Triaged]) -> None:
@@ -89,35 +81,49 @@ def read_triaged(path: str) -> list[triage.Triaged]:
 
 def write_liabilities_header(path: str) -> None:
     """Start the run's one dataset-wide file. Called once, before the batch
-    loop, so an empty roster still leaves a header-only TSV rather than no
+    loop, so an empty pdb_index still leaves a header-only TSV rather than no
     file at all."""
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
+
+
+def summarize_liabilities(triaged_list: list[triage.Triaged]) -> tuple[str, str]:
+    """A coarse verdict plus one joined summary line for a parent's triaged
+    liabilities, mirroring the sibling block's
+    `_create_sequence_liabilities_summary_str`
+    (`antibody-sequence-liabilities/liabilities-calc-script/src/main.py:133-226`).
+
+    `verdict` is `"present"` when the parent carries at least one triaged
+    liability, `"none"` when it triaged clean. `summary` lists every one,
+    declined ones included, each written `<liabilityType>@<chain><imgtLabel>
+    (<verdict>)` — the fixability class is appended for a
+    `fixability-declined` site, since that is the only place its decline
+    reason survives once the per-liability columns are gone.
+    """
+    if not triaged_list:
+        return "none", "None"
+    parts = []
+    for t in triaged_list:
+        entry = f"{liability_key(t)} ({t.verdict}"
+        if t.verdict == "fixability-declined":
+            entry += f": {t.fixability}"
+        entry += ")"
+        parts.append(entry)
+    return "present", ", ".join(parts)
 
 
 def append_liabilities_tsv(
     path: str, clonotype_key: str, triaged_list: list[triage.Triaged]
 ) -> None:
-    """Append one antibody's rows — every triaged liability, whatever its
-    verdict, since the Parents page has no other source for a `buried` or
-    `fixability-declined` row.
+    """Append one row for this antibody — a coarse verdict plus a summary of
+    every triaged liability, whatever its verdict, since the Parents page has
+    no other source for a `buried` or `fixability-declined` site.
 
-    Appends rather than returning rows to collect: one file now holds the
-    whole dataset, and accumulating every antibody's rows before a single
+    Appends rather than returning a row to collect: one file now holds the
+    whole dataset, and accumulating every antibody's row before a single
     write is what the sequential-streaming constraint forbids."""
+    verdict, summary = summarize_liabilities(triaged_list)
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-    for t in triaged_list:
-        writer.writerow(
-            [
-                _tsv_value(clonotype_key),
-                _tsv_value(liability_key(t)),
-                _tsv_value(t.liability_type),
-                _tsv_value(t.verdict),
-                _tsv_value(t.site[0].region),
-                _tsv_value(t.rsasa),
-                _tsv_value(_low_confidence_str(t)),
-                _tsv_value(t.fixability),
-            ]
-        )
+    writer.writerow([_tsv_value(clonotype_key), verdict, summary])
     with Path(path).open("a") as fh:
         fh.write(buf.getvalue())

@@ -41,8 +41,9 @@ const variantsTableOutput = computed(() => app.model.outputs.variantsTable);
 // `objective`, `variantId`) both change the header set AG-Grid would
 // otherwise reuse stale. v5 is the identity change: the three axes collapsed
 // into the variant's own clonotype key, and the parent moved into the
-// `parentCloneId` / `parentClonotypeKey` columns. v6 drops `Variant ID` from
-// the default view — a cached column order would keep showing it.
+// `parentClonotypeId` / `parentClonotypeKey` columns. v6 drops `Variant ID`
+// entirely and `Parent Clonotype Id` from the default view — a cached column order
+// would keep showing both.
 //
 // It is `undefined` until a run produces a table. That is what makes the
 // placeholder work at all: only a null `sourceId` lets the settings report
@@ -82,9 +83,11 @@ const comparisonProps = computed(() => {
   const v = row.values;
   return {
     // The parent, not the row: `pl7.app/label` on this table is the variant's
-    // own clone id now, and `axesKey[0]` is the variant's content hash.
+    // own clonotype id now, and `axesKey[0]` is the variant's content hash.
     parentLabel: String(
-      v[VARIANT_VALUE_COLUMNS.parentCloneId] ?? v[VARIANT_VALUE_COLUMNS.parentClonotypeKey] ?? "",
+      v[VARIANT_VALUE_COLUMNS.parentClonotypeId] ??
+        v[VARIANT_VALUE_COLUMNS.parentClonotypeKey] ??
+        "",
     ),
     rank: v[VARIANT_VALUE_COLUMNS.rank] === null ? null : Number(v[VARIANT_VALUE_COLUMNS.rank]),
     addressedTarget: String(v[VARIANT_VALUE_COLUMNS.addressedTarget] ?? ""),

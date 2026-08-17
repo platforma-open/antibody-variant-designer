@@ -1,10 +1,10 @@
 /** PColumn value-column names this UI reads by name, kept in one place so
  *  the Variants/Parents pages and the comparison modal spell them alike. */
 
-/** The `C-XXXXX` short id — the label of whichever axis the group is keyed on.
- *  On the Variants table that is the variant's own; on the Parents table it is
- *  the parent's, emitted by this block because upstream's label is out of the
- *  model's reach. Both pages read the row's short id under this one name. */
+/** The VARIANT's own `C-XXXXX` — the label of the variant group's single axis.
+ *  The liabilities group cannot carry one: a label column has exactly one axis
+ *  and that group is keyed on (parent, liability), so the Parents page reads
+ *  the parent through `LIABILITY_VALUE_COLUMNS.parentClonotypeId` instead. */
 export const COL_LABEL = "pl7.app/label";
 
 /** Group A and B — the variant table's value columns. */
@@ -18,20 +18,17 @@ export const VARIANT_VALUE_COLUMNS = {
   bindingRisk: "pl7.app/vdj/bindingRisk",
   lowConfidenceWarning: "pl7.app/liabilities/lowConfidence",
   status: "pl7.app/antibodyVariantDesigner/status",
-  parentCloneId: "pl7.app/antibodyVariantDesigner/parentCloneId",
+  parentClonotypeId: "pl7.app/antibodyVariantDesigner/parentClonotypeId",
   parentClonotypeKey: "pl7.app/antibodyVariantDesigner/parentClonotypeKey",
 } as const;
 
-/** Group C — the parent-keyed liabilities table's value columns. The parent's
- *  short id is not here: it is spelled `pl7.app/label` and read as `COL_LABEL`,
- *  the same as the variant table's. */
+/** Group C — the parent-keyed liabilities table's value columns. One row per
+ *  parent: a coarse verdict plus a joined summary of every triaged liability,
+ *  declined ones included (`082-decision-the-liabilities-group-drops-to-one-axis`). */
 export const LIABILITY_VALUE_COLUMNS = {
-  liabilityType: "pl7.app/liabilities/liabilityType",
+  parentClonotypeId: "pl7.app/antibodyVariantDesigner/parentClonotypeId",
   verdict: "pl7.app/liabilities/verdict",
-  region: "pl7.app/liabilities/region",
-  rsasa: "pl7.app/liabilities/rsasa",
-  lowConfidence: "pl7.app/liabilities/lowConfidence",
-  fixability: "pl7.app/liabilities/fixability",
+  summary: "pl7.app/liabilities/summary",
 } as const;
 
 /** One edit parsed out of a `changedPositions` cell:

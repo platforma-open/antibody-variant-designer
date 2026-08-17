@@ -119,10 +119,14 @@ class TestActionableOnlyReachesTriagedJson:
         [actionable] = liability_store.read_triaged(str(out_triaged))
         assert actionable.definition_id == "deamidation_ng"
 
-        rows = _rows_of(out_liabilities)
-        ids_by_type = {r["liabilityType"]: r["verdict"] for r in rows}
-        assert ids_by_type["deamidation"] == "exposed"
-        assert ids_by_type["cysteine"] == "fixability-declined"
+        [row] = _rows_of(out_liabilities)
+        assert row["verdict"] == "present"
+        entries = [e.strip() for e in row["summary"].split(",")]
+        assert any(e.startswith("deamidation@") and e.endswith("(exposed)") for e in entries)
+        assert any(
+            e.startswith("cysteine@") and e.endswith("(fixability-declined: structural)")
+            for e in entries
+        )
 
 
 class TestSkipWhenNothingSurvivesTriage:
@@ -134,9 +138,10 @@ class TestSkipWhenNothingSurvivesTriage:
 
         assert skip == "no-liability-survived-triage"
         assert liability_store.read_triaged(str(out_triaged)) == []
-        rows = _rows_of(out_liabilities)
-        assert len(rows) == 1
-        assert rows[0]["liabilityType"] == "cysteine"
+        [row] = _rows_of(out_liabilities)
+        assert row["verdict"] == "present"
+        assert row["summary"].startswith("cysteine@")
+        assert row["summary"].endswith("(fixability-declined: structural)")
 
 
 class TestLowConfidenceFallsBackToBFactor:
@@ -253,17 +258,19 @@ class TestBatchCli:
         assert skips == [("clone-1", "", ""), ("clone-2", "", "")]
         assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"clone-1", "clone-2"}
 
-    def test_clonotype_key_and_liability_key_identify_a_row_across_the_file(self, batch):
-        # Two antibodies with identical liabilities at identical positions —
-        # the liabilityKey repeats, so only the pair keeps rows distinct.
+    def test_clonotype_key_alone_identifies_a_row_across_the_file(self, batch):
+        # Two antibodies with identical liabilities at identical positions
+        # still get two distinct rows — the row grain is the parent, so
+        # `clonotypeKey` alone is the whole key, never a (parent, liability)
+        # pair (082-decision-the-liabilities-group-drops-to-one-axis).
         _stage(batch, "clone-1", self._actionable())
         _stage(batch, "clone-2", self._actionable())
 
         _, _, out_liabilities = _run(batch)
 
         rows = _rows_of(out_liabilities)
-        keys = [(r["clonotypeKey"], r["liabilityKey"]) for r in rows]
-        assert len(set(keys)) == len(rows)
+        keys = [r["clonotypeKey"] for r in rows]
+        assert len(set(keys)) == len(rows) == 2
 
     def test_an_unindexable_antibody_carries_exactly_one_reason(self, batch):
         # The index phase short-circuits the scan phase, so this antibody is

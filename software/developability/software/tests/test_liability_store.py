@@ -76,41 +76,68 @@ def _rows_of(path):
     return list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
 
 
-class TestLiabilitiesTsv:
-    def test_every_verdict_is_written_including_declined_ones(self, tmp_path):
+class TestSummarizeLiabilities:
+    def test_clean_parent_is_none_and_none(self):
+        assert liability_store.summarize_liabilities([]) == ("none", "None")
+
+    def test_any_triaged_liability_makes_the_verdict_present(self):
+        buried = _triaged([_residue("H", 0, imgt="107")], verdict="buried", rsasa=0.01)
+
+        verdict, _ = liability_store.summarize_liabilities([buried])
+
+        assert verdict == "present"
+
+    def test_summary_joins_every_liability_with_its_verdict(self):
         exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
         buried = _triaged([_residue("H", 1, imgt="108")], verdict="buried", rsasa=0.01)
+
+        _, summary = liability_store.summarize_liabilities([exposed, buried])
+
+        assert summary == "deamidation@H107 (exposed), deamidation@H108 (buried)"
+
+    def test_declined_entry_names_its_fixability_class(self):
+        declined = _triaged(
+            [_residue("H", 2, imgt="109")], verdict="fixability-declined", rsasa=0.9
+        )
+
+        _, summary = liability_store.summarize_liabilities([declined])
+
+        assert summary == "deamidation@H109 (fixability-declined: fixable)"
+
+    def test_exposed_entry_names_no_fixability_class(self):
+        exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
+
+        _, summary = liability_store.summarize_liabilities([exposed])
+
+        assert summary == "deamidation@H107 (exposed)"
+
+
+class TestLiabilitiesTsv:
+    def test_a_clean_parent_writes_none_and_none(self, tmp_path):
+        path = tmp_path / "liabilities.tsv"
+
+        liability_store.write_liabilities_header(str(path))
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [])
+
+        [row] = _rows_of(path)
+        assert row["verdict"] == "none"
+        assert row["summary"] == "None"
+
+    def test_a_triaged_parent_writes_present_and_the_joined_summary(self, tmp_path):
+        exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
         declined = _triaged(
             [_residue("H", 2, imgt="109")], verdict="fixability-declined", rsasa=0.9
         )
         path = tmp_path / "liabilities.tsv"
 
         liability_store.write_liabilities_header(str(path))
-        liability_store.append_liabilities_tsv(
-            str(path), "clone-1", [exposed, buried, declined]
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, declined])
+
+        [row] = _rows_of(path)
+        assert row["verdict"] == "present"
+        assert row["summary"] == (
+            "deamidation@H107 (exposed), deamidation@H109 (fixability-declined: fixable)"
         )
-
-        rows = _rows_of(path)
-        assert [r["verdict"] for r in rows] == ["exposed", "buried", "fixability-declined"]
-
-    def test_low_confidence_is_the_string_yes_or_no_never_a_bool(self, tmp_path):
-        low = _triaged([_residue("H", 0, imgt="107")], low_confidence=True)
-        high = _triaged([_residue("H", 1, imgt="108")], low_confidence=False)
-        path = tmp_path / "liabilities.tsv"
-
-        liability_store.write_liabilities_header(str(path))
-        liability_store.append_liabilities_tsv(str(path), "clone-1", [low, high])
-
-        assert [r["lowConfidence"] for r in _rows_of(path)] == ["yes", "no"]
-
-    def test_null_rsasa_writes_an_empty_cell_not_the_word_none(self, tmp_path):
-        unmeasured = _triaged([_residue("H", 0, imgt="107")], rsasa=None)
-        path = tmp_path / "liabilities.tsv"
-
-        liability_store.write_liabilities_header(str(path))
-        liability_store.append_liabilities_tsv(str(path), "clone-1", [unmeasured])
-
-        assert _rows_of(path)[0]["rsasa"] == ""
 
     def test_header_alone_is_a_valid_empty_file(self, tmp_path):
         path = tmp_path / "liabilities.tsv"
@@ -135,18 +162,14 @@ class TestOneFileHoldsEveryParent:
 
         assert [r["clonotypeKey"] for r in _rows_of(path)] == ["clone-1", "clone-2"]
 
-    def test_clonotype_key_and_liability_key_are_unique_across_the_whole_file(self, tmp_path):
-        # Two parents may carry the same liability at the same position, so
-        # the liabilityKey alone stops identifying a row once one file holds
-        # every parent — the pair is the axis tuple.
-        same_liability = [_triaged([_residue("H", 0, imgt="107")])]
+    def test_one_row_per_parent_not_per_liability(self, tmp_path):
+        # Two liabilities on one parent still collapse to one row — the row
+        # grain is the parent, not the (parent, liability) pair.
+        exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
+        buried = _triaged([_residue("H", 1, imgt="108")], verdict="buried", rsasa=0.01)
         path = tmp_path / "liabilities.tsv"
 
         liability_store.write_liabilities_header(str(path))
-        liability_store.append_liabilities_tsv(str(path), "clone-1", same_liability)
-        liability_store.append_liabilities_tsv(str(path), "clone-2", same_liability)
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, buried])
 
-        rows = _rows_of(path)
-        keys = [(r["clonotypeKey"], r["liabilityKey"]) for r in rows]
-        assert len(set(keys)) == len(rows) == 2
-        assert len({r["liabilityKey"] for r in rows}) == 1
+        assert len(_rows_of(path)) == 1

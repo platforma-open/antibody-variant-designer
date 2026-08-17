@@ -46,6 +46,13 @@ DEFAULT_FR_CONFIDENCE_THRESHOLD = 4.0
 DEFAULT_CDR_CONFIDENCE_THRESHOLD = 6.0
 DEFAULT_ACT_ON_FIXABILITY = "fixable,easily_fixable"
 
+# `process_one`'s two reasons for having actually reached triage — the index
+# phase's own reasons (`no-structure`, `structure-not-imgt`,
+# `structure-multi-domain-chain`, `no-researchable-residue`) mean the scan
+# phase never ran, so `triaged` is `[]` from the short-circuit, not from a
+# clean scan. Only these two are safe to summarize into `liabilities.tsv`.
+_REACHED_TRIAGE_REASONS = ("", "no-liability-survived-triage")
+
 
 def _iter_clonotype_keyed_tsv(path: Path) -> Iterator[tuple[str, str]]:
     """Yield `(clonotype_key, raw_value)` for a dataset-wide TSV exported by
@@ -258,12 +265,17 @@ def main(argv: list[str] | None = None) -> int:
             args.cdr_confidence_gating_threshold,
             act_on_fixability,
         )
-        # Appended even when triage declined everything, so an antibody
-        # that produces no variant still has Parents-page data.
-        liability_store.append_liabilities_tsv(args.out_liabilities, entry.clonotype_key, triaged)
+        # Appended even when triage declined everything, so an antibody that
+        # produces no variant still has Parents-page data — but only once it
+        # actually reached triage. An index-phase failure never scanned, so
+        # it must not contribute a false "none" verdict.
+        if reason in _REACHED_TRIAGE_REASONS:
+            liability_store.append_liabilities_tsv(
+                args.out_liabilities, entry.clonotype_key, triaged
+            )
         return reason
 
-    return batch.run(roster.read_roster(args.pdb_index), one, args.out_skip)
+    return batch.run(pdb_index.read_index(args.pdb_index), one, args.out_skip)
 
 
 if __name__ == "__main__":

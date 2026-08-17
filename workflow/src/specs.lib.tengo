@@ -1,88 +1,23 @@
-// Every PColumn spec this block emits, and the synthesis CSV's column set.
-//
-// **The liability group carries the liabilities triage declined**, not only the
-// ones it acted on: a declined liability produces no variant, so a
-// variant-keyed table can never show it and the Parents page has no other
-// source.
-//
-// The parent axis is passed in rather than built here, because a row of this
-// group IS one of upstream's clonotypes and must join back to it. Its label is
-// this block's own, though: upstream's `pl7.app/label` sits in the result pool
-// the block's table cannot read (`model/src/index.ts`), so the group carries a
-// label column built from the same value at import time.
 
 ll := import("@platforma-sdk/workflow-tengo:ll")
-slices := import("@platforma-sdk/workflow-tengo:slices")
+maps := import("@platforma-sdk/workflow-tengo:maps")
 
-VARIANT_CLONE_AXIS_NAME := "pl7.app/antibodyVariantDesigner/variantCloneKey"
-LIABILITY_AXIS_NAME := "pl7.app/antibodyVariantDesigner/liabilityKey"
+// **A group's column list IS its table order, so the position stamps the
+// priority.** No row writes a number of its own: a number beside a list that
+// already fixes the order is a second copy of it, free to disagree. The grid
+// draws a higher priority first, so the first row takes the highest number and
+// each next row one step less.
+ORDER_PRIORITY_STEP := 1000
 
-// The hash's ingredient list, serialised the way upstream serialises its own
-// (`mixcr-clonotyping/workflow/src/calculate-export-specs.lib.tengo:1095-1101`)
-// so a reader can tell which columns the key covers. Written as JSON text,
-// never `json.encode` — see `BINDING_RISK_VALUES` below for why.
-//
-// The parent key is an ingredient, unlike upstream where the sequence alone
-// defines a clonotype. A row here is a design proposal FOR a parent, and two
-// parents differing only at the liability being fixed converge on one
-// designed sequence — hashing the sequence alone would give those two
-// proposals one axis value and collide their rows.
-VARIANT_KEY_STRUCTURE := "[\"parentClonotypeKey\",\"pl7.app/vdj/sequence|VDJRegion|aminoacid\"]"
-
-// A designed variant is a new clonotype, so it gets a clonotype's identity:
-// a content hash of the sequence that defines it, built by upstream's own
-// recipe — sha256 over the `#`-joined defining columns, base64-alphanumeric,
-// 120 bits (`mixcr-clonotyping/workflow/src/mixcr-export.tpl.tengo:64-68`).
-// `main.tpl.tengo` computes it; `pl7.app/label` beside it carries the
-// `C-XXXXX` short id derived by upstream's second recipe.
-//
-// The name is deliberately NOT `pl7.app/vdj/clonotypeKey`. Label discovery
-// matches a label column to an axis by axis NAME alone
-// (`@platforma-sdk/model/.../discoverColumns.ts:64-66`), so reusing it would
-// bind the PARENT's `pl7.app/label` from the pool onto this axis and render
-// an all-null "Clone Id" beside our own.
-//
-// Two runs over one dataset hash the same sequences to the same values, so
-// the run identity moved into the axis `domain` — the same mechanism upstream
-// uses to keep two clonotyping runs apart, replacing the separate block axis
-// (073-decision-the-block-id-becomes-an-axis-not-a-variant-key-ingredient).
-variantCloneAxisSpec := func(blockId) {
-	return {
-		type: "String",
-		name: VARIANT_CLONE_AXIS_NAME,
-		domain: {
-			"pl7.app/vdj/clonotypeKey/structure": VARIANT_KEY_STRUCTURE,
-			"pl7.app/vdj/clonotypingRunId": blockId
-		},
-		annotations: {
-			"pl7.app/label": "Variant clonotype key",
-			"pl7.app/description": "sha256 of the parent key and the designed V-domain sequence, base64-alphanumeric, 120 bits — the same recipe upstream hashes a clonotype with. Same parent and same designed sequence, same key, in every run.",
-			"pl7.app/table/fontFamily": "monospace"
-		}
+_stampOrderPriority := func(columns) {
+	for i, c in columns {
+		c.spec.annotations["pl7.app/table/orderPriority"] =
+			string((len(columns) - i) * ORDER_PRIORITY_STEP)
 	}
+	return columns
 }
 
-liabilityAxisSpec := {
-	type: "String",
-	name: LIABILITY_AXIS_NAME,
-	annotations: {
-		"pl7.app/label": "Liability site"
-	}
-}
-
-// Written as JSON text rather than built with `json.encode`. An annotation is
-// part of the rendered template input, and a byte-different input re-runs work
-// the dedup would otherwise skip: `json.encode` iterates a Tengo map with Go's
-// randomised map order, so it cannot be trusted to produce one spelling. An
-// array encodes in order today, but nothing in the encoder marks the two cases
-// as different, so no spec constant here goes through it.
-BINDING_RISK_VALUES := "[\"Low\",\"Medium\",\"High\"]"
-
-// Ranked decreasing, so the default cutoff keeps the two bands a user can act
-// on and hides the ones most likely to cost binding.
-BINDING_RISK_DEFAULT_CUTOFF := "[\"Low\",\"Medium\"]"
-
-// ──────────── The variant group — one row per (parent, variant) ────────────
+// ──────────── The Variants page's columns — one row per designed variant ────────────
 //
 // A row is `{column, csvHeader?, spec}`. `column` is not part of the spec: it
 // is the header `variant_store.TSV_COLUMNS` writes, and it is what the importer
@@ -93,14 +28,16 @@ BINDING_RISK_DEFAULT_CUTOFF := "[\"Low\",\"Medium\"]"
 // One row is `{column, csvHeader, csvOnly: true}` with no spec at all: the
 // vendor's form still wants it, no table does.
 //
-// **`A-0018`'s whole column set is this list, in the atom's own order**, so
-// the contract is the list itself, top to bottom, and every row declares a
-// `csvHeader` — that is why no row carries a position number: a number beside
-// a list that already fixes the order is a second copy of it, free to
-// disagree. `variantId` leads (built in `main.tpl.tengo` from the parent and
-// variant axes, since `xsv.exportFrame` can relabel a column but never
-// compute one — 079-fact-variantid-needs-a-computed-column-not-a-relabel);
-// `humannessScore` stays out at V0.5 ([[A-0018]] — V1 only).
+// **This list fixes two orders at once.** Top to bottom it is the table's
+// column order, which `_stampOrderPriority` turns into each column's priority.
+// The rows that declare a `csvHeader`, read in the same order, are the vendor's
+// whole set — `variantId` leads it and is built in `main.tpl.tengo`, and
+// `humannessScore` is not among them. So no row carries a position number of
+// either kind.
+//
+// This is the one list two readers share — `buildVariantsSettings` below and
+// `csvColumnOrder` at the end of the file — so it is a named list rather than a
+// literal inside either of them.
 
 variantColumns := func(blockId) {
 	return [
@@ -108,20 +45,78 @@ variantColumns := func(blockId) {
 			column: "variantId",
 			csvHeader: "variantId",
 			// The vendor's row, and nothing else: `csvOnly` keeps it out of the
-			// PFrame, so no table ever shows it. `main.tpl.tengo` still builds
-			// it on the flat table as `<parentClonotypeId>:<variantKey>`, which
-			// is where the CSV reads it from.
-			//
-			// The variant carries its own `C-XXXXX` clone id now, and that is
-			// what identifies a row everywhere a human looks. This string stays
-			// only because the synthesis order form's header set is fixed.
+			// PFrame, so no table ever shows it. `main.tpl.tengo` builds it on
+			// the flat table as `<parentClonotypeId>:<variantKey>`, which is
+			// where the CSV reads it from.
 			csvOnly: true
+		},
+		// ── The row's identity, at the front of the table ──
+		//
+		// None declares a `csvHeader`, so the vendor's set steps over all three
+		// and stays exactly what its contract fixes.
+		//
+		// The variant's own id leads whatever priority it carries, because it is
+		// spelled `pl7.app/label` and the grid sorts every axis and every label
+		// column ahead of the value columns
+		// (`PlAgDataTable/sources/table-source-v2.ts:489-502`). The parent's id
+		// follows it as the highest-priority value column, and the parent's key
+		// third.
+		{
+			column: "variantClonotypeId",
+			// The `C-XXXXX` short id, derived from `variantClonotypeKey` by
+			// upstream's own recipe in `main.tpl.tengo`. Named `pl7.app/label`
+			// rather than a private name so that it labels this group's axis.
+			spec: {
+				name: "pl7.app/label",
+				valueType: "String",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Variant Clonotype Id",
+					"pl7.app/description": "`C-XXXXX`, derived from the variant clonotype key the way upstream derives a clonotype id — digits dropped, first five characters, uppercased, with a rank suffix when two keys share the prefix."
+				}
+			}
+		},
+		{
+			column: "parentClonotypeId",
+			// The parent in the spelling a human reads. Carried verbatim from the
+			// parent's own `pl7.app/label` upstream, never re-derived: the `-2`
+			// collision suffix is ranked over the producing block's whole clonotype
+			// set, so deriving it here from a subset could print a different string
+			// than the Parents page shows for the same clonotype.
+			//
+			// Visible, unlike the key below it: which parent a variant was designed
+			// from is what a reader checks second, right after which variant the
+			// row is.
+			spec: {
+				name: "pl7.app/antibodyVariantDesigner/parentClonotypeId",
+				valueType: "String",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Parent Clonotype Id",
+					"pl7.app/description": "The clonotype this variant was designed from, as upstream names it."
+				}
+			}
+		},
+		{
+			column: "parentClonotypeKey",
+			// The machine half of the same binding — the parent's content hash,
+			// which is what a downstream join needs and what the synthesis CSV
+			// carries as `parentClonotypeId`.
+			spec: {
+				name: "pl7.app/antibodyVariantDesigner/parentClonotypeKey",
+				valueType: "String",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Parent clonotype key",
+					"pl7.app/description": "The parent's clonotype key, as minted by the block that produced the structures dataset.",
+					"pl7.app/table/fontFamily": "monospace",
+					"pl7.app/table/visibility": "optional"
+				}
+			}
 		},
 		{
 			column: "rank",
 			csvHeader: "rank",
-			// Position within THIS parent's surviving set, restarting at 1 per
-			// parent, so the number means nothing compared across parents.
 			spec: {
 				name: "pl7.app/score",
 				valueType: "Long",
@@ -130,8 +125,7 @@ variantColumns := func(blockId) {
 					"pl7.app/label": "Rank",
 					"pl7.app/description": "Position within this parent's own surviving set, starting at 1. Not comparable across different parents. Lower is better — rank 1 is the top pick for that parent.",
 					"pl7.app/isScore": "true",
-					"pl7.app/score/rankingOrder": "increasing",
-					"pl7.app/table/orderPriority": "1000"
+					"pl7.app/score/rankingOrder": "increasing"
 				}
 			}
 		},
@@ -141,10 +135,8 @@ variantColumns := func(blockId) {
 			// A designed sequence is a sequence: the same name MiXCR gives every
 			// sequence column, qualified by feature and alphabet, so every
 			// consumer that already reads sequences finds this one. The only
-			// column with a `domain` of its own, because those two keys are
-			// exact-match discriminators every sequence consumer already selects
-			// on — 100 sites across 14 repos — and they are also what stops this
-			// column joining to the parent's own sequence.
+			// column here with a `domain`, and those two keys are what stop it
+			// joining to the parent's own sequence.
 			spec: {
 				name: "pl7.app/vdj/sequence",
 				valueType: "String",
@@ -163,10 +155,8 @@ variantColumns := func(blockId) {
 		{
 			column: "chain",
 			csvHeader: "chain",
-			// "H" for a VHH (the single V-domain), "H,L" for a paired Fv — which
-			// chain(s) `variantSequence` actually renders, derived once per
-			// antibody from the residue index's own `chain_role`
-			// (unit-must-not-be-derivable: never carried as a boundary field).
+			// Derived once per antibody from the residue index's own
+			// `chain_role`, never carried as a boundary field.
 			spec: {
 				name: "pl7.app/antibodyVariantDesigner/chain",
 				valueType: "String",
@@ -194,18 +184,16 @@ variantColumns := func(blockId) {
 		{
 			column: "objective",
 			csvHeader: "objective",
-			// The constant `liability` — V1's second objective, `humanness`,
-			// is not generated at V0.5. A value invariant across every row is
-			// what a domain key is for, and this is another column that breaks
-			// that rule on purpose, for the same reason `status` does: the
-			// synthesis CSV must carry the word.
+			// The constant `liability` — the only objective this block designs
+			// against. A column rather than a domain key, like `status`, because
+			// the synthesis CSV must carry the word.
 			spec: {
 				name: "pl7.app/antibodyVariantDesigner/objective",
 				valueType: "String",
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Objective",
-					"pl7.app/description": "Always 'liability' at V0.5 — the humanness objective is a later increment.",
+					"pl7.app/description": "Always 'liability' — the objective this variant was designed against.",
 					"pl7.app/isDiscreteFilter": "true",
 					"pl7.app/table/visibility": "hidden"
 				}
@@ -230,9 +218,8 @@ variantColumns := func(blockId) {
 			csvHeader: "structuralTolerance",
 			// AntiFold's perplexity, `2^H₂(p)` over `[1,20]` — entropy in bits,
 			// a different base from the natural-log columns beside it in the
-			// model's own frame. The scale is backend-specific, hence the metric
-			// annotation: a second backend changes that annotation, not this
-			// name.
+			// model's own frame. The scale is backend-specific, so a second
+			// backend changes the metric annotation, not this name.
 			spec: {
 				name: "pl7.app/structure/tolerance",
 				valueType: "Double",
@@ -248,10 +235,8 @@ variantColumns := func(blockId) {
 		{
 			column: "worstConfidence",
 			csvHeader: "worstConfidence",
-			// Worst over the edited span, not mean: one badly-predicted residue
-			// invalidates the edit whatever its neighbours look like. Every
-			// member of the confidence family carries the metric annotation so a
-			// consumer can detect the scale.
+			// Every member of the confidence family carries the metric
+			// annotation, so a consumer can detect the scale.
 			spec: {
 				name: "pl7.app/structure/confidence/worstOverEdits",
 				valueType: "Double",
@@ -268,8 +253,7 @@ variantColumns := func(blockId) {
 			column: "bindingRisk",
 			csvHeader: "bindingRisk",
 			// There is no paratope model and no ΔΔG prediction anywhere in this
-			// block. This band is the whole substitute for one, which is why it
-			// is a band rather than a number.
+			// block, which is why this is a band rather than a number.
 			spec: {
 				name: "pl7.app/vdj/bindingRisk",
 				valueType: "String",
@@ -279,18 +263,20 @@ variantColumns := func(blockId) {
 					"pl7.app/description": "A band standing in for a binding-affinity prediction, which this block does not make: High for a CDR edit with poor fold tolerance or low prediction confidence, Low for a framework edit with neither problem, Medium otherwise.",
 					"pl7.app/isScore": "true",
 					"pl7.app/isDiscreteFilter": "true",
-					"pl7.app/discreteValues": BINDING_RISK_VALUES,
+					"pl7.app/discreteValues": "[\"Low\",\"Medium\",\"High\"]",
 					"pl7.app/score/rankingOrder": "decreasing",
-					"pl7.app/score/defaultCutoff": BINDING_RISK_DEFAULT_CUTOFF
+					// Ranked decreasing, so the default cutoff keeps the two bands
+					// a user can act on and hides the ones most likely to cost
+					// binding.
+					"pl7.app/score/defaultCutoff": "[\"Low\",\"Medium\"]"
 				}
 			}
 		},
 		{
 			column: "lowConfidenceWarning",
 			csvHeader: "lowConfidenceWarning",
-			// Warns and down-ranks; it never blocked generation, so a "yes" row
-			// is a real proposal with a caveat. Same name, grammar and meaning
-			// as the liability group's column of that name, on the other axis.
+			// Same name, grammar and meaning as the Parents page's column of
+			// that name, on the other axis.
 			spec: {
 				name: "pl7.app/liabilities/lowConfidence",
 				valueType: "String",
@@ -304,11 +290,9 @@ variantColumns := func(blockId) {
 		{
 			column: "status",
 			csvHeader: "status",
-			// The constant `unvalidated-hypothesis`. A value invariant across
-			// every row is what a domain key is for, and this is another column
-			// that breaks that rule on purpose: `xsv.exportFrame` exports
-			// columns, and the synthesis CSV must carry the word, which a domain
-			// key would never reach.
+			// The constant `unvalidated-hypothesis`. A column rather than a
+			// domain key, like `objective`, because the synthesis CSV must
+			// carry the word.
 			spec: {
 				name: "pl7.app/antibodyVariantDesigner/status",
 				valueType: "String",
@@ -320,69 +304,9 @@ variantColumns := func(blockId) {
 				}
 			}
 		},
-
-		// ── Identity columns, after the CSV's leading run ──
-		//
-		// None declares a `csvHeader`: `A-0018` fixes the vendor's column set,
-		// and `csvColumnOrder` reads the leading run of declaring rows, so
-		// every row below is invisible to the CSV by construction.
-		{
-			column: "variantCloneId",
-			// The `C-XXXXX` short id, derived from `variantCloneKey` by
-			// upstream's own recipe in `main.tpl.tengo`. Named `pl7.app/label`
-			// rather than a private name because it labels this group's axis:
-			// that is the name every table and every downstream consumer reads
-			// a readable row name from.
-			spec: {
-				name: "pl7.app/label",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Variant Clone Id",
-					"pl7.app/description": "`C-XXXXX`, derived from the variant clonotype key the way upstream derives a clone id — digits dropped, first five characters, uppercased, with a rank suffix when two keys share the prefix.",
-					"pl7.app/table/orderPriority": "110000"
-				}
-			}
-		},
-		{
-			column: "parentCloneId",
-			// The binding, in the spelling a human reads. Carried verbatim from
-			// the parent's own `pl7.app/label` upstream, never re-derived: the
-			// `-2` collision suffix is ranked over the producing block's whole
-			// clonotype set, so deriving it here from a subset could print a
-			// different string than the Parents page shows for the same clone.
-			spec: {
-				name: "pl7.app/antibodyVariantDesigner/parentCloneId",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Parent Clone Id",
-					"pl7.app/description": "The clone this variant was designed from, as upstream names it.",
-					"pl7.app/table/orderPriority": "109000"
-				}
-			}
-		},
-		{
-			column: "parentClonotypeKey",
-			// The machine half of the same binding — the parent's content hash,
-			// which is what a downstream join needs and what the synthesis CSV
-			// carries as `parentClonotypeId`.
-			spec: {
-				name: "pl7.app/antibodyVariantDesigner/parentClonotypeKey",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Parent clonotype key",
-					"pl7.app/description": "The parent's clonotype key, as minted by the block that produced the structures dataset.",
-					"pl7.app/table/fontFamily": "monospace",
-					"pl7.app/table/visibility": "optional"
-				}
-			}
-		},
 		{
 			column: "variantKey",
-			// Was the second axis until the variant gained a key of its own. It
-			// stays as a value column because `variantId` — the vendor's
+			// A value column because `variantId` — the vendor's
 			// synthesis id — is built from it, and because it is the only cell
 			// that states this variant's rank order within its parent.
 			spec: {
@@ -399,268 +323,201 @@ variantColumns := func(blockId) {
 	]
 }
 
-// ──────────── The liability group — one row per (parent, liability) ────────────
-//
-// Names come from `pl7.app/liabilities/`, the segment the sibling liability
-// blocks already own, because these are liability columns whoever computed
-// them. None of the six collides with the eleven names the sibling ships, and
-// the one that does share a name with this block's own variant group —
-// `lowConfidence` — sits on a different axis, so the two cannot join.
-
-liabilityColumns := func(blockId) {
-	return [
-		{
-			column: "liabilityType",
-			spec: {
-				name: "pl7.app/liabilities/liabilityType",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Liabilities",
-					"pl7.app/isDiscreteFilter": "true"
-				}
-			}
-		},
-		{
-			column: "verdict",
-			spec: {
-				name: "pl7.app/liabilities/verdict",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Verdict",
-					"pl7.app/isDiscreteFilter": "true"
-				}
-			}
-		},
-		{
-			column: "region",
-			// First of the value columns, right behind the two axes: where the
-			// liability sits is what a reader groups the rows by. The rest carry
-			// no priority and fall in behind it alphabetically, which is the
-			// grid's own default.
-			spec: {
-				name: "pl7.app/liabilities/region",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Region",
-					"pl7.app/table/orderPriority": "100000"
-				}
-			}
-		},
-		{
-			column: "rsasa",
-			// Nullable: a residue type absent from the Ala-X-Ala reference table
-			// has no relative SASA at all, and that must not read as "buried".
-			spec: {
-				name: "pl7.app/liabilities/rsasa",
-				valueType: "Double",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Relative SASA",
-					"pl7.app/description": "How solvent-exposed the residue is, as a fraction of the exposure a lone Ala-X-Ala tripeptide would show (can exceed 1 at a chain terminus). Higher means more exposed. Below the buried cutoff a liability is declined rather than acted on, so higher is the direction that makes a liability worth fixing — not a quality score in itself.",
-					"pl7.app/format": ".3f"
-				}
-			}
-		},
-		{
-			column: "lowConfidence",
-			spec: {
-				name: "pl7.app/liabilities/lowConfidence",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Low confidence"
-				}
-			}
-		},
-		{
-			column: "fixability",
-			// Why a declined liability was declined. Without it the Parents page
-			// shows a verdict with no reason.
-			spec: {
-				name: "pl7.app/liabilities/fixability",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Fixability",
-					"pl7.app/isDiscreteFilter": "true"
-				}
-			}
-		},
-
-		// ── The parent axis's label, after the six liability columns ──
-		{
-			column: "parentCloneId",
-			// The parent in the spelling a human reads (`C-EWOQA`), joined onto
-			// the flat table in `main.tpl.tengo` from upstream's own
-			// `pl7.app/label` — the same value the variant group's
-			// `parentCloneId` carries.
-			//
-			// Spelled `pl7.app/label`, so it LABELS the parent axis instead of
-			// standing beside it: the grid drops a single-axis label column from
-			// the displayed set and renders its values in that axis's own column
-			// (`ui-vue/.../sources/table-source-v2.ts:445-486`). Without it the
-			// axis shows the content hash, because upstream's label lives in the
-			// result pool the block's table cannot read.
-			//
-			// It labels an axis this block did not mint, which is the one thing
-			// the variant group's axis name avoids on purpose (see
-			// VARIANT_KEY_STRUCTURE above). It is safe in this direction: the
-			// value IS upstream's own label for that same axis, so a consumer
-			// holding both sees one spelling twice, never two spellings.
-			spec: {
-				name: "pl7.app/label",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Clone Id",
-					"pl7.app/description": "The clone this liability was found on, as upstream names it."
-				}
-			}
-		}
-	]
-}
-
-// ──────────── The synthesis CSV's parent column header ────────────
-//
-// A vendor's order form and, later, the annotation key for returning NGS
-// reads, so the column set is a contract rather than a display choice.
-// Built straight off the flat table in `main.tpl.tengo` — see
-// `csvColumnOrder` below for why.
-
-CSV_PARENT_HEADER := "parentClonotypeId"
-
-// ──────────── Builders ────────────
-
-declaresCsvHeader := func(d) {
-	return !is_undefined(d.csvHeader)
-}
-
-// A row the vendor's CSV carries but no PColumn does. It holds a `csvHeader`
-// and no `spec`, so it stays in the contract order below while `buildXsvColumns`
-// leaves it out of the import.
-emitsPColumn := func(d) {
-	return is_undefined(d.csvOnly)
-}
-
-// A row to an `xsv` import entry: the header to read from, and the row's own
-// spec passed through untouched. `id` is left off — the importer defaults it to
-// `column` (`pframes/util.lib.tengo:118` declares it `id,?`, `:281-287` falls
-// back to `column`), so spelling it out is a second copy of the header that is
-// free to drift from it.
-buildXsvColumns := func(declarations) {
-	return slices.map(slices.filter(declarations, emitsPColumn), func(d) {
-		return {
-			column: d.column,
-			spec: d.spec
-		}
-	})
-}
-
 /**
- * `xsv.importFile` settings for `variants.tsv` — the variant group.
+ * The PFrame `variants.tsv` becomes — the Variants page's group.
  *
  * One axis, the variant's own clonotype key, so the group has a clonotype's
  * shape: a hashed row key plus a `pl7.app/label` beside it. The parent is no
  * longer the row's identity — it rides along as the binding columns
- * `parentClonotypeKey` / `parentCloneId`.
- */
-buildVariantsXsvSettings := func(blockId) {
-	return {
-		axes: [
-			{ column: "variantCloneKey", spec: variantCloneAxisSpec(blockId) }
-		],
-		columns: buildXsvColumns(variantColumns(blockId)),
-		storageFormat: "Parquet"
-	}
-}
-
-/**
- * Upstream's clonotype axis under the name its values now read as.
+ * `parentClonotypeKey` / `parentClonotypeId`.
  *
- * The axis arrives labelled "Clonotype ID", which named a content hash. The
- * `pl7.app/label` column above puts the short `C-XXXXX` in that same column,
- * so the header has to follow the values. Only the annotation changes, and an
- * axis is identified by name, type and domain alone — the relabelled axis
- * still joins to upstream's.
- *
- * A copy, never a write into the caller's map: the same spec is handed to the
- * variant group's parent binding in `main.tpl.tengo`.
+ * A `csvOnly` row is the one thing dropped on the way in: it holds a `csvHeader`
+ * and no spec, so it keeps its place in the contract order while no PColumn
+ * carries it. `id` is left off every entry, so it defaults to `column`.
  */
-_labelledClonotypeAxis := func(clonotypeAxisSpec) {
-	out := {}
-	for k, v in clonotypeAxisSpec {
-		out[k] = v
-	}
-
-	annotations := {}
-	if !is_undefined(clonotypeAxisSpec.annotations) {
-		for k, v in clonotypeAxisSpec.annotations {
-			annotations[k] = v
+buildVariantsSettings := func(blockId) {
+	columns := []
+	for d in variantColumns(blockId) {
+		if is_undefined(d.csvOnly) {
+			columns = append(columns, { column: d.column, spec: d.spec })
 		}
 	}
-	annotations["pl7.app/label"] = "Clone Id"
-	out.annotations = annotations
+	columns = _stampOrderPriority(columns)
 
-	return out
-}
-
-/**
- * `xsv.importFile` settings for `liabilities.tsv` — the liability group,
- * carrying every triaged liability including the declined ones.
- */
-buildLiabilitiesXsvSettings := func(blockId, clonotypeAxisSpec) {
 	return {
 		axes: [
-			{ column: "clonotypeKey", spec: _labelledClonotypeAxis(clonotypeAxisSpec) },
-			{ column: "liabilityKey", spec: liabilityAxisSpec }
+			{
+				column: "variantClonotypeKey",
+				// The registry's variant identity axis. A designed sequence is a
+				// variant, and this is the name every block that already reads
+				// variants selects on, so this group needs no new name to be
+				// consumed. `main.tpl.tengo` computes the value; the
+				// `pl7.app/label` column beside it carries the short id.
+				//
+				// NOT `pl7.app/vdj/clonotypeKey`: label discovery binds a label
+				// column to an axis by axis name alone, so that name would bind the
+				// PARENT's `pl7.app/label` onto this axis and draw an all-null
+				// "Clonotype Id" beside our own.
+				spec: {
+					type: "String",
+					name: "pl7.app/variantKey",
+					// One name, several producers, told apart by one domain key —
+					// a peptide run writes `pl7.app/peptide/extractionRunId`, an
+					// amplicon run `pl7.app/repertoire/extractionRunId`, and a design
+					// run writes this. It carries the block id because two runs over
+					// one dataset hash the same designed sequences to the same
+					// values: without it, the rows of two runs share an axis value
+					// and join into one.
+					domain: {
+						"pl7.app/antibodyVariantDesigner/designRunId": blockId
+					},
+					annotations: {
+						"pl7.app/label": "Variant key",
+						"pl7.app/description": "sha256 of the parent clonotype key and the designed V-domain sequence, base64-alphanumeric, 120 bits — the recipe upstream hashes a clonotype with. The parent is an ingredient because two parents that differ only at the liability being fixed converge on one designed sequence, and hashing the sequence alone would collide their rows. Same parent and same designed sequence, same key, in every run.",
+						"pl7.app/table/fontFamily": "monospace"
+					}
+				}
+			}
 		],
-		columns: buildXsvColumns(liabilityColumns(blockId)),
+		columns: columns,
 		storageFormat: "Parquet"
 	}
 }
 
 /**
- * The synthesis CSV's flat column order: the leading run of variant columns
- * that declare a `csvHeader`, in list order — `{column, csvHeader}` pairs,
- * naming the flat TSV column to read and the contract header to write it
- * under.
+ * The PFrame `liabilities.tsv` becomes — the Parents page's group, one row
+ * per parent, carrying a coarse verdict and a summary of every triaged
+ * liability including the declined ones.
  *
- * **Built from the flat table, not from the imported PFrame.** A PColumn's
- * `axesSpec` must match the physical axis count its data was partitioned
- * with at `xsv.importFile` time — re-speccing it with a different axis set
- * for export crashes at read time, not at spec-build time
- * ([[080-fact-export-axesspec-must-match-physical-partition-count]]). The
- * flat table has no axes at all, so `main.tpl.tengo` selects straight off it
- * with `pt.col(column).alias(csvHeader)`, in this order, before
- * `xsv.importFile` ever runs.
+ * One axis and two value columns.
+ * [[082-decision-the-liabilities-group-drops-to-one-axis]] replaced this
+ * group's earlier (parent, liability) row grain and its six value columns
+ * with this shape — the same one-row-per-parent summary
+ * `antibody-sequence-liabilities` already ships for its own liabilities. The
+ * hidden axis and the `parentClonotypeId` column that wraps it are untouched
+ * by that change; only the row grain and the value columns are new.
+ *
+ * Column names come from `pl7.app/liabilities/`, the segment the sibling
+ * liability blocks already own, because these are liability columns whoever
+ * computed them.
+ *
+ * @param blockId: string - this run's block id, the context domain every
+ *                 emitted column carries
+ * @param clonotypeAxisSpec: map - upstream's clonotype axis, taken from the
+ *                 resolved PDB column in `main.tpl.tengo`. Passed in, never
+ *                 written here: a row of this group IS one of upstream's
+ *                 clonotypes, and an axis joins on name, type and domain, so a
+ *                 spelling of our own would key the group to nothing.
+ */
+buildParentsSettings := func(blockId, clonotypeAxisSpec) {
+	return {
+		axes: [
+			{
+				column: "clonotypeKey",
+				// Upstream's axis, hidden from the table because the
+				// `parentClonotypeId` column below shows the same parent in the
+				// spelling a human reads. It stays in the data: it is the row key
+				// and what a downstream block joins on. Only annotations change,
+				// so the hidden axis still joins to upstream's.
+				//
+				// `deepMerge` returns a new map and never writes into the caller's:
+				// the same spec is handed to the Variants page's parent binding in
+				// `main.tpl.tengo`.
+				spec: maps.deepMerge(clonotypeAxisSpec, {
+					annotations: {
+						"pl7.app/description": "The clonotype these liabilities were found on, keyed as the block that produced the structures dataset keys it. Hidden here because \"Clonotype Id\" names the same parent in the spelling a human reads.",
+						"pl7.app/table/visibility": "hidden"
+					}
+				})
+			}
+		],
+		columns: _stampOrderPriority([
+			{
+				column: "parentClonotypeId",
+				// The parent in the spelling a human reads (`C-EWOQA`), joined onto
+				// the flat table in `main.tpl.tengo` from upstream's own
+				// `pl7.app/label` — the same value the Variants page's
+				// `parentClonotypeId` carries. It stands in for the parent axis
+				// hidden above.
+				//
+				// NOT spelled `pl7.app/label`: upstream already emits that name for
+				// this axis, and the model-side table renderer cannot reach it
+				// through the result pool (`spec-helpers.lib.tengo`), so this block
+				// carries its own readable copy instead of a second, colliding
+				// `pl7.app/label` producer.
+				//
+				// Ahead of Verdict and Summary: the row's parent is what a reader
+				// looks for first.
+				spec: {
+					name: "pl7.app/antibodyVariantDesigner/parentClonotypeId",
+					valueType: "String",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Parent Clonotype Id",
+						"pl7.app/description": "The clonotype this variant was designed from, as upstream names it."
+					}
+				}
+			},
+			{
+				column: "verdict",
+				spec: {
+					name: "pl7.app/liabilities/verdict",
+					valueType: "String",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Verdict",
+						"pl7.app/description": "Whether this parent carries any triaged liability at all — present or none — buried and declined ones included. Read Summary for what was found and why a declined one was declined.",
+						"pl7.app/isDiscreteFilter": "true"
+					}
+				}
+			},
+			{
+				column: "summary",
+				spec: {
+					name: "pl7.app/liabilities/summary",
+					valueType: "String",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Summary",
+						"pl7.app/description": "Every triaged liability on this parent, comma-joined as <liability type>@<chain><IMGT position> (<verdict>), with the fixability class named when the verdict is fixability-declined. \"None\" when the parent triaged clean."
+					}
+				}
+			}
+		]),
+		storageFormat: "Parquet"
+	}
+}
+
+/**
+ * The synthesis CSV's flat column order: every variant column that declares a
+ * `csvHeader`, in list order — `{column, csvHeader}` pairs,
+ * naming the flat TSV column to read and the contract header to write it
+ * under. The column set is a vendor contract, not a display choice.
+ *
+ * **Built from the flat table, not from the imported PFrame**, which has no
+ * axes to re-spec: `spec-helpers.lib.tengo` selects straight off it with
+ * `pt.col(column).alias(csvHeader)`, in this order, before the import ever
+ * runs.
  *
  * @return [{column, csvHeader}] - in the CSV's own contract order.
  */
 csvColumnOrder := func(blockId) {
-	declaring := slices.filter(variantColumns(blockId), declaresCsvHeader)
-
-	// The declaring rows are the list's leading run, so their list order IS the
-	// contract order and no row needs a position number. The one thing the list
-	// shape cannot state is that the run stays contiguous — a later row
-	// rejoining it would append an extra column to the vendor's set — so the
-	// prefix of that length must be exactly the declaring rows.
-	ll.assert(
-		slices.every(slices.slice(variantColumns(blockId), 0, len(declaring)), declaresCsvHeader),
-		"the synthesis CSV columns must be the leading run of the variant list")
-
-	return slices.map(declaring, func(d) {
-		return { column: d.column, csvHeader: d.csvHeader }
-	})
+	// The declaring rows in list order ARE the contract order — the identity
+	// rows sit between them and are stepped over, because the list orders the
+	// table and the vendor's set is only the part of it the vendor asked for.
+	// `specs.test.tengo` pins the exact twelve headers, which is what stops the
+	// set growing when a row gains a `csvHeader` it should not have.
+	order := []
+	for d in variantColumns(blockId) {
+		if !is_undefined(d.csvHeader) {
+			order = append(order, { column: d.column, csvHeader: d.csvHeader })
+		}
+	}
+	return order
 }
 
 export ll.toStrict({
-	VARIANT_CLONE_AXIS_NAME: VARIANT_CLONE_AXIS_NAME,
-	LIABILITY_AXIS_NAME: LIABILITY_AXIS_NAME,
-	CSV_PARENT_HEADER: CSV_PARENT_HEADER,
-	buildVariantsXsvSettings: buildVariantsXsvSettings,
-	buildLiabilitiesXsvSettings: buildLiabilitiesXsvSettings,
+	buildVariantsSettings: buildVariantsSettings,
+	buildParentsSettings: buildParentsSettings,
 	csvColumnOrder: csvColumnOrder
 })
