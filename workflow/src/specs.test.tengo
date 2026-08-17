@@ -72,11 +72,20 @@ TestVariantColumns := func() {
 		byColumn.parentClonotypeKey.spec.name)
 	test.isEqual("pl7.app/antibodyVariantDesigner/variantKey", byColumn.variantKey.spec.name)
 
-	// The designed sequence reuses the sequence name every consumer reads,
-	// qualified by feature and alphabet rather than renamed.
-	test.isEqual("pl7.app/vdj/sequence", byColumn.variantSequence.spec.name)
-	test.isEqual("VDJRegion", byColumn.variantSequence.spec.domain["pl7.app/vdj/feature"])
+	// The designed sequence publishes under the producer-neutral sequence name
+	// with a feature of its own — never `pl7.app/vdj/sequence` / `VDJRegion`,
+	// which promises the gene hits and region boundaries the block never
+	// re-derives. `VDJRegion` survives in the label alone.
+	test.isEqual("pl7.app/sequence", byColumn.variantSequence.spec.name)
+	test.isEqual("designed-variant", byColumn.variantSequence.spec.domain["pl7.app/feature"])
 	test.isEqual("aminoacid", byColumn.variantSequence.spec.domain["pl7.app/alphabet"])
+	test.isEqual("Designed VDJRegion aa", byColumn.variantSequence.spec.annotations["pl7.app/label"])
+
+	// The markers a dataset selector needs: this column IS the group's anchor,
+	// because a designed molecule has no abundance column to anchor instead.
+	test.isEqual("true", byColumn.variantSequence.spec.annotations["pl7.app/isAnchor"])
+	test.isEqual("true", byColumn.variantSequence.spec.annotations["pl7.app/isMainSequence"])
+	test.isEqual("true", byColumn.variantSequence.spec.annotations["pl7.app/isAssemblingFeature"])
 
 	// The one column with a `domain`, and it holds only the two keys sequence
 	// consumers match on — never the block id.

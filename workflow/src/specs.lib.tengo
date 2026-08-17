@@ -132,22 +132,34 @@ variantColumns := func(blockId) {
 		{
 			column: "variantSequence",
 			csvHeader: "variantSequence",
-			// A designed sequence is a sequence: the same name MiXCR gives every
-			// sequence column, qualified by feature and alphabet, so every
-			// consumer that already reads sequences finds this one. The only
-			// column here with a `domain`, and those two keys are what stop it
-			// joining to the parent's own sequence.
+			// A designed sequence is a sequence, but NOT a MiXCR one: the block
+			// re-derives no gene hit and no region boundary, so it publishes the
+			// producer-neutral `pl7.app/sequence` under a feature of its own
+			// rather than claiming `pl7.app/vdj/sequence` / `VDJRegion`, which
+			// routes a consumer into a VDJ branch this group cannot feed. The
+			// complete-feature name rides in the label instead — the rule
+			// `synthetic-repertoire-profiler` follows for the same reason
+			// (`column-specs.lib.tengo:498-506`).
+			//
+			// The only column here with a `domain`, and those two keys are both
+			// what a consumer matches on and what stops this joining to the
+			// parent's own sequence. `isAnchor` makes this the column a dataset
+			// selector finds the group by; the group has no abundance column to
+			// anchor, because a designed molecule was never sequenced.
 			spec: {
-				name: "pl7.app/vdj/sequence",
+				name: "pl7.app/sequence",
 				valueType: "String",
 				domain: {
-					"pl7.app/vdj/feature": "VDJRegion",
+					"pl7.app/feature": "designed-variant",
 					"pl7.app/alphabet": "aminoacid"
 				},
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
-					"pl7.app/label": "Variant sequence",
+					"pl7.app/label": "Designed VDJRegion aa",
 					"pl7.app/description": "The full designed V-domain sequence. Only the positions listed in \"Changed positions\" differ from the parent.",
+					"pl7.app/isAnchor": "true",
+					"pl7.app/isMainSequence": "true",
+					"pl7.app/isAssemblingFeature": "true",
 					"pl7.app/table/visibility": "hidden"
 				}
 			}

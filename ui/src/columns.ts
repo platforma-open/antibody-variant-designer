@@ -12,7 +12,7 @@ export const VARIANT_VALUE_COLUMNS = {
   rank: "pl7.app/score",
   addressedTarget: "pl7.app/liabilities/addressedTarget",
   changedPositions: "pl7.app/liabilities/changedPositions",
-  variantSequence: "pl7.app/vdj/sequence",
+  variantSequence: "pl7.app/sequence",
   structuralTolerance: "pl7.app/structure/tolerance",
   worstConfidence: "pl7.app/structure/confidence/worstOverEdits",
   bindingRisk: "pl7.app/vdj/bindingRisk",
