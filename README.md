@@ -78,6 +78,7 @@ restaged with `addFiles`, never as a path.
 | `software/` | the python package doing the per-residue work |
 | `block/` | the published block facade (`block.components`, `block.meta`) |
 | `test/` | integration tests |
+| `docs/` | the published description, and [`test-datasets.md`](docs/test-datasets.md) — which public dataset to run against per antibody format, and the blocks a project needs |
 
 ## Development
 
