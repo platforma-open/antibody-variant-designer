@@ -16,6 +16,7 @@ render := import("@platforma-sdk/workflow-tengo:render")
 file := import("@platforma-sdk/workflow-tengo:file")
 ll := import("@platforma-sdk/workflow-tengo:ll")
 maps := import("@platforma-sdk/workflow-tengo:maps")
+smart := import("@platforma-sdk/workflow-tengo:smart")
 pframes := import("@platforma-sdk/workflow-tengo:pframes")
 pSpec := import("@platforma-sdk/workflow-tengo:pframes.spec")
 xsv := import("@platforma-sdk/workflow-tengo:pframes.xsv")
@@ -30,6 +31,7 @@ definitionsSw := assets.importSoftware("@platforma-open/milaboratories.software-
 step1ScanLiabilitiesTpl := assets.importTemplate(":steps.step-1-index-and-scan")
 step2ReadToleranceTpl := assets.importTemplate(":steps.step-2-read-tolerance")
 step3BuildVariantsTpl := assets.importTemplate(":steps.step-3-build-variants")
+materializeFileSetTpl := assets.importTemplate(":materialize-fileset")
 
 /**
  * Advanced Settings → Resource Allocation, as the render options every step
@@ -118,6 +120,16 @@ _buildVariants := func(pdbIndex, triaged, tolerance, residues, definitions, args
 			epistasisRescoreTopK: args.epistasisRescoreTopK
 		}
 	}, _resourceRail(args.buildVariantsCpu, args.buildVariantsMem))
+}
+
+/**
+ * A copy of every file in `fileSet`, put into primary storage as soon as the
+ * step that produced it is done — see `materialize-fileset.tpl.tengo` for why a
+ * step output needs this and why wiring it into the next step does not provide
+ * it.
+ */
+_materialize := func(fileSet) {
+	return render.createEphemeral(materializeFileSetTpl, { fileSet: fileSet }).output("copies")
 }
 
 wf.prepare(func(args) {
@@ -262,8 +274,21 @@ wf.body(func(args) {
 			variantsData: pframes.exportFrame(variantsPf),
 			liabilitiesData: pframes.exportFrame(liabilitiesPf),
 			synthesisCsv: file.exportFile(synthesisCsv),
-			variants: variantsPf,
-			liabilities: liabilitiesPf
+
+			// The three artifacts the steps hand to each other — `residues` and
+			// `triaged` out of step 1, `tolerance` out of step 2. Nothing reads them
+			// here. They are attached because their bytes live in work storage, held
+			// by a one-minute pin, and the step that consumes them cannot ask for a
+			// durable copy until it has a compute allocation — step 2 queues for a
+			// GPU, so that ask lands long after the pin lapsed and fails with "lost
+			// blob ... no incarnations found in any of storages". `_materialize`
+			// makes the copy on the producing side instead, the moment each fileSet
+			// locks, and attaching the result keeps it for as long as the block lives.
+			resultsToCache: smart.createMapResource({
+				residues: _materialize(liabilities.output("residues")),
+				triaged: _materialize(liabilities.output("triaged")),
+				tolerance: _materialize(tolerance.output("tolerance"))
+			})
 		},
 		exports: {}
 	}
