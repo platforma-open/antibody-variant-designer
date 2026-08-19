@@ -63,9 +63,17 @@ _withParentClonotypeId := func(ptWf, df, parentLabels) {
  * Parents page can name a parent only through a value column of this block's
  * own — the same column, from the same source, the variant group carries.
  *
+ * Also aliases `clonotypeKey` onto a `parentClonotypeKey` value column: the
+ * axis itself is `pl7.app/table/visibility: hidden` (no column-picker entry at
+ * all), and an axis cannot be made addable-but-hidden-by-default the way a
+ * value column can (`089-decision-parents-page-gets-an-addable-parent-key-column`)
+ * — so the machine key needs its own column to become optional, same as the
+ * Variants page's own `parentClonotypeKey`.
+ *
  * @param liabilitiesFile: reference - the flat `liabilities.tsv` step 1 wrote
  * @param parentLabels: frame | undefined - as in `_withParentClonotypeId`
- * @return reference - the same table with `parentClonotypeId` added
+ * @return reference - the same table with `parentClonotypeId` and
+ *                 `parentClonotypeKey` added
  */
 withParentIdOnLiabilities := func(liabilitiesFile, parentLabels) {
 	ptWf := pt.workflow().mem("1GiB").cpu(1)
@@ -73,6 +81,9 @@ withParentIdOnLiabilities := func(liabilitiesFile, parentLabels) {
 		ptWf,
 		ptWf.frame(liabilitiesFile, { xsvType: "tsv", inferSchema: false }),
 		parentLabels)
+	df = df.withColumns(
+		pt.col("clonotypeKey").alias("parentClonotypeKey")
+	)
 	df.save("liabilities-with-id.tsv")
 	return ptWf.run().getFile("liabilities-with-id.tsv")
 }

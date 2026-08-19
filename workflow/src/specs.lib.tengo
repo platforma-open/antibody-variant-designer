@@ -71,7 +71,7 @@ variantColumns := func(blockId) {
 				valueType: "String",
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
-					"pl7.app/label": "Variant Clonotype Id",
+					"pl7.app/label": "Variant Clone Id",
 					"pl7.app/description": "`C-XXXXX`, derived from the variant clonotype key the way upstream derives a clonotype id — digits dropped, first five characters, uppercased, with a rank suffix when two keys share the prefix."
 				}
 			}
@@ -107,7 +107,7 @@ variantColumns := func(blockId) {
 				valueType: "String",
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
-					"pl7.app/label": "Parent clonotype key",
+					"pl7.app/label": "Parent clone key",
 					"pl7.app/description": "The parent's clonotype key, as minted by the block that produced the structures dataset.",
 					"pl7.app/table/fontFamily": "monospace",
 					"pl7.app/table/visibility": "optional"
@@ -123,7 +123,30 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Rank",
-					"pl7.app/description": "Position within this parent's own surviving set, starting at 1. Not comparable across different parents. Lower is better — rank 1 is the top pick for that parent.",
+					"pl7.app/description": "Position across every surviving variant in the run, starting at 1. Comparable across parents — rank 1 is the top pick dataset-wide.",
+					"pl7.app/isScore": "true",
+					"pl7.app/score/rankingOrder": "increasing",
+					// Hidden by default: `parentRank` is the table's default view —
+					// most users compare candidates within one parent, not across
+					// the whole run — so this one only shows once a user asks for
+					// it, same as `parentClonotypeKey` below.
+					"pl7.app/table/visibility": "optional"
+				}
+			}
+		},
+		{
+			// No `csvHeader`: the vendor's contract fixes `rank` as the
+			// dataset-wide ordinal, and this is a Variants-page-only view onto
+			// the same underlying order, scoped back down to one parent
+			// ([[088-decision-rank-becomes-a-global-ordinal-via-a-second-pass]]).
+			column: "parentRank",
+			spec: {
+				name: "pl7.app/antibodyVariantDesigner/parentRank",
+				valueType: "Long",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Rank per parent",
+					"pl7.app/description": "Position within this parent's own surviving set, starting at 1. Not comparable across different parents — for that, see `rank`. Lower is better — rank 1 is the top pick for that parent.",
 					"pl7.app/isScore": "true",
 					"pl7.app/score/rankingOrder": "increasing"
 				}
@@ -327,7 +350,7 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Variant ordinal",
-					"pl7.app/description": "A per-parent ordinal — v01, v02, … in this run's rank order.",
+					"pl7.app/description": "A per-parent ordinal — v01, v02, … in that parent's own selection order. Unlike `rank`, this stays scoped to the parent even though rank is now dataset-wide.",
 					"pl7.app/table/visibility": "optional"
 				}
 			}
@@ -369,7 +392,7 @@ buildVariantsSettings := func(blockId) {
 				// NOT `pl7.app/vdj/clonotypeKey`: label discovery binds a label
 				// column to an axis by axis name alone, so that name would bind the
 				// PARENT's `pl7.app/label` onto this axis and draw an all-null
-				// "Clonotype Id" beside our own.
+				// "Clone Id" beside our own.
 				spec: {
 					type: "String",
 					name: "pl7.app/variantKey",
@@ -437,7 +460,7 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 				// `main.tpl.tengo`.
 				spec: maps.deepMerge(clonotypeAxisSpec, {
 					annotations: {
-						"pl7.app/description": "The clonotype these liabilities were found on, keyed as the block that produced the structures dataset keys it. Hidden here because \"Clonotype Id\" names the same parent in the spelling a human reads.",
+						"pl7.app/description": "The clonotype these liabilities were found on, keyed as the block that produced the structures dataset keys it. Hidden here because \"Clone Id\" names the same parent in the spelling a human reads.",
 						"pl7.app/table/visibility": "hidden"
 					}
 				})
@@ -467,6 +490,26 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 					annotations: {
 						"pl7.app/label": "Parent Clonotype Id",
 						"pl7.app/description": "The clonotype this variant was designed from, as upstream names it."
+					}
+				}
+			},
+			{
+				// Reuses the Variants page's own PColumn name — same real-world
+				// value, same name, the precedent `parentClonotypeId` above already
+				// set on this page
+				// ([[089-decision-parents-page-gets-an-addable-parent-key-column]]).
+				// `spec-helpers.lib.tengo` aliases it off the flat `clonotypeKey`
+				// column; the hidden axis above is untouched.
+				column: "parentClonotypeKey",
+				spec: {
+					name: "pl7.app/antibodyVariantDesigner/parentClonotypeKey",
+					valueType: "String",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Parent clone key",
+						"pl7.app/description": "The parent's clonotype key, as minted by the block that produced the structures dataset.",
+						"pl7.app/table/fontFamily": "monospace",
+						"pl7.app/table/visibility": "optional"
 					}
 				}
 			},
