@@ -5,6 +5,7 @@ import { parseChangedPositions } from "../columns";
 const props = defineProps<{
   parentLabel: string;
   rank: number | null;
+  parentRank: number | null;
   addressedTarget: string;
   changedPositions: string;
   variantSequence: string;
@@ -22,8 +23,10 @@ const edits = computed(() => parseChangedPositions(props.changedPositions));
     <dl class="summary">
       <dt>Parent</dt>
       <dd>{{ parentLabel }}</dd>
-      <dt>Rank within parent</dt>
+      <dt>Rank</dt>
       <dd>{{ rank ?? "—" }}</dd>
+      <dt>Rank per parent</dt>
+      <dd>{{ parentRank ?? "—" }}</dd>
       <dt>Addressed liability</dt>
       <dd>{{ addressedTarget }}</dd>
       <dt>Structural tolerance</dt>

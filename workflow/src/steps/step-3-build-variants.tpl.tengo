@@ -8,10 +8,15 @@
 // candidate files written out and staged back in.
 //
 // `variants.tsv` is dataset-wide and leaves the pipeline as a PFrame. Its
-// `variantKey` is a per-parent ordinal — `v01`, `v02`, … in rank order — so no
-// block id reaches this process: run identity lands on the emitted columns as a
-// spec domain after the exec, which is what lets two blocks over one dataset
-// share this run.
+// `variantKey` is a per-parent ordinal — `v01`, `v02`, … in that parent's own
+// local rank order — so no block id reaches this process: run identity lands
+// on the emitted columns as a spec domain after the exec, which is what lets
+// two blocks over one dataset share this run. `rank` itself is not per-parent
+// any more — the process rewrites it to a dataset-wide ordinal once the whole
+// batch loop is done ([[088-decision-rank-becomes-a-global-ordinal-via-a-second-pass]]).
+// `parentRank` carries the value `rank` used to: a per-parent-only ordinal,
+// for the Variants page alone — no `csvHeader`, so the vendor's CSV never
+// sees it.
 //
 // The exec recipe itself — flag names, workdir paths, output shape, resource
 // sizing — lives in the software package that owns the entrypoint. What

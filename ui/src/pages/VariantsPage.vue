@@ -50,10 +50,13 @@ const variantsTableOutput = computed(() => app.model.outputs.variantsTable);
 // `pending` picks the running skeleton over the "not computed" cat
 // (`PlAgDataTableV2.vue:378`). A constant string here pins the grid to the
 // not-ready overlay for the whole run, so `running-text` below never shows.
+//
+// v7 adds `parentRank`: a new column changes the header set AG-Grid would
+// otherwise cache stale (`088-decision-rank-becomes-a-global-ordinal-via-a-second-pass`).
 const variantsTableSettings = usePlDataTableSettingsV2({
   model: () => variantsTableOutput.value,
   sourceId: () =>
-    variantsTableOutput.value.ok && variantsTableOutput.value.value ? "avd-variants-v6" : undefined,
+    variantsTableOutput.value.ok && variantsTableOutput.value.value ? "avd-variants-v7" : undefined,
 });
 
 // The row-detail view's own value columns (`VARIANT_VALUE_COLUMNS`) are read
@@ -89,6 +92,10 @@ const comparisonProps = computed(() => {
         "",
     ),
     rank: v[VARIANT_VALUE_COLUMNS.rank] === null ? null : Number(v[VARIANT_VALUE_COLUMNS.rank]),
+    parentRank:
+      v[VARIANT_VALUE_COLUMNS.parentRank] === null
+        ? null
+        : Number(v[VARIANT_VALUE_COLUMNS.parentRank]),
     addressedTarget: String(v[VARIANT_VALUE_COLUMNS.addressedTarget] ?? ""),
     changedPositions: String(v[VARIANT_VALUE_COLUMNS.changedPositions] ?? ""),
     variantSequence: String(v[VARIANT_VALUE_COLUMNS.variantSequence] ?? ""),
@@ -124,7 +131,7 @@ const comparisonProps = computed(() => {
       v-model="app.model.data.variantsTableState"
       :settings="variantsTableSettings"
       not-ready-text="Run on a 3D structures dataset to see variant hypotheses"
-      running-text="Designing variants — scanning liabilities, reading fold tolerance, and ranking candidates per parent."
+      running-text="Designing variants — scanning liabilities, reading fold tolerance, and ranking candidates across the run."
       no-rows-text="No variants — every parent may have been skipped, or none needed a fix"
       @row-double-clicked="openComparison"
     />

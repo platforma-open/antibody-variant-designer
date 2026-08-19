@@ -1,5 +1,7 @@
-"""Unit tests for `variant_store.py` — the `variants.tsv` round trip, and
-the per-parent-ordinal `variantKey` the variant axis is built from."""
+"""Unit tests for `variant_store.py` — the `variants.tsv` round trip, the
+per-parent-ordinal `variantKey` the variant axis is built from, and the
+second pass that turns each parent's own local `rank` into one ordinal
+across the whole run."""
 
 import csv
 import io
@@ -9,18 +11,23 @@ import variant_store
 
 def _variant(
     rank=1,
+    parent_rank=None,
     chain="H,L",
     worst_confidence_angstroms=3.2,
     low_confidence_warning=False,
     changed_positions="H:N107D, H:G108S",
+    structural_tolerance=2.0,
 ):
+    # `parent_rank` defaults to `rank` — the shape every caller sees before
+    # `rewrite_global_rank` ever runs, when the two are still identical.
     return variant_store.Variant(
         rank=rank,
+        parent_rank=rank if parent_rank is None else parent_rank,
         chain=chain,
         addressed_target="Deamidation (N[GS]) @ CDR1 H:107",
         changed_positions=changed_positions,
         variant_sequence="DSALA",
-        structural_tolerance=2.0,
+        structural_tolerance=structural_tolerance,
         worst_confidence_angstroms=worst_confidence_angstroms,
         binding_risk="Medium",
         low_confidence_warning=low_confidence_warning,
@@ -89,7 +96,10 @@ class TestOneFileHoldsEveryParent:
 
         assert [r["clonotypeKey"] for r in _rows_of(path)] == ["clone-1", "clone-2"]
 
-    def test_ranks_restart_per_parent_inside_the_one_file(self, tmp_path):
+    def test_ranks_restart_per_parent_before_the_global_rewrite(self, tmp_path):
+        # `append_variants_tsv` alone still writes the local, per-parent
+        # rank `rank_variants` produced — only `rewrite_global_rank`, called
+        # once after the whole batch loop, turns it into one ordinal.
         path = tmp_path / "variants.tsv"
         two = [_variant(rank=1, changed_positions="H:N107D"),
                _variant(rank=2, changed_positions="H:N108D")]
@@ -144,3 +154,73 @@ class TestVariantKeyIsAPerParentOrdinal:
         rows = _rows_of(path)
         keys = [(r["clonotypeKey"], r["variantKey"]) for r in rows]
         assert len(set(keys)) == len(rows) == 4
+
+
+class TestRewriteGlobalRank:
+    def test_renumbers_every_parents_survivors_by_tolerance_across_the_run(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+        variant_store.write_variants_header(str(path))
+        # clone-2's one variant tolerates edits better than either of
+        # clone-1's — it must come out ranked ahead of both.
+        variant_store.append_variants_tsv(
+            str(path), "clone-1",
+            [
+                _variant(rank=1, structural_tolerance=9.0, changed_positions="H:N107D"),
+                _variant(rank=2, structural_tolerance=5.0, changed_positions="H:N108D"),
+            ],
+        )
+        variant_store.append_variants_tsv(
+            str(path), "clone-2",
+            [_variant(rank=1, structural_tolerance=12.0, changed_positions="H:N109D")],
+        )
+
+        variant_store.rewrite_global_rank(str(path))
+
+        written = variant_store.read_variants_tsv(str(path))
+        assert [(ck, v.rank) for ck, _, v in written] == [
+            ("clone-2", 1), ("clone-1", 2), ("clone-1", 3),
+        ]
+        # `parent_rank` is untouched: clone-1's two rows still read 1, 2 —
+        # their own local order — even though the global `rank` column now
+        # interleaves them with clone-2's.
+        assert [(ck, v.parent_rank) for ck, _, v in written] == [
+            ("clone-2", 1), ("clone-1", 1), ("clone-1", 2),
+        ]
+
+    def test_variant_key_is_untouched_by_the_rewrite(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(
+            str(path), "clone-1", [_variant(rank=1, structural_tolerance=9.0)]
+        )
+        variant_store.append_variants_tsv(
+            str(path), "clone-2", [_variant(rank=1, structural_tolerance=5.0)]
+        )
+
+        variant_store.rewrite_global_rank(str(path))
+
+        # Both parents' one survivor was locally rank 1, so both still
+        # render `v01` — only the now-global `rank` column tells them apart.
+        assert [variant for _, variant, _ in variant_store.read_variants_tsv(str(path))] == [
+            "v01", "v01",
+        ]
+
+    def test_ties_break_by_clonotype_then_variant_key_for_determinism(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+        variant_store.write_variants_header(str(path))
+        tied = _variant(rank=1, structural_tolerance=5.0, changed_positions="H:N107D")
+        variant_store.append_variants_tsv(str(path), "clone-2", [tied])
+        variant_store.append_variants_tsv(str(path), "clone-1", [tied])
+
+        variant_store.rewrite_global_rank(str(path))
+
+        written = variant_store.read_variants_tsv(str(path))
+        assert [(ck, v.rank) for ck, _, v in written] == [("clone-1", 1), ("clone-2", 2)]
+
+    def test_an_empty_file_is_left_alone(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+        variant_store.write_variants_header(str(path))
+
+        variant_store.rewrite_global_rank(str(path))
+
+        assert variant_store.read_variants_tsv(str(path)) == []

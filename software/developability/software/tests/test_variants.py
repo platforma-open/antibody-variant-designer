@@ -154,15 +154,22 @@ class TestGateAndRankInOnePass:
 
 
 class TestDatasetWideVariantsTsv:
-    def test_one_file_holds_every_parent_with_ranks_restarting(self, batch):
+    def test_one_file_holds_every_parent_with_rank_global_across_the_run(self, batch):
+        # Both parents are staged from the identical fixture, so clone-1's
+        # and clone-2's rank-1 candidates tie on tolerance and changed
+        # positions, and likewise for their rank-2 candidates — genuinely
+        # global rank interleaves the two parents rather than keeping each
+        # parent's pair together, with `(clonotypeKey, variantKey)` breaking
+        # the tie deterministically within each interleaved pair.
         _stage(batch, "clone-1")
         _stage(batch, "clone-2")
 
         skips, written = _run(batch, ["--variants-per-parent", "2"])
 
         assert skips == [("clone-1", "", ""), ("clone-2", "", "")]
-        assert [key for key, _, _ in written] == ["clone-1", "clone-1", "clone-2", "clone-2"]
-        assert [v.rank for _, _, v in written] == [1, 2, 1, 2]
+        assert [(key, v.rank) for key, _, v in written] == [
+            ("clone-1", 1), ("clone-2", 2), ("clone-1", 3), ("clone-2", 4),
+        ]
 
     def test_clonotype_key_and_variant_key_are_unique_across_the_file(self, batch):
         _stage(batch, "clone-1")

@@ -117,7 +117,16 @@ def rank_variants(
     `changed_positions` for determinism), re-sort the leading
     `epistasis_rescore_top_k` window by the edit-count penalty, then keep
     the top `variants_per_parent`. Rank restarts at 1 here, because one
-    call already covers exactly one parent's candidates. Band every
+    call already covers exactly one parent's candidates — it is this
+    parent's own selection order, and `variant_store.variant_key` fixes
+    `variantKey` from it. The returned `Variant.rank` is not the value that
+    reaches the emitted `rank` column: `variant_store.rewrite_global_rank`
+    renumbers every parent's survivors together, once the whole dataset has
+    been through this function, into one dataset-wide ordinal
+    (`088-decision-rank-becomes-a-global-ordinal-via-a-second-pass`).
+    `Variant.parent_rank` carries this same local position permanently — it
+    is the Variants page's own "best pick of this antibody" column, and
+    nothing ever overwrites it after this function sets it. Band every
     candidate for reporting, but the band decides no order here."""
     low_tolerance_positions = _low_tolerance_positions(tolerance_lookup, low_tolerance_floor)
     is_vhh = not any(r.chain_role == "L" for r in residues)
@@ -139,6 +148,7 @@ def rank_variants(
         variants.append(
             variant_store.Variant(
                 rank=rank,
+                parent_rank=rank,
                 chain=chain,
                 addressed_target=candidate.addressed_target,
                 changed_positions=candidate.changed_positions,

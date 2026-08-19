@@ -10,6 +10,7 @@ export const COL_LABEL = "pl7.app/label";
 /** Group A and B — the variant table's value columns. */
 export const VARIANT_VALUE_COLUMNS = {
   rank: "pl7.app/score",
+  parentRank: "pl7.app/antibodyVariantDesigner/parentRank",
   addressedTarget: "pl7.app/liabilities/addressedTarget",
   changedPositions: "pl7.app/liabilities/changedPositions",
   variantSequence: "pl7.app/sequence",

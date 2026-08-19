@@ -13,6 +13,12 @@ Both thresholds a reviewer checks therefore arrive at the same command.
 the gate; `--variants-per-parent`, `--low-tolerance-floor` and
 `--epistasis-rescore-top-k` belong to the ranking. Nothing else reads any of
 them.
+
+`main` closes with one more pass over `variants.tsv` after the batch loop
+returns: `variant_store.rewrite_global_rank` turns each parent's own local
+rank into one ordinal across every surviving variant in the run. It runs
+after, not inside, the loop that writes the file, so it never grows the
+loop's own per-antibody memory footprint — see that function's docstring.
 """
 
 import argparse
@@ -141,7 +147,12 @@ def main(argv: list[str] | None = None) -> int:
         variant_store.append_variants_tsv(args.out_variants, entry.clonotype_key, variants)
         return reason
 
-    return batch.run(pdb_index.read_index(args.pdb_index), one, args.out_skip)
+    rc = batch.run(pdb_index.read_index(args.pdb_index), one, args.out_skip)
+    # After the loop, not inside it: by now every antibody's working state is
+    # released, and only the small already-filtered survivor set remains to
+    # renumber (088-decision-rank-becomes-a-global-ordinal-via-a-second-pass).
+    variant_store.rewrite_global_rank(args.out_variants)
+    return rc
 
 
 if __name__ == "__main__":
