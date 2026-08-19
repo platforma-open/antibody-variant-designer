@@ -1,4 +1,3 @@
-
 ll := import("@platforma-sdk/workflow-tengo:ll")
 maps := import("@platforma-sdk/workflow-tengo:maps")
 
@@ -359,17 +358,17 @@ variantColumns := func(blockId) {
 }
 
 /**
- * The PFrame `variants.tsv` becomes — the Variants page's group.
- *
- * One axis, the variant's own clonotype key, so the group has a clonotype's
- * shape: a hashed row key plus a `pl7.app/label` beside it. The parent is no
- * longer the row's identity — it rides along as the binding columns
- * `parentClonotypeKey` / `parentClonotypeId`.
- *
- * A `csvOnly` row is the one thing dropped on the way in: it holds a `csvHeader`
- * and no spec, so it keeps its place in the contract order while no PColumn
- * carries it. `id` is left off every entry, so it defaults to `column`.
- */
+	* The PFrame `variants.tsv` becomes — the Variants page's group.
+	*
+	* One axis, the variant's own clonotype key, so the group has a clonotype's
+	* shape: a hashed row key plus a `pl7.app/label` beside it. The parent is no
+	* longer the row's identity — it rides along as the binding columns
+	* `parentClonotypeKey` / `parentClonotypeId`.
+	*
+	* A `csvOnly` row is the one thing dropped on the way in: it holds a `csvHeader`
+	* and no spec, so it keeps its place in the contract order while no PColumn
+	* carries it. `id` is left off every entry, so it defaults to `column`.
+	*/
 buildVariantsSettings := func(blockId) {
 	columns := []
 	for d in variantColumns(blockId) {
@@ -420,30 +419,30 @@ buildVariantsSettings := func(blockId) {
 }
 
 /**
- * The PFrame `liabilities.tsv` becomes — the Parents page's group, one row
- * per parent, carrying a coarse verdict and a summary of every triaged
- * liability including the declined ones.
- *
- * One axis and two value columns.
- * [[082-decision-the-liabilities-group-drops-to-one-axis]] replaced this
- * group's earlier (parent, liability) row grain and its six value columns
- * with this shape — the same one-row-per-parent summary
- * `antibody-sequence-liabilities` already ships for its own liabilities. The
- * hidden axis and the `parentClonotypeId` column that wraps it are untouched
- * by that change; only the row grain and the value columns are new.
- *
- * Column names come from `pl7.app/liabilities/`, the segment the sibling
- * liability blocks already own, because these are liability columns whoever
- * computed them.
- *
- * @param blockId: string - this run's block id, the context domain every
- *                 emitted column carries
- * @param clonotypeAxisSpec: map - upstream's clonotype axis, taken from the
- *                 resolved PDB column in `main.tpl.tengo`. Passed in, never
- *                 written here: a row of this group IS one of upstream's
- *                 clonotypes, and an axis joins on name, type and domain, so a
- *                 spelling of our own would key the group to nothing.
- */
+	* The PFrame `liabilities.tsv` becomes — the Parents page's group, one row
+	* per parent, carrying a coarse verdict and a summary of every triaged
+	* liability including the declined ones.
+	*
+	* One axis and two value columns.
+	* [[082-decision-the-liabilities-group-drops-to-one-axis]] replaced this
+	* group's earlier (parent, liability) row grain and its six value columns
+	* with this shape — the same one-row-per-parent summary
+	* `antibody-sequence-liabilities` already ships for its own liabilities. The
+	* hidden axis and the `parentClonotypeId` column that wraps it are untouched
+	* by that change; only the row grain and the value columns are new.
+	*
+	* Column names come from `pl7.app/liabilities/`, the segment the sibling
+	* liability blocks already own, because these are liability columns whoever
+	* computed them.
+	*
+	* @param blockId: string - this run's block id, the context domain every
+	*                 emitted column carries
+	* @param clonotypeAxisSpec: map - upstream's clonotype axis, taken from the
+	*                 resolved PDB column in `main.tpl.tengo`. Passed in, never
+	*                 written here: a row of this group IS one of upstream's
+	*                 clonotypes, and an axis joins on name, type and domain, so a
+	*                 spelling of our own would key the group to nothing.
+	*/
 buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 	return {
 		axes: [
@@ -544,18 +543,18 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 }
 
 /**
- * The synthesis CSV's flat column order: every variant column that declares a
- * `csvHeader`, in list order — `{column, csvHeader}` pairs,
- * naming the flat TSV column to read and the contract header to write it
- * under. The column set is a vendor contract, not a display choice.
- *
- * **Built from the flat table, not from the imported PFrame**, which has no
- * axes to re-spec: `spec-helpers.lib.tengo` selects straight off it with
- * `pt.col(column).alias(csvHeader)`, in this order, before the import ever
- * runs.
- *
- * @return [{column, csvHeader}] - in the CSV's own contract order.
- */
+	* The synthesis CSV's flat column order: every variant column that declares a
+	* `csvHeader`, in list order — `{column, csvHeader}` pairs,
+	* naming the flat TSV column to read and the contract header to write it
+	* under. The column set is a vendor contract, not a display choice.
+	*
+	* **Built from the flat table, not from the imported PFrame**, which has no
+	* axes to re-spec: `spec-helpers.lib.tengo` selects straight off it with
+	* `pt.col(column).alias(csvHeader)`, in this order, before the import ever
+	* runs.
+	*
+	* @return [{column, csvHeader}] - in the CSV's own contract order.
+	*/
 csvColumnOrder := func(blockId) {
 	// The declaring rows in list order ARE the contract order — the identity
 	// rows sit between them and are stepped over, because the list orders the
