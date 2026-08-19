@@ -88,38 +88,5 @@ const viewerProps = ref<PlStructureViewerProps>();
       no-rows-text="No liabilities"
       @row-double-clicked="selectParentRow"
     />
-
-    <div class="viewer-frame">
-      <template v-if="selectedParentLabel">
-        <p class="viewer-title">{{ selectedParentLabel }}</p>
-        <PlStructureViewer
-          v-if="viewerProps"
-          v-bind="viewerProps"
-          initial-color-scheme="uncertainty"
-        />
-        <p v-else class="viewer-placeholder">
-          Structure preview is not wired to a PDB source yet for this parent.
-        </p>
-      </template>
-      <p v-else class="viewer-placeholder">Double-click a parent row to preview its structure.</p>
-    </div>
   </PlBlockPage>
 </template>
-
-<style scoped>
-.viewer-frame {
-  margin-top: 16px;
-  padding: 12px;
-  border: 1px solid var(--border-color-default, #e5e7eb);
-  border-radius: 6px;
-  min-height: 120px;
-}
-.viewer-title {
-  font-weight: 600;
-  margin: 0 0 4px;
-}
-.viewer-placeholder {
-  color: var(--text-color-secondary, #6b7280);
-  margin: 0;
-}
-</style>
