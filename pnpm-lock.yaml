@@ -170,6 +170,9 @@ importers:
       '@platforma-open/milaboratories.antifold-weights-assets':
         specifier: ^1.0.0
         version: 1.0.0
+      '@platforma-open/milaboratories.sapiens-weights-assets':
+        specifier: ^1.0.0
+        version: 1.0.0
       '@platforma-sdk/workflow-tengo':
         specifier: 'catalog:'
         version: 6.8.2
@@ -1723,6 +1726,12 @@ packages:
 
   '@platforma-open/milaboratories.runenv-python-3@1.8.2':
     resolution: {integrity: sha512-gsb33geN7RXIKhcYXPn18aU3sInJNcGVEO5/vlM+JxySBVMr2ICr86ABY90oX0fc60RiuEgVI3ltiOgtCs9Kbg==}
+
+  '@platforma-open/milaboratories.sapiens-weights-assets.sapiens@1.0.0':
+    resolution: {integrity: sha512-0utrOOaXQNlmmyDSn7428J9dwR9z36lT50GW2vE4/fk8E9WNEPAn189TXUmdw6Ras4xLQAyiu/q+D86ffP63xg==}
+
+  '@platforma-open/milaboratories.sapiens-weights-assets@1.0.0':
+    resolution: {integrity: sha512-I8UPCU0wf4DIf1B3U4f867emBC1ZgyM3nKvB0oQmknklffUJEJBTBySmN29LtaX2hd9cy6+RHye2UH6FFDG0fQ==}
 
   '@platforma-open/milaboratories.software-liability-definitions@1.1.0':
     resolution: {integrity: sha512-8HbgoB8kKhIELMbItN6fwC65Cmkz3/ER9f8VCfNtCAlHgyvoCFsWasHutFXGsQaDbNOE/wCv/OFRL4tzozPh+w==}
@@ -7471,6 +7480,12 @@ snapshots:
       '@platforma-open/milaboratories.runenv-python-3.12.10-rapids': 1.6.0
       '@platforma-open/milaboratories.runenv-python-3.12.10-sccoda': 1.3.5
       '@platforma-open/milaboratories.runenv-python-3.12.10-scientific-slim': 1.1.0
+
+  '@platforma-open/milaboratories.sapiens-weights-assets.sapiens@1.0.0': {}
+
+  '@platforma-open/milaboratories.sapiens-weights-assets@1.0.0':
+    dependencies:
+      '@platforma-open/milaboratories.sapiens-weights-assets.sapiens': 1.0.0
 
   '@platforma-open/milaboratories.software-liability-definitions@1.1.0': {}
 

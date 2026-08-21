@@ -40,6 +40,13 @@ antifold = [
     "scipy>=1,<1.17",
     "biotite==0.38.*",
     "biopython==1.83",
+    # The human-repertoire prior. Sapiens pins nothing — not torch, not
+    # transformers, not pandas (`Merck/Sapiens/setup.py:24-27`) — so every bound
+    # here is ours. `transformers` is capped because `deps:export` compiles with
+    # `--no-deps`: a newer line may require a torch this file contradicts, and pip
+    # then refuses the exported set outright rather than resolving around it.
+    "sapiens==1.1.*",
+    "transformers>=4.44,<4.45",
 ]
 
 [dependency-groups]

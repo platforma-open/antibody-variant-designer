@@ -44,6 +44,7 @@ from pathlib import Path
 import batch
 import pdb_index
 import residue_store
+import sapiens_prior
 import tolerance_store
 
 _VENDOR_DIR = str(Path(__file__).parent / "vendor" / "AntiFold")
@@ -221,10 +222,18 @@ def _run_model(
     ]
 
 
-def process_one(model, pdb_path: str, residues_path: str, out_tolerance: str) -> str:
-    """Read one antibody's tolerance matrix. Nanobody mode is decided here,
-    from this antibody's own parsed chain count — one batch may legally mix
-    VHH and paired structures, so it can never be a run-level flag."""
+def process_one(
+    model,
+    pdb_path: str,
+    residues_path: str,
+    out_tolerance: str,
+    sapiens_weights: str,
+    out_prior: str,
+) -> str:
+    """Read one antibody's tolerance matrix, and beside it its human-repertoire
+    prior. Nanobody mode is decided here, from this antibody's own parsed chain
+    count — one batch may legally mix VHH and paired structures, so it can
+    never be a run-level flag."""
     residues = residue_store.read_residues(residues_path)
     h_chain, l_chain, nanobody_mode = pick_chains(residues)
 
@@ -232,6 +241,11 @@ def process_one(model, pdb_path: str, residues_path: str, out_tolerance: str) ->
     rows = build_tolerance_rows(residues, logits_rows)
 
     tolerance_store.write_tolerance_tsv(out_tolerance, rows)
+
+    with _block_network():
+        prior_rows = sapiens_prior.build_prior_rows(residues, sapiens_weights)
+    Path(out_prior).write_text(sapiens_prior.render(prior_rows))
+
     return ""
 
 
@@ -248,6 +262,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--pdb-index", required=True, help="the pdb_index")
     parser.add_argument("--weights", required=True, help="mounted models/model.pt")
+    parser.add_argument(
+        "--sapiens-weights",
+        required=True,
+        help="the mounted Sapiens asset root, holding vh/, vl/ and tokenizer/",
+    )
     parser.add_argument("--out-tolerance-dir", required=True)
     parser.add_argument("--out-skip", required=True)
     args = parser.parse_args(argv)
@@ -289,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
             str(pdb_dir / entry.filename),
             str(residues_dir / f"{entry.stem}.json"),
             str(out_dir / f"{entry.stem}.tsv"),
+            args.sapiens_weights,
+            str(out_dir / f"{entry.stem}{sapiens_prior.PRIOR_SUFFIX}"),
         )
 
     # `error_reason` is passed here and nowhere else: AntiFold swallows its

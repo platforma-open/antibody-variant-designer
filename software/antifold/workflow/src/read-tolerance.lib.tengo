@@ -24,6 +24,7 @@ f := exec.formula
 
 antifoldSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software-antifold:read-tolerance")
 weightsAsset := assets.importAsset("@platforma-open/milaboratories.antifold-weights-assets:antifold")
+sapiensAsset := assets.importAsset("@platforma-open/milaboratories.sapiens-weights-assets:sapiens")
 
 TOLERANCE_DIR := "tolerance"
 SKIP_FILE := "skip.tsv"
@@ -33,6 +34,11 @@ SKIP_FILE := "skip.tsv"
 // this file sees both.
 WEIGHTS_MOUNT := "models"
 WEIGHTS_FILE := "models/model.pt"
+
+// Where the Sapiens asset is mounted — its root already holds `vh`, `vl` and
+// `tokenizer`, so the python is handed the mount point itself, not a file
+// inside it.
+SAPIENS_MOUNT := "sapiens"
 
 // The tag the RAM formula measures. Only the staged structures carry it: the
 // residues and triaged files are small per-antibody sidecars, and the model
@@ -137,6 +143,7 @@ run := func(args) {
 		}).
 		printErrStreamToStdout().
 		addAsset(weightsAsset, WEIGHTS_MOUNT).
+		addAsset(sapiensAsset, SAPIENS_MOUNT).
 		addFiles(args.pdbs, { tag: STRUCTURE_TAG }).
 		addFiles(args.residues).
 		addFiles(args.triaged).
@@ -146,6 +153,7 @@ run := func(args) {
 		arg("--residues-dir").arg("residues").
 		arg("--triaged-dir").arg("triaged").
 		arg("--weights").arg(WEIGHTS_FILE).
+		arg("--sapiens-weights").arg(SAPIENS_MOUNT).
 		arg("--out-tolerance-dir").arg(TOLERANCE_DIR).
 		arg("--out-skip").arg(SKIP_FILE).
 		saveFileSet("tolerance", workdir.dirPattern(TOLERANCE_DIR)).

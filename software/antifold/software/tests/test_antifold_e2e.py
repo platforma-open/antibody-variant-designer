@@ -27,11 +27,26 @@ from pathlib import Path
 
 import pytest
 
+import liability_store
+import pdb_index
+import residue_store
+import skip_store
+import triage
+
 pytest.importorskip("torch")
 
 pytestmark = pytest.mark.e2e
 
 _SCRIPT_PATH = Path(__file__).parent.parent / "src" / "antifold.py"
+
+# The real, tiny (4.4 MiB) Sapiens checkpoint + tokenizer TODO-11.1 already fetched, in
+# the sibling asset repo this multi-repo workspace checks out beside this one. A
+# standalone clone of this repo alone (e.g. CI) never has it — `sapiens_weights_root`
+# below skips rather than fails when it is absent.
+_SAPIENS_WEIGHTS_ROOT = (
+    Path(__file__).resolve().parents[4].parent
+    / "assets-sapiens-weights" / "sapiens" / "indexed_model" / "sapiens"
+)
 
 
 @pytest.fixture
@@ -130,6 +145,113 @@ def untrained_model(isolated_antifold_module):
 
     model, _ = pretrained._load_IF1_local()
     return model.eval()
+
+
+@pytest.fixture
+def sapiens_weights_root():
+    if not _SAPIENS_WEIGHTS_ROOT.is_dir():
+        pytest.skip(f"sibling asset repo not checked out beside this one: {_SAPIENS_WEIGHTS_ROOT}")
+    return str(_SAPIENS_WEIGHTS_ROOT)
+
+
+@pytest.fixture
+def antifold_weights_path(tmp_path, untrained_model):
+    """A fully offline AntiFold checkpoint: the untrained model's own state
+    dict, saved and read back through the real `load_IF1_checkpoint` path —
+    the same trick this file's other fixtures use to avoid a real download."""
+    import torch
+
+    path = tmp_path / "model.pt"
+    torch.save(untrained_model.state_dict(), path)
+    return str(path)
+
+
+class TestRealEntrypointWithTheHumanPrior:
+    """Enters `antifold.main(argv)` itself — the exact entrypoint the workflow
+    invokes — rather than `_run_model` or `_predict_scores` directly, so this
+    covers the wiring between the tolerance read and the prior read too."""
+
+    def test_both_parents_get_a_tolerance_and_a_prior_file(
+        self,
+        isolated_antifold_module,
+        nanobody_pdb,
+        antifold_weights_path,
+        sapiens_weights_root,
+        tmp_path,
+    ):
+        pytest.importorskip("sapiens")
+
+        pdb_dir = tmp_path / "pdbs"
+        residues_dir = tmp_path / "residues"
+        triaged_dir = tmp_path / "triaged"
+        for one_dir in (pdb_dir, residues_dir, triaged_dir):
+            one_dir.mkdir()
+
+        pdb_text = nanobody_pdb.read_text()
+        entries = []
+        for stem in ("parent-1", "parent-2"):
+            (pdb_dir / f"{stem}.pdb").write_text(pdb_text)
+            # The ten residues `_NANOBODY_LIKE_PDB` stages, all inside FR1 (well
+            # short of CDR1's start at IMGT 27) — every one a framework position
+            # the prior must cover.
+            residues = [
+                residue_store.Residue(
+                    chain="H", offset=i, imgt=str(i + 1), wild_type="A", res_name="ALA",
+                    b_factor=20.0, region="FR1", chain_role="H",
+                )
+                for i in range(10)
+            ]
+            residue_store.write_residues(str(residues_dir / f"{stem}.json"), residues)
+            liability_store.write_triaged(
+                str(triaged_dir / f"{stem}.json"),
+                [
+                    triage.Triaged(
+                        definition_id="deamidation_ng",
+                        liability_type="deamidation",
+                        risk_level="High",
+                        fixability="fixable",
+                        site=residues[:1],
+                        verdict="exposed",
+                        low_confidence=False,
+                        confidence_angstroms=3.0,
+                        rsasa=0.5,
+                    )
+                ],
+            )
+            entries.append(pdb_index.Entry(clonotype_key=stem, filename=f"{stem}.pdb"))
+
+        index_path = tmp_path / "pdb_index.tsv"
+        pdb_index.write_index(str(index_path), entries)
+
+        out_dir = tmp_path / "tolerance"
+        out_skip = tmp_path / "skip.tsv"
+
+        rc = isolated_antifold_module.main(
+            [
+                "--pdb-dir", str(pdb_dir),
+                "--residues-dir", str(residues_dir),
+                "--triaged-dir", str(triaged_dir),
+                "--pdb-index", str(index_path),
+                "--weights", antifold_weights_path,
+                "--sapiens-weights", sapiens_weights_root,
+                "--out-tolerance-dir", str(out_dir),
+                "--out-skip", str(out_skip),
+            ]
+        )
+
+        assert rc == 0
+        # Every parent completed inside `_block_network()` with no exception —
+        # a `backend-failed` row here would mean the model call raised.
+        assert skip_store.read_skips(str(out_skip)) == [
+            ("parent-1", "", ""),
+            ("parent-2", "", ""),
+        ]
+        for stem in ("parent-1", "parent-2"):
+            assert (out_dir / f"{stem}.tsv").is_file()
+            prior_path = out_dir / f"{stem}{isolated_antifold_module.sapiens_prior.PRIOR_SUFFIX}"
+            assert prior_path.is_file()
+            # Header plus one row per framework position — all ten of them.
+            assert len(prior_path.read_text().splitlines()) - 1 == 10
 
 
 class TestNanobodyReachesTheForwardPass:

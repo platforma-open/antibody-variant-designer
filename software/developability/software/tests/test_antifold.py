@@ -17,6 +17,7 @@ from pathlib import Path
 
 import antifold
 import pytest
+import sapiens_prior
 
 import liability_store
 import residue_store
@@ -25,6 +26,14 @@ import tolerance_store
 import triage
 
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
+
+
+@pytest.fixture(autouse=True)
+def _no_human_prior(monkeypatch):
+    """This file exercises the structural tolerance read only. The human
+    prior's own behavior — framework filtering, checkpoint paths, the
+    network guard — is covered in `test_humanness_objective.py`."""
+    monkeypatch.setattr(sapiens_prior, "build_prior_rows", lambda *_a, **_k: [])
 
 
 def _residue(chain, offset, imgt=None, role=None):
@@ -225,6 +234,7 @@ def _run(batch, weights):
             "--triaged-dir", batch.dir("triaged"),
             "--pdb-index", batch.index,
             "--weights", weights,
+            "--sapiens-weights", batch.dir("sapiens"),
             "--out-tolerance-dir", out_dir,
             "--out-skip", out_skip,
         ]
@@ -252,6 +262,7 @@ class TestMissingWeightsRaisesBeforeAnyModelCall:
                     "--triaged-dir", batch.dir("triaged"),
                     "--pdb-index", batch.index,
                     "--weights", missing_weights,
+                    "--sapiens-weights", batch.dir("sapiens"),
                     "--out-tolerance-dir", batch.dir("tolerance"),
                     "--out-skip", batch.path("skip.tsv"),
                 ]
