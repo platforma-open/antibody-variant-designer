@@ -27,7 +27,9 @@ from pathlib import Path
 
 import batch
 import candidates
+import liability_objective
 import liability_store
+import objectives
 import pdb_index
 import ranking
 import residue_store
@@ -41,6 +43,7 @@ def process_one(
     tolerance_path: str,
     residues_path: str,
     taxonomy: list[dict],
+    objective: objectives.Objective,
     max_edits_per_variant: int,
     candidate_residues_per_position: int,
     variants_per_parent: int,
@@ -51,10 +54,13 @@ def process_one(
     and the ranked variants the caller appends to the run's one
     `variants.tsv`."""
     tolerance_lookup = tolerance_store.read_tolerance_tsv(tolerance_path)
+    residues = residue_store.read_residues(residues_path)
     cleared = candidates.build_candidates(
         liability_store.read_triaged(triaged_path),
         tolerance_lookup,
+        residues,
         taxonomy,
+        objective,
         max_edits_per_variant,
         candidate_residues_per_position,
     )
@@ -63,7 +69,7 @@ def process_one(
 
     variants = ranking.rank_variants(
         cleared,
-        residue_store.read_residues(residues_path),
+        residues,
         tolerance_lookup,
         variants_per_parent,
         low_tolerance_floor,
@@ -138,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             str(tolerance_path),
             str(residues_path),
             taxonomy,
+            liability_objective.OBJECTIVE,
             args.max_edits_per_variant,
             args.candidate_residues_per_position,
             args.variants_per_parent,

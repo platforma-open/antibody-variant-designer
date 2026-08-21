@@ -31,10 +31,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import batch
-import cysteine
 import exposure
+import liability_objective
 import liability_store
-import motifs
+import objectives
 import pdb_index
 import residue_store
 import structure
@@ -147,6 +147,7 @@ def process_one(
     out_residues: str,
     out_triaged: str,
     taxonomy: list[dict],
+    objective: objectives.Objective,
     confidence_records: list[dict] | None,
     rsasa_buried_cutoff: float,
     fr_confidence_threshold: float,
@@ -171,7 +172,7 @@ def process_one(
     rsasa_lookup = exposure.annotate(residues, pdb_path)
     confidence_lookup = _confidence_lookup(residues, confidence_records)
 
-    detected = motifs.detect_all(residues, taxonomy) + cysteine.detect_all(residues, taxonomy)
+    detected = objective.select_target_positions(residues, taxonomy)
     triaged = triage.verdict_for(
         detected,
         rsasa_lookup,
@@ -259,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
             str(residues_dir / f"{entry.stem}.json"),
             str(out_dir / f"{entry.stem}.json"),
             taxonomy,
+            liability_objective.OBJECTIVE,
             confidence_by_clonotype.get(entry.clonotype_key),
             args.rsasa_buried_cutoff,
             args.fr_confidence_gating_threshold,

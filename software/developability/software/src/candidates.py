@@ -1,4 +1,4 @@
-"""Candidate substitutions and the re-scan gate — the block's only real
+"""Candidate substitutions and the objective's goal check — the block's only real
 filter between a triaged liability and a variant.
 
 A module, not an entrypoint: `variants.py` runs this and then `ranking.py`
@@ -8,37 +8,27 @@ did not just produce.
 This gate never sees the residue index or the PDB — only a triaged
 liability and the tolerance table — so a candidate's own site (the exact
 residues its originating motif or cysteine check matched over) is the only
-window the re-scan can see. Substituting every position in that site
-together and re-running the same two detectors over just that window is
-therefore both the mechanism and its own boundary: a hit reappearing in
-the re-scan means either the target motif still matches (not cleared) or a
-different taxonomy entry now matches inside that same short span (a new
-liability), and either way the candidate is discarded. A liability whose
-site runs longer than `max_edits_per_variant` is skipped outright, since
+window an objective's `score_candidate` can see. A liability whose site
+runs longer than `max_edits_per_variant` is skipped outright, since
 substituting every one of its positions would exceed the edit budget
-before the re-scan even runs.
+before the objective is ever asked.
 
-`cysteine.detect_all`'s expected-cysteine-position indexing is relative to
-a region's full residue list, not to a bare site; re-scanning a cysteine
-candidate over its own (shorter) site is an approximation this module
-accepts because, again, the full region is not something it can see.
-
-A surviving candidate's `tolerance` is the **mean** AntiFold perplexity
-over its edited positions — a property of the positions themselves,
-independent of which amino acid was substituted there, unlike the
-per-amino-acid log-probability `_top_substitutions` ranks by. `region`,
-`low_confidence` and `worst_confidence_angstroms` ride along unchanged from
-the triaged liability; `addressed_target` and `changed_positions` are
-built here, from the taxonomy's own label and the fixed
-`<chain>:<wt><imgtLabel><mut>` rendering, so `ranking.py` never has to
-re-read the triaged liabilities or the taxonomy to report either one.
+A surviving candidate's `tolerance` is the score its objective's
+`score_candidate` returned — for the liability-removal objective, the
+**mean** AntiFold perplexity over its edited positions, a property of the
+positions themselves, independent of which amino acid was substituted
+there, unlike the per-amino-acid log-probability `_top_substitutions`
+ranks by. `region`, `low_confidence` and `worst_confidence_angstroms` ride
+along unchanged from the triaged liability; `addressed_target` and
+`changed_positions` are built here, from the taxonomy's own label and the
+fixed `<chain>:<wt><imgtLabel><mut>` rendering, so `ranking.py` never has
+to re-read the triaged liabilities or the taxonomy to report either one.
 """
 
 import itertools
 from dataclasses import dataclass, replace
 
-import cysteine
-import motifs
+import objectives
 
 DEFAULT_MAX_EDITS_PER_VARIANT = 5
 DEFAULT_CANDIDATE_RESIDUES_PER_POSITION = 3
@@ -84,35 +74,28 @@ class Candidate:
     changed_positions: str
 
 
-def _top_substitutions(residue, tolerance_lookup: dict, k: int) -> list[str]:
-    """Up to `k` amino acids at `residue`'s position, ranked by AntiFold
-    log-probability, wild type excluded — substituting a position to its
-    own residue would neither change nor clear anything, so it is never a
-    candidate substitution.
+def _combined_scores(residue, log_probs: dict[str, float], prior: dict | None) -> dict[str, float]:
+    """The structural log-probability row, elementwise-summed with the
+    objective's position prior at this residue when one is offered — an
+    uncovered position, or an objective with no prior at all, falls back
+    to the log-probability row alone."""
+    prior_row = None if prior is None else prior.get((residue.chain, residue.imgt))
+    if prior_row is None:
+        return log_probs
+    return {aa: value + prior_row.get(aa, 0.0) for aa, value in log_probs.items()}
 
-    The combined score a position's candidates should be ranked by is a
-    log-space weighted sum of two terms: the structural log-probability
-    row read here, and an objective prior over the same twenty amino
-    acids. At V0.5 that second term does not exist — there is no
-    conventional-fix table yet — so the sum has one live term with a
-    positive weight, and a single positive-weighted term cannot reorder
-    its own ranking. Sorting the log-probability row alone is therefore
-    not an approximation of the full sum; it *is* the full sum, in the
-    one-expert case this package ships. `perplexity` is one number for
-    the whole position and could never order twenty amino acids at it."""
+
+def _top_substitutions(residue, tolerance_lookup: dict, k: int, prior: dict | None) -> list[str]:
+    """Up to `k` amino acids at `residue`'s position, ranked by the
+    combined score, wild type excluded — substituting a position to its
+    own residue would neither change nor clear anything, so it is never a
+    candidate substitution."""
     row = tolerance_lookup.get((residue.chain, residue.imgt))
     if row is None:
         return []
-    ranked = sorted(row["logProbs"].items(), key=lambda kv: (-kv[1], kv[0]))
+    scores = _combined_scores(residue, row["logProbs"], prior)
+    ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
     return [aa for aa, _ in ranked if aa != residue.wild_type][:k]
-
-
-def _rescan_clears(mutated_site: list, taxonomy: list[dict]) -> bool:
-    """True iff neither detector matches anywhere in the mutated site — the
-    target's own motif no longer matches (cleared) and no other taxonomy
-    entry now matches within the same short span (nothing new)."""
-    hits = motifs.detect_all(mutated_site, taxonomy) + cysteine.detect_all(mutated_site, taxonomy)
-    return not hits
 
 
 def _changed_positions(edits: tuple) -> str:
@@ -147,35 +130,36 @@ def _addressed_target(definition_id: str, site: list, taxonomy_by_id: dict) -> s
 def build_candidates(
     triaged_list: list,
     tolerance_lookup: dict,
+    residues: list,
     taxonomy: list[dict],
+    objective: objectives.Objective,
     max_edits_per_variant: int,
     candidate_residues_per_position: int,
 ) -> list[Candidate]:
-    """Every re-scan-cleared substitution set, one liability at a time.
-    Every position in a liability's site is substituted together, so each
-    candidate's edit count equals that site's length — a site longer than
-    `max_edits_per_variant` is skipped, and a site with no admissible
-    substitution at any of its positions is skipped, both before the
-    re-scan runs at all."""
+    """Every candidate whose objective goal check passed, one liability at
+    a time. Every position in a liability's site is substituted together,
+    so each candidate's edit count equals that site's length — a site
+    longer than `max_edits_per_variant` is skipped, and a site with no
+    admissible substitution at any of its positions is skipped, both
+    before the objective is asked at all."""
     taxonomy_by_id = {d["id"]: d for d in taxonomy}
+    prior = (
+        None
+        if objective.position_prior is None
+        else objective.position_prior(residues, triaged_list)
+    )
     candidates: list[Candidate] = []
     for triaged in sorted(triaged_list, key=_risk_level_order):
         site = triaged.site
         if len(site) > max_edits_per_variant:
             continue
         per_position_options = [
-            _top_substitutions(residue, tolerance_lookup, candidate_residues_per_position)
+            _top_substitutions(residue, tolerance_lookup, candidate_residues_per_position, prior)
             for residue in site
         ]
         if any(len(options) == 0 for options in per_position_options):
             continue
 
-        # A property of the positions themselves, the same for every
-        # combination substituted there — computed once per liability
-        # rather than once per candidate.
-        structural_tolerance = sum(
-            tolerance_lookup[(residue.chain, residue.imgt)]["perplexity"] for residue in site
-        ) / len(site)
         addressed_target = _addressed_target(triaged.definition_id, site, taxonomy_by_id)
 
         for combo in itertools.product(*per_position_options):
@@ -183,7 +167,8 @@ def build_candidates(
                 replace(residue, wild_type=to_aa)
                 for residue, to_aa in zip(site, combo, strict=True)
             ]
-            if not _rescan_clears(mutated_site, taxonomy):
+            check = objective.score_candidate(mutated_site, taxonomy, tolerance_lookup)
+            if not check.meets_goal:
                 continue
 
             edits = tuple(
@@ -200,7 +185,7 @@ def build_candidates(
                 Candidate(
                     target_definition_id=triaged.definition_id,
                     edits=edits,
-                    tolerance=structural_tolerance,
+                    tolerance=check.score,
                     region=site[0].region,
                     low_confidence=triaged.low_confidence,
                     worst_confidence_angstroms=triaged.confidence_angstroms,

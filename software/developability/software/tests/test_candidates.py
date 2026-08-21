@@ -1,10 +1,11 @@
-"""Unit tests for `candidates.py` — the re-scan gate, as a module. Its CLI
+"""Unit tests for `candidates.py` — the objective-driven gate, as a module. Its CLI
 lives in `variants.py`, tested in `test_variants.py`."""
 
 
 import pytest
 
 import candidates
+import liability_objective
 import residue_store
 import tolerance_store
 import triage
@@ -19,6 +20,8 @@ TAXONOMY = [
     {"id": "extra_cysteines", "name": "Extra Cysteines", "liabilityType": "cysteine",
      "motif": None, "riskLevel": "High", "fixability": "hard_to_fix"},
 ]
+
+_OBJECTIVE = liability_objective.OBJECTIVE
 
 
 def _residue(chain, offset, wild_type, imgt=None):
@@ -76,7 +79,8 @@ def _ng_tolerance_lookup():
 class TestBuildCandidatesRescanGate:
     def test_a_combination_that_clears_the_target_and_creates_nothing_survives(self):
         candidates_out = candidates.build_candidates(
-            [_triaged(_ng_site())], _ng_tolerance_lookup(), TAXONOMY,
+            [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+            objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=3,
         )
 
@@ -87,7 +91,8 @@ class TestBuildCandidatesRescanGate:
         # D then P spells `fragmentation_dp`'s own motif — clearing the
         # NG target this way must not survive the re-scan.
         candidates_out = candidates.build_candidates(
-            [_triaged(_ng_site())], _ng_tolerance_lookup(), TAXONOMY,
+            [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+            objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=3,
         )
 
@@ -98,7 +103,8 @@ class TestBuildCandidatesRescanGate:
         [candidate] = [
             c
             for c in candidates.build_candidates(
-                [_triaged(_ng_site())], _ng_tolerance_lookup(), TAXONOMY,
+                [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+                objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
@@ -110,7 +116,8 @@ class TestBuildCandidatesRescanGate:
         [candidate] = [
             c
             for c in candidates.build_candidates(
-                [_triaged(_ng_site())], _ng_tolerance_lookup(), TAXONOMY,
+                [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+                objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
@@ -126,7 +133,8 @@ class TestBuildCandidatesRescanGate:
             c
             for c in candidates.build_candidates(
                 [_triaged(_ng_site(), low_confidence=True, confidence_angstroms=7.5)],
-                _ng_tolerance_lookup(), TAXONOMY,
+                _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+                objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
@@ -140,7 +148,8 @@ class TestBuildCandidatesRescanGate:
         [candidate] = [
             c
             for c in candidates.build_candidates(
-                [_triaged(_ng_site())], _ng_tolerance_lookup(), TAXONOMY,
+                [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+                objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
@@ -152,7 +161,8 @@ class TestBuildCandidatesRescanGate:
         [candidate] = [
             c
             for c in candidates.build_candidates(
-                [_triaged(_ng_site())], _ng_tolerance_lookup(), TAXONOMY,
+                [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+                objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
@@ -174,13 +184,34 @@ class TestTopSubstitutionsRanksByLogProbability:
         residue = _residue("H", 6, "N", imgt="107")
         lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=3.0)}
 
-        assert candidates._top_substitutions(residue, lookup, k=2) == ["D", "Q"]
+        assert candidates._top_substitutions(residue, lookup, k=2, prior=None) == ["D", "Q"]
+
+    def test_a_prior_favourite_that_disagrees_with_the_log_row_wins_first(self):
+        # The prior adds an elementwise term over the amino-acid order
+        # ACDEFGHIKLMNPQRSTVWY; a large enough prior weight on "E" — which
+        # the log-probability row does not favour at all — must still push
+        # it to the front once combined.
+        residue = _residue("H", 6, "N", imgt="107")
+        lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=3.0)}
+        prior = {("H", "107"): {"E": 10.0}}
+
+        assert candidates._top_substitutions(residue, lookup, k=2, prior=prior) == ["E", "D"]
+
+    def test_a_prior_with_no_row_for_this_position_falls_back_to_prior_none(self):
+        residue = _residue("H", 6, "N", imgt="107")
+        lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=3.0)}
+        prior = {("H", "999"): {"E": 10.0}}  # a different position — uncovered here
+
+        assert candidates._top_substitutions(residue, lookup, k=2, prior=prior) == (
+            candidates._top_substitutions(residue, lookup, k=2, prior=None)
+        )
 
 
 class TestBuildCandidatesEditBudget:
     def test_a_site_longer_than_the_edit_budget_produces_no_candidate(self):
         candidates_out = candidates.build_candidates(
-            [_triaged(_ng_site())], _ng_tolerance_lookup(), TAXONOMY,
+            [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+            objective=_OBJECTIVE,
             max_edits_per_variant=1, candidate_residues_per_position=3,
         )
 
@@ -190,7 +221,8 @@ class TestBuildCandidatesEditBudget:
         lookup = {("H", "107"): _ng_tolerance_lookup()[("H", "107")]}  # "108" absent
 
         candidates_out = candidates.build_candidates(
-            [_triaged(_ng_site())], lookup, TAXONOMY,
+            [_triaged(_ng_site())], lookup, _ng_site(), TAXONOMY,
+            objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=3,
         )
 
@@ -222,7 +254,8 @@ class TestBuildCandidatesRiskLevelOrder:
         }
 
         candidates_out = candidates.build_candidates(
-            [low, high, medium], lookup, TAXONOMY,
+            [low, high, medium], lookup, [], TAXONOMY,
+            objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=1,
         )
 
