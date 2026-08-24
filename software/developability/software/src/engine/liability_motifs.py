@@ -9,7 +9,7 @@ worth acting on is `liability_triage.py`'s question, not this module's.
 import re
 from dataclasses import dataclass
 
-import residue_store
+from engine import residue_store
 
 # Index, within each regex match, of the residue whose chemistry
 # actually changes. In the `N[GS]` deamidation motif, the reactive Asn

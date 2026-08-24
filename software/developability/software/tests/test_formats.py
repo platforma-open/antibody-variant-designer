@@ -8,11 +8,9 @@ not in `CLAUDE.md` must reach a named skip here, never a partial index.
 import json
 from pathlib import Path
 
-import liability_cysteines
-import liability_motifs
-import residue_store
+from engine import liability_cysteines, liability_motifs, residue_store
+from engine.residue_index import index_one
 from pdb_fixtures import make_pdb, platforma_cdr_remark
-from residue_index import index_one
 
 TAXONOMY = [
     {"id": "deamidation_ng", "name": "Deamidation (N[GS])",

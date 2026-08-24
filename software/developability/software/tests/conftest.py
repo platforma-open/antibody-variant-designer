@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import pdb_index_store
+from engine import pdb_index_store
 
 
 class StagedBatch:

@@ -8,9 +8,9 @@ its file, a file renamed without its key, or a `main` grown on a module that
 no entrypoint runs all pass lint and pass every other test here, then fail
 in the workflow.
 
-This is also what keeps a flat source root readable: with the sets equal, a
-filename answers "is this an entrypoint" on its own, and no module has to
-say so in prose.
+With the sets equal, the source root answers "is this an entrypoint" by
+position — an entrypoint sits at the root, everything shared sits under
+`engine/` — and no module has to say so in prose.
 
 The antifold package's artifact root is `build/`, assembled by
 `stage-build.sh` from two source trees and absent until it runs, so the file
@@ -47,9 +47,15 @@ def _declared_entrypoints(package_dir: Path) -> dict[str, set[str]]:
 
 
 def _files_with_a_main(source_root: Path) -> set[str]:
-    """Top-level modules only — the vendored tree carries its own upstream
-    CLI, which no entrypoint of ours runs."""
-    return {path.name for path in source_root.glob("*.py") if MAIN_GUARD in path.read_text()}
+    """Every module in the tree, not just the root, so a `main` grown inside
+    `engine/` fails this too — a shared module is by definition one no
+    entrypoint declares. The vendored tree is skipped: its own upstream CLI is
+    not ours to declare."""
+    return {
+        path.name
+        for path in source_root.rglob("*.py")
+        if "vendor" not in path.parts and MAIN_GUARD in path.read_text()
+    }
 
 
 @pytest.mark.parametrize(("name", "package_dir"), PACKAGES, ids=[p[0] for p in PACKAGES])

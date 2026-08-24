@@ -39,11 +39,8 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-import antibody_batch
-import pdb_index_store
-import residue_store
 import sapiens_prior
-import tolerance_store
+from engine import antibody_batch, pdb_index_store, residue_store, tolerance_store
 
 _VENDOR_DIR = str(Path(__file__).parent / "vendor" / "AntiFold")
 

@@ -10,7 +10,7 @@ already found.
 
 from dataclasses import dataclass
 
-import residue_store
+from engine import residue_store
 
 DEFAULT_ACT_ON_FIXABILITY = ["fixable", "easily_fixable"]
 DEFAULT_FR_CONFIDENCE_THRESHOLD = 4.0

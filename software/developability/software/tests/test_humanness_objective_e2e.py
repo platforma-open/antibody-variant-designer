@@ -9,12 +9,14 @@ uninformative) TSV file.
 from pathlib import Path
 
 import build_variants
-import liability_store
-import liability_triage
-import residue_store
-import skip_store
-import tolerance_store
-import variant_store
+from engine import (
+    liability_store,
+    liability_triage,
+    residue_store,
+    skip_store,
+    tolerance_store,
+    variant_store,
+)
 
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
 

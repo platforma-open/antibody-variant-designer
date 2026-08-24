@@ -8,7 +8,7 @@ measured at, or how loading it is cached.
 
 from functools import lru_cache
 
-import residue_store
+from engine import residue_store
 
 MIN_WINDOW = 9
 AA_ALPHABET = frozenset("ACDEFGHIKLMNPQRSTVWYX")

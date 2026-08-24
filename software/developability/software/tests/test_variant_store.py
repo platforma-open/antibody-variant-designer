@@ -6,7 +6,7 @@ across the whole run."""
 import csv
 import io
 
-import variant_store
+from engine import variant_store
 
 
 def _variant(

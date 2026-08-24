@@ -1,7 +1,7 @@
 """Unit tests for `skip_store.py` — the per-clonotype skip TSV that carries
 attribution now that one exec covers the whole dataset."""
 
-import skip_store
+from engine import skip_store
 
 
 class TestSkipTsvRoundTrips:

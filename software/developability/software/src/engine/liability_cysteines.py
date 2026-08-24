@@ -8,7 +8,7 @@ counts instead of matching.
 
 from dataclasses import dataclass
 
-import residue_store
+from engine import residue_store
 
 # 0-based, negative-from-the-end positions into a region's own residue
 # list, not the whole chain. FR1's conserved cysteine legally sits at

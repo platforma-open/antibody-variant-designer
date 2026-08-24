@@ -5,9 +5,7 @@ rank/truncate/epistasis-rescore pass, as a module. Its CLI lives in
 
 import pytest
 
-import residue_store
-import variant_candidates
-import variant_ranking
+from engine import residue_store, variant_candidates, variant_ranking
 
 
 def _candidate(

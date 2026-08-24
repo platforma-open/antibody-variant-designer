@@ -3,10 +3,7 @@
 import csv
 from pathlib import Path
 
-import design_objective
-import humanness_gate
-import liability_cysteines
-import liability_motifs
+from engine import design_objective, humanness_gate, liability_cysteines, liability_motifs
 
 NO_CANDIDATE_REASON = "no-candidate-raised-humanness"
 

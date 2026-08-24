@@ -12,8 +12,7 @@ import io
 import json
 from pathlib import Path
 
-import liability_triage
-import residue_store
+from engine import liability_triage, residue_store
 
 TSV_COLUMNS = [
     "clonotypeKey",

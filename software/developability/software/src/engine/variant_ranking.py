@@ -10,9 +10,7 @@ Every candidate reaching this module already passed the re-scan gate in
 
 import math
 
-import residue_store
-import variant_candidates
-import variant_store
+from engine import residue_store, variant_candidates, variant_store
 
 DEFAULT_VARIANTS_PER_PARENT = 10
 DEFAULT_LOW_TOLERANCE_FLOOR = 3.0

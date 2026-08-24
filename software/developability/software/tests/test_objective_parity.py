@@ -14,9 +14,7 @@ from pathlib import Path
 
 import build_variants
 import index_and_scan
-import residue_store
-import skip_store
-import tolerance_store
+from engine import residue_store, skip_store, tolerance_store
 from pdb_fixtures import make_pdb, platforma_cdr_remark
 
 GOLDEN_DIR = Path(__file__).parent / "golden"

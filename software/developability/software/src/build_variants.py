@@ -12,18 +12,20 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-import antibody_batch
-import design_objective
-import humanness_objective
-import liability_objective
-import liability_store
-import pdb_index_store
-import residue_store
-import taxonomy_store
-import tolerance_store
-import variant_candidates
-import variant_ranking
-import variant_store
+from engine import (
+    antibody_batch,
+    design_objective,
+    humanness_objective,
+    liability_objective,
+    liability_store,
+    pdb_index_store,
+    residue_store,
+    taxonomy_store,
+    tolerance_store,
+    variant_candidates,
+    variant_ranking,
+    variant_store,
+)
 
 LIABILITY = "liability"
 HUMANIZATION = "humanization"

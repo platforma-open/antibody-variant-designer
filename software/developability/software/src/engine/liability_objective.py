@@ -8,9 +8,7 @@ score_candidate sees only one site, not the full region. Re-scanning a cysteine
 over its site is approximate, but that is how it works — the full region is unavailable.
 """
 
-import design_objective
-import liability_cysteines
-import liability_motifs
+from engine import design_objective, liability_cysteines, liability_motifs
 
 
 def select_target_positions(residues: list, taxonomy: list[dict]) -> list:

@@ -1,9 +1,9 @@
 """Tests for `liability_triage.py` — the non-destructive verdict layer over
 `liability_motifs.detect_all` / `liability_cysteines.detect_all` hits."""
 
-from liability_motifs import DetectedMotif
-from liability_triage import generates_for, verdict_for
-from residue_store import Residue
+from engine.liability_motifs import DetectedMotif
+from engine.liability_triage import generates_for, verdict_for
+from engine.residue_store import Residue
 
 RSASA_BURIED_CUTOFF = 0.25
 CDR_CONFIDENCE_THRESHOLD = 6.0

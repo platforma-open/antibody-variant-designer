@@ -3,9 +3,7 @@ share, and the attribution rules that replace one-exec-per-antibody."""
 
 import pytest
 
-import antibody_batch
-import pdb_index_store
-import skip_store
+from engine import antibody_batch, pdb_index_store, skip_store
 
 
 def _entries(*keys):

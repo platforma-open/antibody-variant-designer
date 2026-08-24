@@ -19,11 +19,7 @@ import pytest
 import read_tolerance
 import sapiens_prior
 
-import liability_store
-import liability_triage
-import residue_store
-import skip_store
-import tolerance_store
+from engine import liability_store, liability_triage, residue_store, skip_store, tolerance_store
 
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
 

@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import residue_store
+from engine import residue_store
 
 # ---------------------------------------------------------------------------
 # Section 1: PDB parsing

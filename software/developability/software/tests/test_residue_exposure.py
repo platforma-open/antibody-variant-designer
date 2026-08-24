@@ -1,7 +1,6 @@
 """Unit tests for `residue_exposure.py` — solvent-exposure annotation."""
 
-import residue_exposure
-import residue_store
+from engine import residue_exposure, residue_store
 from pdb_fixtures import make_chain, make_pdb
 
 

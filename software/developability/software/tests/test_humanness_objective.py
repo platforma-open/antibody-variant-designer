@@ -15,10 +15,7 @@ import pytest
 import read_tolerance
 import sapiens_prior
 
-import humanness_gate
-import humanness_objective
-import liability_motifs
-import residue_store
+from engine import humanness_gate, humanness_objective, liability_motifs, residue_store
 
 REGIONS = ["FR1", "CDR1", "FR2", "CDR2", "FR3", "CDR3", "FR4"]
 

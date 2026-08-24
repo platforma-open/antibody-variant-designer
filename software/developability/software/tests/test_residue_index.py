@@ -5,9 +5,8 @@ The module has no CLI — it is the index phase of the `index-and-scan`
 entrypoint — so the end-to-end cases live in `test_index_and_scan.py`, and the format
 cases in `test_formats.py`."""
 
-import residue_store
-from pdb_fixtures import make_chain, make_pdb, platforma_cdr_remark
-from residue_index import (
+from engine import residue_store
+from engine.residue_index import (
     AA_THREE_TO_ONE,
     index_one,
     index_residues,
@@ -15,6 +14,7 @@ from residue_index import (
     parse_pdb,
     region_for,
 )
+from pdb_fixtures import make_chain, make_pdb, platforma_cdr_remark
 
 
 class TestInsertionCodes:

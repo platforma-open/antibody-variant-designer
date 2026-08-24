@@ -10,7 +10,7 @@ produce, so nothing needs to cross a process boundary between the two.
 import itertools
 from dataclasses import dataclass, replace
 
-import design_objective
+from engine import design_objective
 
 DEFAULT_MAX_EDITS_PER_VARIANT = 5
 DEFAULT_CANDIDATE_RESIDUES_PER_POSITION = 3

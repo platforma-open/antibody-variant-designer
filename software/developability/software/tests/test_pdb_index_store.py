@@ -1,7 +1,7 @@
 """Unit tests for `pdb_index_store.py` — the `pdb_index.tsv` round trip and the
 clonotype-key-to-stem resolution every batch entrypoint depends on."""
 
-import pdb_index_store
+from engine import pdb_index_store
 
 
 class TestPdbIndexRoundTrips:

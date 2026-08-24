@@ -4,11 +4,13 @@ import dataclasses
 
 import pytest
 
-import design_objective
-import liability_cysteines
-import liability_motifs
-import liability_objective
-import residue_store
+from engine import (
+    design_objective,
+    liability_cysteines,
+    liability_motifs,
+    liability_objective,
+    residue_store,
+)
 
 TAXONOMY = [
     {"id": "deamidation_ng", "name": "Deamidation (N[GS])", "liabilityType": "deamidation",

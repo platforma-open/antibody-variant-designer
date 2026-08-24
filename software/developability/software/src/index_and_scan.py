@@ -16,16 +16,18 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
-import antibody_batch
-import design_objective
-import liability_objective
-import liability_store
-import liability_triage
-import pdb_index_store
-import residue_exposure
-import residue_index
-import residue_store
-import taxonomy_store
+from engine import (
+    antibody_batch,
+    design_objective,
+    liability_objective,
+    liability_store,
+    liability_triage,
+    pdb_index_store,
+    residue_exposure,
+    residue_index,
+    residue_store,
+    taxonomy_store,
+)
 
 DEFAULT_RSASA_BURIED_CUTOFF = 0.075
 DEFAULT_FR_CONFIDENCE_THRESHOLD = 4.0

@@ -7,8 +7,7 @@ import json
 from pathlib import Path
 
 import index_and_scan
-import liability_store
-import skip_store
+from engine import liability_store, skip_store
 from pdb_fixtures import make_pdb, platforma_cdr_remark
 
 TAXONOMY = [
@@ -98,7 +97,7 @@ def _write_keyed_tsv(path, rows):
 
 def _index(pdb_text, role="H", chain="H"):
     """Run `residue_index.py` for real so `index_and_scan.py` reads its actual output shape."""
-    import residue_index
+    from engine import residue_index
 
     parsed = residue_index.parse_pdb(pdb_text)
     return residue_index.index_residues(parsed)

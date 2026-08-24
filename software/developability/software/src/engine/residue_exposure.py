@@ -9,7 +9,7 @@ from pathlib import Path
 
 import freesasa
 
-import residue_store
+from engine import residue_store
 
 # Heavy-atom-only Ala-X-Ala maxima (Yang and Blundell, 1996): each residue type's known maximum
 # surface area. rSASA divides a residue's raw area by that maximum. The table is copied from the

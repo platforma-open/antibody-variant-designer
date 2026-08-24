@@ -63,8 +63,8 @@ e2e = [
 [tool.ruff]
 extend = "../../ruff.toml"
 # `../../developability/software/src` is here for the same reason it is on `pythonpath`
-# below: `read_tolerance.py` imports that package's stores as bare names, and they
-# must sort as first-party here exactly as they do there.
+# below: `read_tolerance.py` imports that package's `engine`, which must sort as
+# first-party here exactly as it does there.
 src = ["src", "../../developability/software/src", "tests"]
 # Vendored third-party source (BSD 3-Clause, commit 789d467) — ours to run,
 # not ours to restyle.
@@ -72,8 +72,8 @@ extend-exclude = ["src/vendor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `read_tolerance.py` imports the developability package's stores at module level, so
-# this package's own source is not enough to load it.
+# `read_tolerance.py` imports the developability package's `engine` at module
+# level, so this package's own source is not enough to load it.
 pythonpath = ["src", "../../developability/software/src", "tests"]
 markers = [
     "e2e: end-to-end tests that run the real vendored AntiFold",

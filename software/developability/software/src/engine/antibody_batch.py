@@ -9,8 +9,7 @@ force it to request more.
 import sys
 from collections.abc import Callable
 
-import pdb_index_store
-import skip_store
+from engine import pdb_index_store, skip_store
 
 
 def run(

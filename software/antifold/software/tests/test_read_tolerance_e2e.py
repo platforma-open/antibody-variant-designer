@@ -25,12 +25,8 @@ from pathlib import Path
 
 import pytest
 
-import liability_store
-import liability_triage
-import pdb_index_store
-import residue_store
 import sapiens_prior
-import skip_store
+from engine import liability_store, liability_triage, pdb_index_store, residue_store, skip_store
 
 pytest.importorskip("torch")
 

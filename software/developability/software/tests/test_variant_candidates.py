@@ -4,11 +4,13 @@ lives in `build_variants.py`, tested in `test_build_variants.py`."""
 
 import pytest
 
-import liability_objective
-import liability_triage
-import residue_store
-import tolerance_store
-import variant_candidates
+from engine import (
+    liability_objective,
+    liability_triage,
+    residue_store,
+    tolerance_store,
+    variant_candidates,
+)
 
 TAXONOMY = [
     {"id": "deamidation_ng", "name": "Deamidation (N[GS])", "liabilityType": "deamidation",

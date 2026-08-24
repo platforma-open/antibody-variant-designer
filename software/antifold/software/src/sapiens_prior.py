@@ -14,7 +14,7 @@ import json
 import math
 from pathlib import Path
 
-import tolerance_store
+from engine import tolerance_store
 
 # AntiFold's order, so the two rows combine elementwise without remapping.
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS

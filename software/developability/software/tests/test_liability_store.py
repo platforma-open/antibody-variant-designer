@@ -4,9 +4,7 @@ and the write-only path for `liabilities.tsv`."""
 import csv
 import io
 
-import liability_store
-import liability_triage
-import residue_store
+from engine import liability_store, liability_triage, residue_store
 
 
 def _residue(chain, offset, imgt=None, region="CDR1"):
