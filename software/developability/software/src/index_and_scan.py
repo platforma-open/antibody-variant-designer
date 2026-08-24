@@ -31,10 +31,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import antibody_batch
+import design_objective
 import exposure
 import liability_objective
 import liability_store
-import objectives
 import pdb_index
 import residue_store
 import structure
@@ -147,7 +147,7 @@ def process_one(
     out_residues: str,
     out_triaged: str,
     taxonomy: list[dict],
-    objective: objectives.Objective,
+    objective: design_objective.Objective,
     confidence_records: list[dict] | None,
     rsasa_buried_cutoff: float,
     fr_confidence_threshold: float,

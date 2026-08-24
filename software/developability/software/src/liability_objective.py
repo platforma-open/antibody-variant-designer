@@ -13,8 +13,8 @@ can see.
 """
 
 import cysteine
+import design_objective
 import motifs
-import objectives
 
 
 def select_target_positions(residues: list, taxonomy: list[dict]) -> list:
@@ -23,15 +23,17 @@ def select_target_positions(residues: list, taxonomy: list[dict]) -> list:
 
 def score_candidate(
     mutated_site: list, taxonomy: list[dict], tolerance_lookup: dict
-) -> objectives.GoalCheck:
+) -> design_objective.GoalCheck:
     hits = motifs.detect_all(mutated_site, taxonomy) + cysteine.detect_all(mutated_site, taxonomy)
     perplexities = [
         tolerance_lookup[(residue.chain, residue.imgt)]["perplexity"] for residue in mutated_site
     ]
-    return objectives.GoalCheck(meets_goal=not hits, score=sum(perplexities) / len(perplexities))
+    return design_objective.GoalCheck(
+        meets_goal=not hits, score=sum(perplexities) / len(perplexities)
+    )
 
 
-OBJECTIVE = objectives.Objective(
+OBJECTIVE = design_objective.Objective(
     select_target_positions=select_target_positions,
     position_prior=None,
     score_candidate=score_candidate,

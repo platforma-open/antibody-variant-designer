@@ -15,9 +15,9 @@ import pytest
 import read_tolerance
 import sapiens_prior
 
-import humanness
 import humanness_objective
 import motifs
+import oasis_gate
 import residue_store
 
 REGIONS = ["FR1", "CDR1", "FR2", "CDR2", "FR3", "CDR3", "FR4"]
@@ -467,14 +467,14 @@ class TestScoreCandidateGoalCheck:
     """`humanness_objective.build(...).score_candidate` — the goal check a
     candidate must clear: raise the one chain its site touches, at a
     framework position, without spelling a second liability. Every case
-    here stubs `humanness.identity` (the measurement itself), so none of
+    here stubs `oasis_gate.identity` (the measurement itself), so none of
     them needs `promb` installed or a database loaded."""
 
     def test_a_strict_rise_meets_the_goal(self, monkeypatch):
         residues = _gate_residues()
         mutated_site = _edited(residues, "H", 0, "Q")
         scores = {"ACDE": 70.0, "QCDE": 80.0}
-        monkeypatch.setattr(humanness, "identity", lambda seq: scores[seq])
+        monkeypatch.setattr(oasis_gate, "identity", lambda seq: scores[seq])
         objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
 
         result = objective.score_candidate(mutated_site, [], {})
@@ -487,7 +487,7 @@ class TestScoreCandidateGoalCheck:
         residues = _gate_residues()
         mutated_site = _edited(residues, "H", 0, "Q")
         scores = {"ACDE": 70.0, "QCDE": 70.0}
-        monkeypatch.setattr(humanness, "identity", lambda seq: scores[seq])
+        monkeypatch.setattr(oasis_gate, "identity", lambda seq: scores[seq])
         objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
 
         result = objective.score_candidate(mutated_site, [], {})
@@ -498,7 +498,7 @@ class TestScoreCandidateGoalCheck:
         residues = _gate_residues()
         mutated_site = _edited(residues, "H", 0, "Q")
         scores = {"ACDE": 70.0, "QCDE": 60.0}
-        monkeypatch.setattr(humanness, "identity", lambda seq: scores[seq])
+        monkeypatch.setattr(oasis_gate, "identity", lambda seq: scores[seq])
         objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
 
         result = objective.score_candidate(mutated_site, [], {})
@@ -509,7 +509,7 @@ class TestScoreCandidateGoalCheck:
         residues = _gate_residues()
         mutated_site = _edited(residues, "H", 0, "Q")
         calls = []
-        monkeypatch.setattr(humanness, "identity", lambda seq: calls.append(seq) or 999.0)
+        monkeypatch.setattr(oasis_gate, "identity", lambda seq: calls.append(seq) or 999.0)
         monkeypatch.setattr(motifs, "detect_all", lambda *_a, **_k: [object()])
         objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
 
@@ -524,7 +524,7 @@ class TestScoreCandidateGoalCheck:
     def test_a_rise_at_a_cdr_position_does_not_meet_the_goal(self, monkeypatch):
         residues = _gate_residues()
         calls = []
-        monkeypatch.setattr(humanness, "identity", lambda seq: calls.append(seq) or 999.0)
+        monkeypatch.setattr(oasis_gate, "identity", lambda seq: calls.append(seq) or 999.0)
         objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
 
         cdr_site = _edited(residues, "H", 1, "X")
@@ -550,7 +550,7 @@ class TestScoreCandidateGoalCheck:
             calls.append(seq)
             return {"ACDE": 70.0, "QCDE": 80.0}[seq]
 
-        monkeypatch.setattr(humanness, "identity", fake_identity)
+        monkeypatch.setattr(oasis_gate, "identity", fake_identity)
         objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
 
         objective.score_candidate(mutated_site, [], {})
@@ -565,11 +565,11 @@ class TestScoreCandidateGoalCheck:
         mutated_site = _edited(residues, "H", 0, "Q")
 
         def fake_identity(seq):
-            # Mirrors the real `humanness.identity` length guard: H's
+            # Mirrors the real `oasis_gate.identity` length guard: H's
             # 4-residue chain never reaches the 9-residue window.
-            return None if len(seq) < humanness.MIN_WINDOW else 99.0
+            return None if len(seq) < oasis_gate.MIN_WINDOW else 99.0
 
-        monkeypatch.setattr(humanness, "identity", fake_identity)
+        monkeypatch.setattr(oasis_gate, "identity", fake_identity)
         objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
 
         result = objective.score_candidate(mutated_site, [], {})
@@ -581,7 +581,7 @@ class TestScoreCandidateGoalCheck:
         residues = _gate_residues()
         mutated_site = _edited(residues, "H", 0, "Q") + _edited(residues, "L", 0, "K")
         calls = []
-        monkeypatch.setattr(humanness, "identity", lambda seq: calls.append(seq) or 999.0)
+        monkeypatch.setattr(oasis_gate, "identity", lambda seq: calls.append(seq) or 999.0)
         objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
 
         result = objective.score_candidate(mutated_site, [], {})

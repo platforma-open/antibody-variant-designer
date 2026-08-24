@@ -28,10 +28,10 @@ from pathlib import Path
 
 import antibody_batch
 import candidates
+import design_objective
 import humanness_objective
 import liability_objective
 import liability_store
-import objectives
 import pdb_index
 import ranking
 import residue_store
@@ -49,7 +49,7 @@ PRIOR_SUFFIX = ".prior.tsv"
 
 def objective_factory(
     name: str, prior_path: str
-) -> tuple[Callable[[list], objectives.Objective], str]:
+) -> tuple[Callable[[list], design_objective.Objective], str]:
     if name == HUMANIZATION:
         return (
             lambda residues: humanness_objective.build(prior_path, residues),
@@ -63,7 +63,7 @@ def process_one(
     tolerance_path: str,
     residues_path: str,
     taxonomy: list[dict],
-    build_objective: Callable[[list], objectives.Objective],
+    build_objective: Callable[[list], design_objective.Objective],
     no_candidate_reason: str,
     max_edits_per_variant: int,
     candidate_residues_per_position: int,

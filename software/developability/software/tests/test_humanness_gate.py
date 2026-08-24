@@ -1,7 +1,7 @@
 """End-to-end tests for the humanization objective through `build_variants.main` —
 the exact command `build-variants` invokes — against the real `promb`
 measurement and a real staged prior TSV. Nothing here is stubbed:
-`humanness.identity` runs for real against the bundled `human-oas`
+`oasis_gate.identity` runs for real against the bundled `human-oas`
 database, and `humanness_objective.build`'s prior load reads a real (if
 uninformative) TSV file.
 """

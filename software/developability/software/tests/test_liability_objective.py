@@ -5,9 +5,9 @@ import dataclasses
 import pytest
 
 import cysteine
+import design_objective
 import liability_objective
 import motifs
-import objectives
 import residue_store
 
 TAXONOMY = [
@@ -42,7 +42,7 @@ def _ng_site():
 
 class TestObjectiveShape:
     def test_the_objective_carries_exactly_three_named_parts_in_order(self):
-        assert [f.name for f in dataclasses.fields(objectives.Objective)] == [
+        assert [f.name for f in dataclasses.fields(design_objective.Objective)] == [
             "select_target_positions", "position_prior", "score_candidate",
         ]
 

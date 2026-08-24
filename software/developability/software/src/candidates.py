@@ -27,7 +27,7 @@ to re-read the triaged liabilities or the taxonomy to report either one.
 import itertools
 from dataclasses import dataclass, replace
 
-import objectives
+import design_objective
 
 DEFAULT_MAX_EDITS_PER_VARIANT = 5
 DEFAULT_CANDIDATE_RESIDUES_PER_POSITION = 3
@@ -150,7 +150,7 @@ def build_candidates(
     tolerance_lookup: dict,
     residues: list,
     taxonomy: list[dict],
-    objective: objectives.Objective,
+    objective: design_objective.Objective,
     max_edits_per_variant: int,
     candidate_residues_per_position: int,
     w_struct: float,
