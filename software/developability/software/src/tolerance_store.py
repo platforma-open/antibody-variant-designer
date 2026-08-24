@@ -25,7 +25,7 @@ def write_tolerance_tsv(path: str, rows: list[dict]) -> None:
 
 
 def read_tolerance_tsv(path: str) -> dict[tuple[str, str], dict]:
-    """Keyed `(chain, posins)`, the same pair `structure.index_residues`
+    """Keyed `(chain, posins)`, the same pair `residue_index.index_residues`
     assigns. A later step looks a row up with the residue it already
     holds. There is no second join format to remember."""
     lookup: dict[tuple[str, str], dict] = {}

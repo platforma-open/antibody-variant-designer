@@ -1,4 +1,4 @@
-"""The verdict layer over `motifs.detect_all` and `cysteine.detect_all` hits.
+"""The verdict layer over `liability_motifs.detect_all` and `liability_cysteines.detect_all` hits.
 
 Triage never drops a hit. A buried or fixability-declined liability is
 still reported. The Parents page can then show what this block chose not

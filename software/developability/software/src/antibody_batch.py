@@ -9,13 +9,13 @@ force it to request more.
 import sys
 from collections.abc import Callable
 
-import pdb_index
+import pdb_index_store
 import skip_store
 
 
 def run(
-    entries: list[pdb_index.Entry],
-    process_one: Callable[[pdb_index.Entry], str | None],
+    entries: list[pdb_index_store.Entry],
+    process_one: Callable[[pdb_index_store.Entry], str | None],
     out_skip: str,
     error_reason: str | None = None,
 ) -> int:

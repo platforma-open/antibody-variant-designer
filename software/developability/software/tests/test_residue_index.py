@@ -1,4 +1,4 @@
-"""Tests for `structure.py`: PDB parsing, the IMGT-numbered check and the
+"""Tests for `residue_index.py`: PDB parsing, the IMGT-numbered check and the
 `(chain, offset)` residue index.
 
 The module has no CLI — it is the index phase of the `index-and-scan`
@@ -7,7 +7,7 @@ cases in `test_formats.py`."""
 
 import residue_store
 from pdb_fixtures import make_chain, make_pdb, platforma_cdr_remark
-from structure import (
+from residue_index import (
     AA_THREE_TO_ONE,
     index_one,
     index_residues,

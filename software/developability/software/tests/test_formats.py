@@ -8,11 +8,11 @@ not in `CLAUDE.md` must reach a named skip here, never a partial index.
 import json
 from pathlib import Path
 
-import cysteine
-import motifs
+import liability_cysteines
+import liability_motifs
 import residue_store
 from pdb_fixtures import make_pdb, platforma_cdr_remark
-from structure import index_one
+from residue_index import index_one
 
 TAXONOMY = [
     {"id": "deamidation_ng", "name": "Deamidation (N[GS])",
@@ -98,14 +98,14 @@ class TestCase1Nanobody:
         assert {r.chain_role for r in residues} == {"H"}
 
     def test_vhh_hallmark_cdr_disulfide_is_not_an_extra_cysteine(self, batch):
-        # The CDR1-CDR3 pair a canonical VHH carries. `cysteine.py` counts
+        # The CDR1-CDR3 pair a canonical VHH carries. `liability_cysteines.py` counts
         # FR1 and FR3 only, so this must stay silent.
         _, residues = run_structure(
             batch,
             remarks("H", "H") + "\n" + make_pdb(v_domain("H", cys_at=(24, 104, 33, 110))),
         )
 
-        assert cysteine.detect_all(residues, TAXONOMY) == []
+        assert liability_cysteines.detect_all(residues, TAXONOMY) == []
 
 
 class TestCase2Fv:
@@ -132,7 +132,7 @@ class TestCase2Fv:
                        + v_domain("L", overrides={1: "GLY"})),
         )
 
-        assert motifs.detect_all(residues, TAXONOMY) == []
+        assert liability_motifs.detect_all(residues, TAXONOMY) == []
 
 
 class TestCase3ScFv:
@@ -183,7 +183,7 @@ class TestCase4Fab:
             + make_pdb(v_domain("H") + c_domain("H", 129, overrides={150: "ASN", 151: "GLY"})),
         )
 
-        assert motifs.detect_all(residues, TAXONOMY) == []
+        assert liability_motifs.detect_all(residues, TAXONOMY) == []
 
     def test_constant_domain_restarting_at_one_skips(self, batch):
         skip, residues = run_structure(
@@ -217,7 +217,7 @@ class TestCase5Mab:
             + make_pdb(v_domain("H", overrides=hit) + v_domain("A", overrides=hit)),
         )
 
-        hits = motifs.detect_all(residues, TAXONOMY)
+        hits = liability_motifs.detect_all(residues, TAXONOMY)
 
         assert [h.relevant.chain for h in hits] == ["H"]
 
@@ -229,7 +229,7 @@ class TestCase5Mab:
         )
 
         assert {r.chain for r in researched(residues)} == {"H"}
-        assert motifs.detect_all(residues, TAXONOMY) == []
+        assert liability_motifs.detect_all(residues, TAXONOMY) == []
 
 
 class TestCase6HalfMab:

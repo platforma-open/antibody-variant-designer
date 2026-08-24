@@ -1,6 +1,6 @@
 """Read/write helpers for residues.json, a plain-file boundary between pipeline steps.
 
-structure.py writes it. index_and_scan.py and read_tolerance.py read it independently.
+residue_index.py writes it. index_and_scan.py and read_tolerance.py read it independently.
 
 Each boundary file gets one helper pair shared by producer and consumer. This ensures
 reading and writing the same shape — a field added to one side cannot silently go missing

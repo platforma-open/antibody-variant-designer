@@ -16,7 +16,7 @@ import residue_store
 
 # The parsing shape below — `Atom`, `Residue`, `ParsedPdb`, `parse_pdb`, and
 # the CDR regex — is copied from
-# `3D-Structure-Based-Liabilities/software/liabilities-script/structure.py`.
+# `3D-Structure-Based-Liabilities/software/liabilities-script/residue_index.py`.
 # That version is already proven against ImmuneBuilder output. It is copied
 # here rather than re-derived.
 

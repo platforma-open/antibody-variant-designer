@@ -13,28 +13,29 @@ named skip, never a best-effort guess.
 | role | `H` or `L`, taken from the `REMARK 99 PLATFORMA CDR*` records the Structure Prediction block writes |
 | role-bearing chain | a PDB chain that a `REMARK 99` record names |
 | in scope | a residue the block scans for liabilities and may propose an edit at |
-| researched | scanned by `motifs.py` and `cysteine.py`, and offered to the design steps |
+| researched | scanned by `liability_motifs.py` and `liability_cysteines.py`, and offered to the design steps |
 
 ## The scope rule
 
 **A residue is in scope when its chain carries a role AND the residue carries an IMGT region.** One
 rule decides every case below. `residue_store.Residue.in_scope` is the single place it lives;
-`motifs.py` and `cysteine.py` read it and never re-derive it.
+`liability_motifs.py` and `liability_cysteines.py` read it and never re-derive it.
 
 **Out-of-scope residues stay in the residue index.** They are dropped from research, not from the
 file and not from the index, for two reasons. Solvent exposure needs them — a V-domain residue
-buried against CH1 or against the partner arm must read as buried, and `exposure.py` computes rSASA
-over the whole PDB. AntiFold needs them — step 3 parses the same PDB itself, so an index that
-silently disagreed with AntiFold's residue set would shift the tolerance matrix against the index.
+buried against CH1 or against the partner arm must read as buried, and `residue_exposure.py`
+computes rSASA over the whole PDB. AntiFold needs them — step 3 parses the same PDB itself, so an
+index that silently disagreed with AntiFold's residue set would shift the tolerance matrix against
+the index.
 
 ## Case 1 — nanobody (VHH)
 
 **One chain, role `H`, V domain only.** The block researches the whole chain.
 
 The VHH hallmark extra disulfide (a CDR1–CDR3 cysteine pair) does not raise `extra_cysteines`.
-`cysteine.py` counts only FR1 and FR3, the two IMGT-conserved positions, so a cysteine in a CDR is
-neither expected nor counted. This is correct for a canonical VHH. The cost is that a genuinely
-unpaired free cysteine in a CDR is not reported either.
+`liability_cysteines.py` counts only FR1 and FR3, the two IMGT-conserved positions, so a cysteine in
+a CDR is neither expected nor counted. This is correct for a canonical VHH. The cost is that a
+genuinely unpaired free cysteine in a CDR is not reported either.
 
 ## Case 2 — Fv
 
@@ -71,7 +72,7 @@ report every liability twice and rank two identical variants against each other.
 excludes it, because no role points at it.
 
 **The same rule excludes an antigen chain.** An antigen carries no role and no IMGT region, so it is
-never scanned and never edited, while still contributing to burial in `exposure.py`.
+never scanned and never edited, while still contributing to burial in `residue_exposure.py`.
 
 ## Case 6 — half mAb, or one arm with the rest constant
 

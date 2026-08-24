@@ -3,11 +3,11 @@ name = "antibody-variant-designer-developability"
 version = "0.1.0"
 description = "Residue indexing, liability scan and triage, candidate generation, and ranking."
 requires-python = ">=3.12"
-# freesasa is the only third-party import this package has: `exposure.py` calls
+# freesasa is the only third-party import this package has: `residue_exposure.py` calls
 # it and nothing else here reaches outside the standard library. It is a real
 # dependency rather than an extra because `deps:export` compiles this list
 # straight into `src/requirements.txt`, and because the test suite needs it —
-# `exposure.py` is under test.
+# `residue_exposure.py` is under test.
 dependencies = [
     "freesasa==2.2.1",
     "promb==1.0.2",

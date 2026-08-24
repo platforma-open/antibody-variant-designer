@@ -20,10 +20,10 @@ import read_tolerance
 import sapiens_prior
 
 import liability_store
+import liability_triage
 import residue_store
 import skip_store
 import tolerance_store
-import triage
 
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
 
@@ -188,7 +188,7 @@ class TestBlockNetwork:
 def _actionable(site):
     """One exposed liability. This step reads only whether the triaged file
     exists, so the row's whole job is to make it a valid `triaged.json`."""
-    return triage.Triaged(
+    return liability_triage.Triaged(
         definition_id="deamidation_ng",
         liability_type="deamidation",
         risk_level="High",

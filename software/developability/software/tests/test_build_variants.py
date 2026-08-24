@@ -7,10 +7,10 @@ import pytest
 
 import build_variants
 import liability_store
+import liability_triage
 import residue_store
 import skip_store
 import tolerance_store
-import triage
 import variant_store
 
 TAXONOMY = [
@@ -46,7 +46,7 @@ def _ng_site():
 
 
 def _triaged(site):
-    return triage.Triaged(
+    return liability_triage.Triaged(
         definition_id="deamidation_ng",
         liability_type="deamidation",
         risk_level="High",

@@ -18,14 +18,14 @@ from pathlib import Path
 
 import antibody_batch
 import design_objective
-import exposure
 import liability_objective
 import liability_store
-import pdb_index
+import liability_triage
+import pdb_index_store
+import residue_exposure
+import residue_index
 import residue_store
-import structure
 import taxonomy_store
-import triage
 
 DEFAULT_RSASA_BURIED_CUTOFF = 0.075
 DEFAULT_FR_CONFIDENCE_THRESHOLD = 4.0
@@ -33,7 +33,7 @@ DEFAULT_CDR_CONFIDENCE_THRESHOLD = 6.0
 DEFAULT_ACT_ON_FIXABILITY = "fixable,easily_fixable"
 
 # The two reasons meaning `process_one` reached the scan phase at all.
-# Every other reason comes from `structure.py`'s index phase and leaves
+# Every other reason comes from `residue_index.py`'s index phase and leaves
 # `triaged` as `[]` too — from the short-circuit, not a clean scan.
 # Only these two are safe to summarize into `liabilities.tsv`.
 _REACHED_TRIAGE_REASONS = ("", "no-liability-survived-triage")
@@ -111,7 +111,7 @@ def _confidence_lookup(
     ImmuneBuilder writes the same error array to both, so a residue's
     B-factor also works as a check on index alignment. A residue the
     sidecar omits falls through to its own B-factor. A residue with
-    neither stays unmeasured, reported as `None`. `triage.py` never
+    neither stays unmeasured, reported as `None`. `liability_triage.py` never
     reads a `None` confidence as high."""
     from_sidecar: dict[tuple[str, str], float] = {}
     for record in confidence_records or []:
@@ -143,7 +143,7 @@ def process_one(
     fr_confidence_threshold: float,
     cdr_confidence_threshold: float,
     act_on_fixability: list[str],
-) -> tuple[str, list[triage.Triaged]]:
+) -> tuple[str, list[liability_triage.Triaged]]:
     """Index, scan, and triage one antibody.
 
     Returns skip reason (empty on pass) and every triaged liability (the
@@ -155,17 +155,17 @@ def process_one(
 
     Skipped antibodies write no residues.json or triaged.json. A missing
     file indicates "already skipped"; an empty file would double-count."""
-    index_reason = structure.index_one(pdb_path, out_residues)
+    index_reason = residue_index.index_one(pdb_path, out_residues)
     if index_reason:
         return index_reason, []
 
     residues = residue_store.read_residues(out_residues)
 
-    rsasa_lookup = exposure.annotate(residues, pdb_path)
+    rsasa_lookup = residue_exposure.annotate(residues, pdb_path)
     confidence_lookup = _confidence_lookup(residues, confidence_records)
 
     detected = objective.select_target_positions(residues, taxonomy)
-    triaged = triage.verdict_for(
+    triaged = liability_triage.verdict_for(
         detected,
         rsasa_lookup,
         confidence_lookup,
@@ -174,7 +174,7 @@ def process_one(
         cdr_confidence_threshold=cdr_confidence_threshold,
         act_on_fixability=act_on_fixability,
     )
-    actionable = [t for t in triaged if triage.generates_for(t)]
+    actionable = [t for t in triaged if liability_triage.generates_for(t)]
 
     liability_store.write_triaged(out_triaged, actionable)
     return ("" if actionable else "no-liability-survived-triage"), triaged
@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     liability_store.write_liabilities_header(args.out_liabilities)
 
-    def one(entry: pdb_index.Entry) -> str | None:
+    def one(entry: pdb_index_store.Entry) -> str | None:
         # A picked filter narrows which parents this step attempts. A
         # filtered-out clonotype was never in scope, so it gets no skip
         # row at all.
@@ -269,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         return reason
 
-    return antibody_batch.run(pdb_index.read_index(args.pdb_index), one, args.out_skip)
+    return antibody_batch.run(pdb_index_store.read_index(args.pdb_index), one, args.out_skip)
 
 
 if __name__ == "__main__":

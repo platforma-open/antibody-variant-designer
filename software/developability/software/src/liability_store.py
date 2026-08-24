@@ -2,7 +2,7 @@
 `liabilities.tsv`.
 
 A `Triaged` site round-trips as full `residue_store.Residue` rows.
-`candidates.py` needs each edited residue's chain, IMGT label and wild
+`variant_candidates.py` needs each edited residue's chain, IMGT label and wild
 type to build an edit. Rejoining bare offsets onto `residues.json` would
 read the index a second time.
 """
@@ -12,8 +12,8 @@ import io
 import json
 from pathlib import Path
 
+import liability_triage
 import residue_store
-import triage
 
 TSV_COLUMNS = [
     "clonotypeKey",
@@ -26,14 +26,14 @@ def _tsv_value(value) -> str:
     return "" if value is None else str(value)
 
 
-def liability_key(triaged: triage.Triaged) -> str:
+def liability_key(triaged: liability_triage.Triaged) -> str:
     """`<liabilityType>@<chain><imgtLabel>` built from the site's first residue, the span start.
     Two liabilities of the same type can never share a key within one parent."""
     start = triaged.site[0]
     return f"{triaged.liability_type}@{start.chain}{start.imgt}"
 
 
-def write_triaged(path: str, triaged_list: list[triage.Triaged]) -> None:
+def write_triaged(path: str, triaged_list: list[liability_triage.Triaged]) -> None:
     """Takes only the actionable subset: rows with verdict `"exposed"`.
     The caller filters; this function writes whatever list it receives."""
     rows = [
@@ -53,10 +53,10 @@ def write_triaged(path: str, triaged_list: list[triage.Triaged]) -> None:
     Path(path).write_text(json.dumps(rows))
 
 
-def read_triaged(path: str) -> list[triage.Triaged]:
+def read_triaged(path: str) -> list[liability_triage.Triaged]:
     rows = json.loads(Path(path).read_text())
     return [
-        triage.Triaged(
+        liability_triage.Triaged(
             definition_id=row["definitionId"],
             liability_type=row["liabilityType"],
             risk_level=row["riskLevel"],
@@ -77,7 +77,7 @@ def write_liabilities_header(path: str) -> None:
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
 
 
-def summarize_liabilities(triaged_list: list[triage.Triaged]) -> tuple[str, str]:
+def summarize_liabilities(triaged_list: list[liability_triage.Triaged]) -> tuple[str, str]:
     """Build coarse verdict ("present" or "none") and summary line for a parent's triaged
     liabilities.
 
@@ -98,7 +98,7 @@ def summarize_liabilities(triaged_list: list[triage.Triaged]) -> tuple[str, str]
 
 
 def append_liabilities_tsv(
-    path: str, clonotype_key: str, triaged_list: list[triage.Triaged]
+    path: str, clonotype_key: str, triaged_list: list[liability_triage.Triaged]
 ) -> None:
     """Append one row: coarse verdict plus summary of every triaged liability.
 

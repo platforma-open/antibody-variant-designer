@@ -5,8 +5,8 @@ import csv
 import io
 
 import liability_store
+import liability_triage
 import residue_store
-import triage
 
 
 def _residue(chain, offset, imgt=None, region="CDR1"):
@@ -22,7 +22,7 @@ def _residue(chain, offset, imgt=None, region="CDR1"):
 
 
 def _triaged(site, verdict="exposed", low_confidence=False, confidence_angstroms=3.0, rsasa=0.5):
-    return triage.Triaged(
+    return liability_triage.Triaged(
         definition_id="deamidation_ng",
         liability_type="deamidation",
         risk_level="High",

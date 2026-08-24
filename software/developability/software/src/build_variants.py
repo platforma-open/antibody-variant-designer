@@ -1,7 +1,7 @@
 """This entrypoint writes `variants.tsv`, the block's final artifact.
 
 Candidate generation, the re-scan gate, and ranking run in one exec.
-`ranking.py` reads only what `candidates.py` just produced. It discards
+`variant_ranking.py` reads only what `variant_candidates.py` just produced. It discards
 nothing. Splitting them would add a job bootstrap and a staging
 directory, for no parallelism gained. The gate and the ranking policy
 stay separate modules — only the exec is merged.
@@ -13,16 +13,16 @@ from collections.abc import Callable
 from pathlib import Path
 
 import antibody_batch
-import candidates
 import design_objective
 import humanness_objective
 import liability_objective
 import liability_store
-import pdb_index
-import ranking
+import pdb_index_store
 import residue_store
 import taxonomy_store
 import tolerance_store
+import variant_candidates
+import variant_ranking
 import variant_store
 
 LIABILITY = "liability"
@@ -66,7 +66,7 @@ def process_one(
     tolerance_lookup = tolerance_store.read_tolerance_tsv(tolerance_path)
     residues = residue_store.read_residues(residues_path)
     objective = build_objective(residues)
-    cleared = candidates.build_candidates(
+    cleared = variant_candidates.build_candidates(
         liability_store.read_triaged(triaged_path),
         tolerance_lookup,
         residues,
@@ -80,7 +80,7 @@ def process_one(
     if not cleared:
         return no_candidate_reason, []
 
-    variants = ranking.rank_variants(
+    variants = variant_ranking.rank_variants(
         cleared,
         residues,
         tolerance_lookup,
@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--tolerance-dir", required=True, help="read_tolerance.py's --out-tolerance-dir"
     )
-    parser.add_argument("--residues-dir", required=True, help="structure.py's output directory")
+    parser.add_argument("--residues-dir", required=True, help="residue_index.py's output directory")
     parser.add_argument("--pdb-index", required=True, help="the pdb_index")
     parser.add_argument(
         "--definitions",
@@ -115,36 +115,36 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--max-edits-per-variant",
         type=int,
-        default=candidates.DEFAULT_MAX_EDITS_PER_VARIANT,
+        default=variant_candidates.DEFAULT_MAX_EDITS_PER_VARIANT,
     )
     parser.add_argument(
         "--candidate-residues-per-position",
         type=int,
-        default=candidates.DEFAULT_CANDIDATE_RESIDUES_PER_POSITION,
+        default=variant_candidates.DEFAULT_CANDIDATE_RESIDUES_PER_POSITION,
     )
     parser.add_argument(
         "--w-struct",
         type=float,
-        default=candidates.DEFAULT_W_STRUCT,
+        default=variant_candidates.DEFAULT_W_STRUCT,
         help="weight on the structural tolerance term of the per-residue score",
     )
     parser.add_argument(
         "--w-obj",
         type=float,
-        default=candidates.DEFAULT_W_OBJ,
+        default=variant_candidates.DEFAULT_W_OBJ,
         help="weight on the objective's position-prior term of the per-residue score",
     )
     # Ranking reads these three flags. Nothing else does.
     parser.add_argument(
-        "--variants-per-parent", type=int, default=ranking.DEFAULT_VARIANTS_PER_PARENT
+        "--variants-per-parent", type=int, default=variant_ranking.DEFAULT_VARIANTS_PER_PARENT
     )
     parser.add_argument(
-        "--low-tolerance-floor", type=float, default=ranking.DEFAULT_LOW_TOLERANCE_FLOOR
+        "--low-tolerance-floor", type=float, default=variant_ranking.DEFAULT_LOW_TOLERANCE_FLOOR
     )
     parser.add_argument(
         "--epistasis-rescore-top-k",
         type=int,
-        default=ranking.DEFAULT_EPISTASIS_RESCORE_TOP_K,
+        default=variant_ranking.DEFAULT_EPISTASIS_RESCORE_TOP_K,
     )
     parser.add_argument(
         "--objective",
@@ -165,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     residues_dir = Path(args.residues_dir)
     variant_store.write_variants_header(args.out_variants)
 
-    def one(entry: pdb_index.Entry) -> str | None:
+    def one(entry: pdb_index_store.Entry) -> str | None:
         triaged_path = triaged_dir / f"{entry.stem}.json"
         tolerance_path = tolerance_dir / f"{entry.stem}.tsv"
         residues_path = residues_dir / f"{entry.stem}.json"
@@ -199,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
         variant_store.append_variants_tsv(args.out_variants, entry.clonotype_key, variants)
         return reason
 
-    rc = antibody_batch.run(pdb_index.read_index(args.pdb_index), one, args.out_skip)
+    rc = antibody_batch.run(pdb_index_store.read_index(args.pdb_index), one, args.out_skip)
     # This runs after the loop, not inside it, once every antibody's
     # working state is already released. Only the small survivor set
     # remains to renumber. `rewrite_global_rank` turns each parent's own

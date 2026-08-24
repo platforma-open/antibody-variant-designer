@@ -40,7 +40,7 @@ CONFIDENCE_TAG := "confidence"
 BASE_RAM := f.gib(1)
 
 // What one antibody costs, per byte of its PDB text: the parsed `Residue` list,
-// plus freesasa's own copy of every atom, which `exposure.py` builds over the
+// plus freesasa's own copy of every atom, which `residue_exposure.py` builds over the
 // whole structure rather than over the residues in scope. An upper-bound
 // estimate, not a measurement.
 RAM_PER_STRUCTURE_BYTE := 32

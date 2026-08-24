@@ -97,17 +97,17 @@ def _write_keyed_tsv(path, rows):
 
 
 def _index(pdb_text, role="H", chain="H"):
-    """Run `structure.py` for real so `index_and_scan.py` reads its actual output shape."""
-    import structure
+    """Run `residue_index.py` for real so `index_and_scan.py` reads its actual output shape."""
+    import residue_index
 
-    parsed = structure.parse_pdb(pdb_text)
-    return structure.index_residues(parsed)
+    parsed = residue_index.parse_pdb(pdb_text)
+    return residue_index.index_residues(parsed)
 
 
 class TestActionableOnlyReachesTriagedJson:
     def test_exposed_fixable_motif_generates_declined_cysteine_does_not(self, batch):
         # A CDR1 `NG` hit (fixable, and this flat chain reads as exposed —
-        # see exposure.py) alongside a missing FR1 cysteine (structural,
+        # see residue_exposure.py) alongside a missing FR1 cysteine (structural,
         # never in the default `act_on_fixability` set).
         pdb_text = (
             remarks("H", "H") + "\n"

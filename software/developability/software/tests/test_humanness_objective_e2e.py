@@ -10,10 +10,10 @@ from pathlib import Path
 
 import build_variants
 import liability_store
+import liability_triage
 import residue_store
 import skip_store
 import tolerance_store
-import triage
 import variant_store
 
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
@@ -89,7 +89,7 @@ def _steered_tolerance_row(residue, favored_aa, perplexity=2.0):
 def _stage(batch, clonotype_key, offset, favored_aa):
     """One antibody: a framework liability site at `offset`, steered by its
     tolerance row toward `favored_aa`, plus a real (near-empty) prior TSV —
-    `candidates.build_candidates` calls `position_prior` regardless of
+    `variant_candidates.build_candidates` calls `position_prior` regardless of
     whether this objective's own goal check ever reads what it returns."""
     entry = batch.add(clonotype_key)
     residues = _heavy_chain_residues()
@@ -98,7 +98,7 @@ def _stage(batch, clonotype_key, offset, favored_aa):
     liability_store.write_triaged(
         str(Path(batch.dir("triaged"), f"{entry.stem}.json")),
         [
-            triage.Triaged(
+            liability_triage.Triaged(
                 definition_id="framework_liability",
                 liability_type="framework",
                 risk_level="High",

@@ -4,12 +4,12 @@ share, and the attribution rules that replace one-exec-per-antibody."""
 import pytest
 
 import antibody_batch
-import pdb_index
+import pdb_index_store
 import skip_store
 
 
 def _entries(*keys):
-    return [pdb_index.Entry(clonotype_key=k, filename=f"{k}.pdb") for k in keys]
+    return [pdb_index_store.Entry(clonotype_key=k, filename=f"{k}.pdb") for k in keys]
 
 
 class TestOneRowPerAttemptedClonotype:

@@ -2,7 +2,7 @@
 objective's goal — the last filter between a triaged liability and a
 shipped variant.
 
-`build_variants.py` runs this module and then `ranking.py` in one exec.
+`build_variants.py` runs this module and then `variant_ranking.py` in one exec.
 Ranking discards nothing and reads nothing this module did not just
 produce, so nothing needs to cross a process boundary between the two.
 """
@@ -37,7 +37,7 @@ class Edit:
 @dataclass(frozen=True)
 class Candidate:
     """One re-scan-cleared substitution set, still keyed to the liability it was built to
-    address. Handed straight to `ranking.py` in the same exec, so it is never serialized."""
+    address. Handed straight to `variant_ranking.py` in the same exec, so it is never serialized."""
 
     target_definition_id: str
     edits: tuple[Edit, ...]
@@ -48,7 +48,7 @@ class Candidate:
     # ranks by.
     tolerance: float
     # region, low_confidence and worst_confidence_angstroms ride forward unchanged from the
-    # triage.Triaged this candidate was built from; this module computes none of them.
+    # liability_triage.Triaged this candidate was built from; this module computes none of them.
     region: str | None
     low_confidence: bool
     worst_confidence_angstroms: float | None
@@ -122,7 +122,7 @@ def _risk_level_order(triaged) -> int:
 def _addressed_target(definition_id: str, site: list, taxonomy_by_id: dict) -> str:
     """A human-readable label for the liability this candidate was built
     to clear: the taxonomy's own name plus where it sits. Neither
-    `triage.Triaged` nor `Candidate` carries a display string of its
+    `liability_triage.Triaged` nor `Candidate` carries a display string of its
     own."""
     definition = taxonomy_by_id.get(definition_id, {})
     name = definition.get("name") or definition_id

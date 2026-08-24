@@ -3,10 +3,10 @@
 import csv
 from pathlib import Path
 
-import cysteine
 import design_objective
 import humanness_gate
-import motifs
+import liability_cysteines
+import liability_motifs
 
 NO_CANDIDATE_REASON = "no-candidate-raised-humanness"
 
@@ -46,7 +46,7 @@ def build(prior_path: str, residues: list) -> design_objective.Objective:
     ) -> design_objective.GoalCheck:
         """Accepts a candidate only when it raises humanness on the one chain its site touches,
         sits entirely inside a framework region, and does not reintroduce a liability
-        `motifs.py` or `cysteine.py` would flag."""
+        `liability_motifs.py` or `liability_cysteines.py` would flag."""
         del tolerance_lookup  # this objective measures humanness, not structural tolerance
         chains = {residue.chain for residue in mutated_site}
         if len(chains) != 1:
@@ -58,8 +58,8 @@ def build(prior_path: str, residues: list) -> design_objective.Objective:
         ):
             return design_objective.GoalCheck(meets_goal=False, score=0.0)
 
-        hits = motifs.detect_all(mutated_site, taxonomy)
-        hits += cysteine.detect_all(mutated_site, taxonomy)
+        hits = liability_motifs.detect_all(mutated_site, taxonomy)
+        hits += liability_cysteines.detect_all(mutated_site, taxonomy)
         if hits:
             return design_objective.GoalCheck(meets_goal=False, score=0.0)
 

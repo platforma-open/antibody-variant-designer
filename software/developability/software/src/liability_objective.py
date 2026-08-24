@@ -8,19 +8,22 @@ score_candidate sees only one site, not the full region. Re-scanning a cysteine
 over its site is approximate, but that is how it works — the full region is unavailable.
 """
 
-import cysteine
 import design_objective
-import motifs
+import liability_cysteines
+import liability_motifs
 
 
 def select_target_positions(residues: list, taxonomy: list[dict]) -> list:
-    return motifs.detect_all(residues, taxonomy) + cysteine.detect_all(residues, taxonomy)
+    return liability_motifs.detect_all(residues, taxonomy) + liability_cysteines.detect_all(
+        residues, taxonomy
+    )
 
 
 def score_candidate(
     mutated_site: list, taxonomy: list[dict], tolerance_lookup: dict
 ) -> design_objective.GoalCheck:
-    hits = motifs.detect_all(mutated_site, taxonomy) + cysteine.detect_all(mutated_site, taxonomy)
+    hits = liability_motifs.detect_all(mutated_site, taxonomy)
+    hits += liability_cysteines.detect_all(mutated_site, taxonomy)
     perplexities = [
         tolerance_lookup[(residue.chain, residue.imgt)]["perplexity"] for residue in mutated_site
     ]

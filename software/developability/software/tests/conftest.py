@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import pdb_index
+import pdb_index_store
 
 
 class StagedBatch:
@@ -24,7 +24,7 @@ class StagedBatch:
         self.root = root
         self.pdb_dir = root / "pdbs"
         self.pdb_dir.mkdir(parents=True, exist_ok=True)
-        self.entries: list[pdb_index.Entry] = []
+        self.entries: list[pdb_index_store.Entry] = []
 
     def add(self, clonotype_key: str, pdb_text: str = "", stem: str | None = None):
         """Stage one antibody and return its pdb_index entry. `stem` defaults
@@ -33,7 +33,7 @@ class StagedBatch:
         stem = stem or clonotype_key
         filename = f"{stem}.pdb"
         (self.pdb_dir / filename).write_text(pdb_text)
-        entry = pdb_index.Entry(clonotype_key=clonotype_key, filename=filename)
+        entry = pdb_index_store.Entry(clonotype_key=clonotype_key, filename=filename)
         self.entries.append(entry)
         return entry
 
@@ -42,7 +42,7 @@ class StagedBatch:
         leaves no ResourceMap entry at all for a failed clonotype, so this
         is a real input shape, not a corrupted one."""
         stem = stem or clonotype_key
-        entry = pdb_index.Entry(clonotype_key=clonotype_key, filename=f"{stem}.pdb")
+        entry = pdb_index_store.Entry(clonotype_key=clonotype_key, filename=f"{stem}.pdb")
         self.entries.append(entry)
         return entry
 
@@ -51,7 +51,7 @@ class StagedBatch:
         """The pdb_index path, rewritten from the current entries on each read
         so a test may add antibodies in any order before running a CLI."""
         path = self.root / "pdb_index.tsv"
-        pdb_index.write_index(str(path), self.entries)
+        pdb_index_store.write_index(str(path), self.entries)
         return str(path)
 
     def dir(self, name: str) -> str:

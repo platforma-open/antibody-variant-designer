@@ -74,7 +74,7 @@ def annotate(
     residues: Iterable[residue_store.Residue], pdb_path: str
 ) -> dict[tuple[str, str], float | None]:
     """rSASA for every residue in `residues`, keyed `(residue.chain, residue.imgt)` — the same
-    pair `structure.index_residues` assigns each residue. The caller looks up a value with the
+    pair `residue_index.index_residues` assigns each residue. The caller looks up a value with the
     residue it already has, instead of re-deriving freesasa's key format."""
     lookup = compute_rsasa(pdb_path)
     return {(r.chain, r.imgt): lookup.get((r.chain, r.imgt)) for r in residues}

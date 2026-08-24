@@ -1,6 +1,6 @@
-"""Unit tests for `exposure.py` — solvent-exposure annotation."""
+"""Unit tests for `residue_exposure.py` — solvent-exposure annotation."""
 
-import exposure
+import residue_exposure
 import residue_store
 from pdb_fixtures import make_chain, make_pdb
 
@@ -15,7 +15,7 @@ def test_rsasa_present_for_known_residue_type(tmp_path):
     pdb_text = make_pdb(make_chain("H", 3, res_name="ALA"))
     pdb_path = _write(tmp_path, pdb_text)
 
-    lookup = exposure.compute_rsasa(pdb_path)
+    lookup = residue_exposure.compute_rsasa(pdb_path)
 
     assert lookup[("H", "1")] is not None
     assert lookup[("H", "1")] > 0
@@ -28,7 +28,7 @@ def test_rsasa_none_for_unknown_residue_type(tmp_path):
     pdb_text = make_pdb(make_chain("H", 1, res_name="ZZZ"))
     pdb_path = _write(tmp_path, pdb_text)
 
-    lookup = exposure.compute_rsasa(pdb_path)
+    lookup = residue_exposure.compute_rsasa(pdb_path)
 
     assert lookup[("H", "1")] is None
 
@@ -41,7 +41,7 @@ def test_rsasa_keys_survive_insertion_codes(tmp_path):
     ]
     pdb_path = _write(tmp_path, make_pdb(residues))
 
-    lookup = exposure.compute_rsasa(pdb_path)
+    lookup = residue_exposure.compute_rsasa(pdb_path)
 
     assert set(lookup.keys()) == {("H", "111"), ("H", "111A"), ("H", "112")}
     assert all(v is not None for v in lookup.values())
@@ -61,7 +61,7 @@ def test_annotate_joins_on_chain_and_imgt(tmp_path):
         ),
     ]
 
-    annotated = exposure.annotate(residues, pdb_path)
+    annotated = residue_exposure.annotate(residues, pdb_path)
 
     assert set(annotated.keys()) == {("H", "1"), ("H", "2")}
     assert all(v is not None for v in annotated.values())
@@ -81,7 +81,7 @@ def test_annotate_skips_residue_absent_from_freesasa_result(tmp_path):
         ),
     ]
 
-    annotated = exposure.annotate(residues, pdb_path)
+    annotated = residue_exposure.annotate(residues, pdb_path)
 
     assert annotated[("H", "1")] is not None
     assert annotated[("L", "1")] is None

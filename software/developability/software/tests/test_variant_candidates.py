@@ -1,14 +1,14 @@
-"""Unit tests for `candidates.py` — the objective-driven gate, as a module. Its CLI
+"""Unit tests for `variant_candidates.py` — the objective-driven gate, as a module. Its CLI
 lives in `build_variants.py`, tested in `test_build_variants.py`."""
 
 
 import pytest
 
-import candidates
 import liability_objective
+import liability_triage
 import residue_store
 import tolerance_store
-import triage
+import variant_candidates
 
 TAXONOMY = [
     {"id": "deamidation_ng", "name": "Deamidation (N[GS])", "liabilityType": "deamidation",
@@ -43,7 +43,7 @@ def _ng_site():
 
 
 def _triaged(site, definition_id="deamidation_ng", low_confidence=False, confidence_angstroms=3.0):
-    return triage.Triaged(
+    return liability_triage.Triaged(
         definition_id=definition_id,
         liability_type="deamidation",
         risk_level="High",
@@ -78,7 +78,7 @@ def _ng_tolerance_lookup():
 
 class TestBuildCandidatesRescanGate:
     def test_a_combination_that_clears_the_target_and_creates_nothing_survives(self):
-        candidates_out = candidates.build_candidates(
+        candidates_out = variant_candidates.build_candidates(
             [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -91,7 +91,7 @@ class TestBuildCandidatesRescanGate:
     def test_a_combination_that_clears_the_target_but_creates_a_new_liability_is_discarded(self):
         # D then P spells `fragmentation_dp`'s own motif — clearing the
         # NG target this way must not survive the re-scan.
-        candidates_out = candidates.build_candidates(
+        candidates_out = variant_candidates.build_candidates(
             [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -104,7 +104,7 @@ class TestBuildCandidatesRescanGate:
     def test_every_surviving_candidate_targets_the_triaged_liability(self):
         [candidate] = [
             c
-            for c in candidates.build_candidates(
+            for c in variant_candidates.build_candidates(
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -118,7 +118,7 @@ class TestBuildCandidatesRescanGate:
     def test_tolerance_is_the_mean_perplexity_over_the_edited_positions(self):
         [candidate] = [
             c
-            for c in candidates.build_candidates(
+            for c in variant_candidates.build_candidates(
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -135,7 +135,7 @@ class TestBuildCandidatesRescanGate:
     def test_region_low_confidence_and_worst_confidence_carry_forward_from_triage(self):
         [candidate] = [
             c
-            for c in candidates.build_candidates(
+            for c in variant_candidates.build_candidates(
                 [_triaged(_ng_site(), low_confidence=True, confidence_angstroms=7.5)],
                 _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
@@ -152,7 +152,7 @@ class TestBuildCandidatesRescanGate:
     def test_changed_positions_is_the_fixed_csv_contract_spelling(self):
         [candidate] = [
             c
-            for c in candidates.build_candidates(
+            for c in variant_candidates.build_candidates(
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -166,7 +166,7 @@ class TestBuildCandidatesRescanGate:
     def test_addressed_target_names_the_taxonomy_entry_and_where_it_sits(self):
         [candidate] = [
             c
-            for c in candidates.build_candidates(
+            for c in variant_candidates.build_candidates(
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -191,7 +191,7 @@ class TestTopSubstitutionsRanksByLogProbability:
         residue = _residue("H", 6, "N", imgt="107")
         lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=3.0)}
 
-        assert candidates._top_substitutions(
+        assert variant_candidates._top_substitutions(
             residue, lookup, k=2, prior=None, w_struct=1.0, w_obj=1.0
         ) == ["D", "Q"]
 
@@ -204,7 +204,7 @@ class TestTopSubstitutionsRanksByLogProbability:
         lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=3.0)}
         prior = {("H", "107"): {"E": 10.0}}
 
-        assert candidates._top_substitutions(
+        assert variant_candidates._top_substitutions(
             residue, lookup, k=2, prior=prior, w_struct=1.0, w_obj=1.0
         ) == ["E", "D"]
 
@@ -213,10 +213,12 @@ class TestTopSubstitutionsRanksByLogProbability:
         lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=3.0)}
         prior = {("H", "999"): {"E": 10.0}}  # a different position — uncovered here
 
-        assert candidates._top_substitutions(
+        assert variant_candidates._top_substitutions(
             residue, lookup, k=2, prior=prior, w_struct=1.0, w_obj=1.0
         ) == (
-            candidates._top_substitutions(residue, lookup, k=2, prior=None, w_struct=1.0, w_obj=1.0)
+            variant_candidates._top_substitutions(
+                residue, lookup, k=2, prior=None, w_struct=1.0, w_obj=1.0
+            )
         )
 
 
@@ -226,7 +228,9 @@ class TestCombinedScoresWeighting:
         log_probs = _row(["D", "Q", "A"], wild_type="N")["logProbs"]
         prior = {("H", "107"): {"D": 0.4, "Q": 0.2}}
 
-        weighted = candidates._combined_scores(residue, log_probs, prior, w_struct=1.0, w_obj=1.0)
+        weighted = variant_candidates._combined_scores(
+            residue, log_probs, prior, w_struct=1.0, w_obj=1.0
+        )
 
         prior_row = prior[("H", "107")]
         unweighted = {aa: value + prior_row.get(aa, 0.0) for aa, value in log_probs.items()}
@@ -240,8 +244,12 @@ class TestCombinedScoresWeighting:
         log_probs = _row(["D", "Q", "A"], wild_type="N")["logProbs"]
         prior = {("H", "107"): {"E": 2.0}}
 
-        at_default = candidates._combined_scores(residue, log_probs, prior, w_struct=1.0, w_obj=1.0)
-        at_triple = candidates._combined_scores(residue, log_probs, prior, w_struct=1.0, w_obj=3.0)
+        at_default = variant_candidates._combined_scores(
+            residue, log_probs, prior, w_struct=1.0, w_obj=1.0
+        )
+        at_triple = variant_candidates._combined_scores(
+            residue, log_probs, prior, w_struct=1.0, w_obj=3.0
+        )
 
         assert max(at_default, key=lambda aa: (at_default[aa], aa)) != "E"
         assert max(at_triple, key=lambda aa: (at_triple[aa], aa)) == "E"
@@ -251,10 +259,10 @@ class TestCombinedScoresWeighting:
         log_probs = _row(["D", "Q", "A"], wild_type="N")["logProbs"]
         prior = {("H", "107"): {"D": 5.0, "Q": -5.0}}
 
-        with_prior_zeroed = candidates._combined_scores(
+        with_prior_zeroed = variant_candidates._combined_scores(
             residue, log_probs, prior, w_struct=1.0, w_obj=0.0
         )
-        with_no_prior_at_all = candidates._combined_scores(
+        with_no_prior_at_all = variant_candidates._combined_scores(
             residue, log_probs, None, w_struct=1.0, w_obj=0.0
         )
         assert with_prior_zeroed == with_no_prior_at_all
@@ -264,7 +272,9 @@ class TestCombinedScoresWeighting:
         log_probs = _row(["D", "Q", "A"], wild_type="N")["logProbs"]
         prior = {("H", "999"): {"E": 10.0}}  # a different position — uncovered here
 
-        scores = candidates._combined_scores(residue, log_probs, prior, w_struct=2.5, w_obj=1.0)
+        scores = variant_candidates._combined_scores(
+            residue, log_probs, prior, w_struct=2.5, w_obj=1.0
+        )
 
         assert scores == {aa: 2.5 * value for aa, value in log_probs.items()}
 
@@ -272,7 +282,7 @@ class TestCombinedScoresWeighting:
         residue = _residue("H", 6, "N", imgt="107")
         lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N")}
 
-        substitutions = candidates._top_substitutions(
+        substitutions = variant_candidates._top_substitutions(
             residue, lookup, k=5, prior=None, w_struct=0.0, w_obj=1.0
         )
 
@@ -281,7 +291,7 @@ class TestCombinedScoresWeighting:
 
 class TestBuildCandidatesEditBudget:
     def test_a_site_longer_than_the_edit_budget_produces_no_candidate(self):
-        candidates_out = candidates.build_candidates(
+        candidates_out = variant_candidates.build_candidates(
             [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             max_edits_per_variant=1, candidate_residues_per_position=3,
@@ -293,7 +303,7 @@ class TestBuildCandidatesEditBudget:
     def test_a_position_missing_from_the_tolerance_table_produces_no_candidate(self):
         lookup = {("H", "107"): _ng_tolerance_lookup()[("H", "107")]}  # "108" absent
 
-        candidates_out = candidates.build_candidates(
+        candidates_out = variant_candidates.build_candidates(
             [_triaged(_ng_site())], lookup, _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -327,7 +337,7 @@ class TestBuildCandidatesRiskLevelOrder:
             ("H", "202"): _row(["A"], wild_type="P"),
         }
 
-        candidates_out = candidates.build_candidates(
+        candidates_out = variant_candidates.build_candidates(
             [low, high, medium], lookup, [], TAXONOMY,
             objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=1,

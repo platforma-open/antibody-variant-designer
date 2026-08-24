@@ -4,10 +4,10 @@ import dataclasses
 
 import pytest
 
-import cysteine
 import design_objective
+import liability_cysteines
+import liability_motifs
 import liability_objective
-import motifs
 import residue_store
 
 TAXONOMY = [
@@ -55,7 +55,8 @@ class TestSelectTargetPositions:
         site = _ng_site()
 
         got = liability_objective.select_target_positions(site, TAXONOMY)
-        want = motifs.detect_all(site, TAXONOMY) + cysteine.detect_all(site, TAXONOMY)
+        want = liability_motifs.detect_all(site, TAXONOMY)
+        want += liability_cysteines.detect_all(site, TAXONOMY)
 
         assert got == want
 

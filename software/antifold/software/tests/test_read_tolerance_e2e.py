@@ -26,11 +26,11 @@ from pathlib import Path
 import pytest
 
 import liability_store
-import pdb_index
+import liability_triage
+import pdb_index_store
 import residue_store
 import sapiens_prior
 import skip_store
-import triage
 
 pytest.importorskip("torch")
 
@@ -205,7 +205,7 @@ class TestRealEntrypointWithTheHumanPrior:
             liability_store.write_triaged(
                 str(triaged_dir / f"{stem}.json"),
                 [
-                    triage.Triaged(
+                    liability_triage.Triaged(
                         definition_id="deamidation_ng",
                         liability_type="deamidation",
                         risk_level="High",
@@ -218,10 +218,10 @@ class TestRealEntrypointWithTheHumanPrior:
                     )
                 ],
             )
-            entries.append(pdb_index.Entry(clonotype_key=stem, filename=f"{stem}.pdb"))
+            entries.append(pdb_index_store.Entry(clonotype_key=stem, filename=f"{stem}.pdb"))
 
         index_path = tmp_path / "pdb_index.tsv"
-        pdb_index.write_index(str(index_path), entries)
+        pdb_index_store.write_index(str(index_path), entries)
 
         out_dir = tmp_path / "tolerance"
         out_skip = tmp_path / "skip.tsv"

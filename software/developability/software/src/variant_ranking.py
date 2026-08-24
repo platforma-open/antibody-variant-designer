@@ -1,17 +1,17 @@
 """Ranks candidates by structural tolerance, bands each one's binding
 risk, and renders each variant's sequence.
 
-`build_variants.py` calls this module right after `candidates.py`, in
+`build_variants.py` calls this module right after `variant_candidates.py`, in
 the same process.
 
 Every candidate reaching this module already passed the re-scan gate in
-`candidates.py`. This module orders and truncates. It filters nothing.
+`variant_candidates.py`. This module orders and truncates. It filters nothing.
 """
 
 import math
 
-import candidates
 import residue_store
+import variant_candidates
 import variant_store
 
 DEFAULT_VARIANTS_PER_PARENT = 10
@@ -45,7 +45,7 @@ def _low_tolerance_positions(tolerance_lookup: dict, floor: float) -> set:
     }
 
 
-def binding_risk(candidate: candidates.Candidate, low_tolerance_positions: set) -> str:
+def binding_risk(candidate: variant_candidates.Candidate, low_tolerance_positions: set) -> str:
     """Bands `candidate`'s binding risk from its region, its edited
     positions' tolerance, and its low-confidence flag.
 
@@ -58,7 +58,7 @@ def binding_risk(candidate: candidates.Candidate, low_tolerance_positions: set) 
     return "Medium" if is_low_tolerance else "Low"
 
 
-def _epistasis_adjusted_tolerance(candidate: candidates.Candidate) -> float:
+def _epistasis_adjusted_tolerance(candidate: variant_candidates.Candidate) -> float:
     """Lowers the tolerance score of a multi-edit candidate.
 
     `candidate.tolerance` is the mean perplexity of the edited positions. A mean
@@ -71,7 +71,7 @@ def _epistasis_adjusted_tolerance(candidate: candidates.Candidate) -> float:
 
 
 def build_variant_sequence(
-    residues: list[residue_store.Residue], edits: tuple[candidates.Edit, ...]
+    residues: list[residue_store.Residue], edits: tuple[variant_candidates.Edit, ...]
 ) -> str:
     """Returns edits applied to every in-scope residue in rendering order.
 
@@ -90,7 +90,7 @@ def build_variant_sequence(
 
 
 def rank_variants(
-    candidate_list: list[candidates.Candidate],
+    candidate_list: list[variant_candidates.Candidate],
     residues: list[residue_store.Residue],
     tolerance_lookup: dict,
     variants_per_parent: int,

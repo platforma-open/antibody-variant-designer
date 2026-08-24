@@ -3,7 +3,7 @@
 Finds every regex match of every motif-bearing taxonomy entry, over each
 chain's own sequence. This module takes no exposure or confidence input.
 It therefore never suppresses a buried match itself. Whether a hit is
-worth acting on is `triage.py`'s question, not this module's.
+worth acting on is `liability_triage.py`'s question, not this module's.
 """
 
 import re
@@ -55,7 +55,7 @@ class DetectedMotif:
 def _qualifying_entries(taxonomy: list[dict]) -> list[dict]:
     """Only entries whose `motif` is a regex string qualify.
 
-    The two cysteine entries carry `motif: None` — `cysteine.py`
+    The two cysteine entries carry `motif: None` — `liability_cysteines.py`
     evaluates them by counting, not matching. The two sequence-artifact
     entries, `contains_stop_codon` and `out_of_frame`, are sequence-QC
     checks a structural block never runs. Both kinds are skipped by

@@ -59,7 +59,7 @@ restaged with `addFiles`, never as a path.
 
 | Artifact | Producer → consumer | Format | Read/write by |
 |---|---|---|---|
-| `pdb_index.tsv` | `main.tpl.tengo` → every step | `clonotypeKey ⇥ filename`, the full ResourceMap in sorted-key order | `pdb_index.py` |
+| `pdb_index.tsv` | `main.tpl.tengo` → every step | `clonotypeKey ⇥ filename`, the full ResourceMap in sorted-key order | `pdb_index_store.py` |
 | `definitions.json` | taxonomy exec → steps 1, 3 | the taxonomy package's document — `schemaVersion` / `liabilities` / `fixabilityWeights` | `taxonomy_store.py` |
 | `per_residue_confidence.tsv` | `main.tpl.tengo` → step 1 | clonotype key + JSON records, zero or one per run | `--per-residue-confidence` |
 | `clonotype_filter.tsv` | `main.tpl.tengo` → step 1 | the optional Lead Selection subset, zero or one per run | `--clonotype-filter` |

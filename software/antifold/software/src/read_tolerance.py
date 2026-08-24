@@ -40,7 +40,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import antibody_batch
-import pdb_index
+import pdb_index_store
 import residue_store
 import sapiens_prior
 import tolerance_store
@@ -69,7 +69,7 @@ def pick_chains(
             l_chain = residue.chain
     if h_chain is None:
         raise ValueError(
-            "no residue carries the H role — structure.py should have skipped this antibody"
+            "no residue carries the H role — residue_index.py should have skipped this antibody"
         )
     return h_chain, l_chain, l_chain is None
 
@@ -285,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = Path(args.out_tolerance_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    entries = pdb_index.read_index(args.pdb_index)
+    entries = pdb_index_store.read_index(args.pdb_index)
     # A missing triaged file is a gate, not an error: it means triage left this
     # antibody nothing actionable, or the index phase skipped it. Either way
     # exec 1 already named the reason and no variant can come from it, so the
@@ -302,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     # would buy a model no antibody uses.
     model = load_model(str(weights_path)) if runnable else None
 
-    def one(entry: pdb_index.Entry) -> str:
+    def one(entry: pdb_index_store.Entry) -> str:
         return process_one(
             model,
             str(pdb_dir / entry.filename),

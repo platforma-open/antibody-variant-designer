@@ -17,7 +17,7 @@ import sapiens_prior
 
 import humanness_gate
 import humanness_objective
-import motifs
+import liability_motifs
 import residue_store
 
 REGIONS = ["FR1", "CDR1", "FR2", "CDR2", "FR3", "CDR3", "FR4"]
@@ -457,7 +457,7 @@ def _gate_residues():
 
 def _edited(residues, chain, offset, to):
     """One mutated-site residue: the base residue at `(chain, offset)`, its
-    `wild_type` replaced by `to` — the shape `candidates.py` documents its
+    `wild_type` replaced by `to` — the shape `variant_candidates.py` documents its
     contract as producing."""
     original = next(r for r in residues if r.chain == chain and r.offset == offset)
     return [replace(original, wild_type=to)]
@@ -510,7 +510,7 @@ class TestScoreCandidateGoalCheck:
         mutated_site = _edited(residues, "H", 0, "Q")
         calls = []
         monkeypatch.setattr(humanness_gate, "identity", lambda seq: calls.append(seq) or 999.0)
-        monkeypatch.setattr(motifs, "detect_all", lambda *_a, **_k: [object()])
+        monkeypatch.setattr(liability_motifs, "detect_all", lambda *_a, **_k: [object()])
         objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
 
         result = objective.score_candidate(mutated_site, [], {})

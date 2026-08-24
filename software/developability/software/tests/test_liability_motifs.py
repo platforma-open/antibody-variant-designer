@@ -1,8 +1,8 @@
-"""Tests for `motifs.py` — total, non-destructive motif detection."""
+"""Tests for `liability_motifs.py` — total, non-destructive motif detection."""
 
 import inspect
 
-from motifs import detect_all
+from liability_motifs import detect_all
 from residue_store import Residue
 
 

@@ -1,7 +1,8 @@
 """Read the shared liability taxonomy definitions.json.
 
 The taxonomy package writes one JSON object keyed by schemaVersion, liabilities,
-and fixabilityWeights — never the flat list that motifs.py and cysteine.py iterate.
+and fixabilityWeights — never the flat list that liability_motifs.py and
+liability_cysteines.py iterate.
 
 index_and_scan.py and build_variants.py both scan against the taxonomy and must
 unwrap this object the same way. The re-scan gate only works if it reads the
