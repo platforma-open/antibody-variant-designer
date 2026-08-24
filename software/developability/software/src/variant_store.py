@@ -36,7 +36,7 @@ TSV_COLUMNS = [
 @dataclass(frozen=True)
 class Variant:
     rank: int  # Global ordinal across the whole run, written by rewrite_global_rank.
-    parent_rank: int  # Local rank inside one parent. The Variants page shows it as "best pick of this antibody".
+    parent_rank: int  # Local rank inside one parent — shown as "best pick of this antibody"
     chain: str  # "H" for a VHH, "H,L" for a paired Fv
     addressed_target: str
     changed_positions: str
