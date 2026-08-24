@@ -10,9 +10,11 @@ from pathlib import Path
 
 import build_variants
 from engine import (
+    humanness_objective,
     liability_store,
     liability_triage,
     residue_store,
+    run_mode,
     skip_store,
     tolerance_store,
     variant_store,
@@ -124,7 +126,28 @@ def _stage(batch, clonotype_key, offset, favored_aa):
     return entry
 
 
-def _run(batch, objective=None, extra_args=None):
+def _run_humanness_only(batch, monkeypatch, extra_args=None):
+    """Runs `main` with `run_mode` patched to select the real humanness
+    objective alone, over every triaged site — a stand-in for the target
+    selection this row does not yet give the humanness objective. Not
+    reachable through `--run-mode` in this row: mode 2 mixes it with the
+    liability objective, and the liability objective trivially clears every
+    edit against this fixture's empty taxonomy, which would otherwise mask
+    the humanness gate this test exists to prove."""
+    monkeypatch.setattr(
+        build_variants.run_mode,
+        "objectives_for",
+        lambda mode, prior_path: [
+            (run_mode.HUMANNESS, lambda residues: humanness_objective.build(prior_path, residues))
+        ],
+    )
+    monkeypatch.setattr(
+        build_variants.run_mode, "targets_for", lambda name, triaged_list: triaged_list
+    )
+    return _run(batch, extra_args)
+
+
+def _run(batch, extra_args=None):
     definitions = batch.definitions([])  # no taxonomy entry can spell a new liability here
     out_variants = batch.path("variants.tsv")
     out_skip = batch.path("skip.tsv")
@@ -141,8 +164,6 @@ def _run(batch, objective=None, extra_args=None):
         # second, unsteered amino acid into the candidate set too.
         "--candidate-residues-per-position", "1",
     ]
-    if objective is not None:
-        argv += ["--objective", objective]
     rc = build_variants.main(argv + (extra_args or []))
 
     assert rc == 0
@@ -150,17 +171,17 @@ def _run(batch, objective=None, extra_args=None):
 
 
 class TestHumanizationObjectiveAgainstTheRealMetric:
-    def test_a_rise_survives_and_a_fall_is_skipped(self, batch):
+    def test_a_rise_survives_and_a_fall_is_skipped(self, batch, monkeypatch):
         _stage(batch, "rises", _RISE_OFFSET, _RISE_AA)
         _stage(batch, "falls", _FALL_OFFSET, _FALL_AA)
 
-        skips, written = _run(batch, "humanization")
+        skips, written = _run_humanness_only(batch, monkeypatch)
 
-        assert skips == [("rises", "", ""), ("falls", "no-candidate-raised-humanness", "")]
-        assert [key for key, _, _ in written] == ["rises"]
+        assert skips == [("rises", "", ""), ("falls", "no-candidate-cleared-motif", "")]
+        assert [key for key, _, _, _ in written] == ["rises"]
         rise_wild_type = VH_SEQUENCE[_RISE_OFFSET]
         assert (
-            written[0][2].changed_positions
+            written[0][3].changed_positions
             == f"H:{rise_wild_type}{_RISE_OFFSET + 1}{_RISE_AA}"
         )
 
@@ -173,12 +194,12 @@ class TestHumanizationObjectiveAgainstTheRealMetric:
         skips, written = _run(batch)
 
         assert skips == [("rises", "", ""), ("falls", "", "")]
-        assert {key for key, _, _ in written} == {"rises", "falls"}
+        assert {key for key, _, _, _ in written} == {"rises", "falls"}
 
-    def test_a_tie_does_not_meet_the_goal_through_the_real_metric(self, batch):
+    def test_a_tie_does_not_meet_the_goal_through_the_real_metric(self, batch, monkeypatch):
         _stage(batch, "ties", _TIE_OFFSET, _TIE_AA)
 
-        skips, written = _run(batch, "humanization")
+        skips, written = _run_humanness_only(batch, monkeypatch)
 
-        assert skips == [("ties", "no-candidate-raised-humanness", "")]
+        assert skips == [("ties", "no-candidate-cleared-motif", "")]
         assert written == []

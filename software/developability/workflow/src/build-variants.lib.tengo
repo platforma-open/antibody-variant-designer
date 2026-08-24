@@ -84,6 +84,7 @@ ARGS := {
 	definitions: validation.resource(),
 	params: {
 		"__options__,closed": "",
+		runMode: "string",
 		maxEditsPerVariant: "number",
 		candidateResiduesPerPosition: "number",
 		wStruct: "number",
@@ -128,6 +129,7 @@ run := func(args) {
 		arg("--definitions").arg("definitions.json").
 		arg("--out-variants").arg(VARIANTS_FILE).
 		arg("--out-skip").arg(SKIP_FILE).
+		arg("--run-mode").arg(args.params.runMode).
 		arg("--max-edits-per-variant").arg(string(args.params.maxEditsPerVariant)).
 		arg("--candidate-residues-per-position").
 		arg(string(args.params.candidateResiduesPerPosition)).

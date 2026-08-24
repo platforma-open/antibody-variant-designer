@@ -12,9 +12,11 @@ import io
 import os
 from pathlib import Path
 
+import pytest
+
 import build_variants
 import index_and_scan
-from engine import residue_store, skip_store, tolerance_store
+from engine import residue_store, skip_store, tolerance_store, variant_store
 from pdb_fixtures import make_pdb, platforma_cdr_remark
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -160,6 +162,91 @@ class TestObjectiveSeamParity:
         rows = _rows_of(out_variants)
         assert len(rows) > 0
         assert {row["objective"] for row in rows} == {"liability"}
+
+
+class TestRunModeReproducesTheGoldenCaptureByteForByte:
+    """The row's safety property: no run mode moves a single byte of what
+    the pre-existing-project shape already emitted."""
+
+    def _stage_prior(self, tolerance_dir, stem):
+        Path(tolerance_dir, f"{stem}{build_variants.PRIOR_SUFFIX}").write_text("chain\timgt\n")
+
+    def test_no_mode_flag_reproduces_every_golden_byte_for_byte(self, batch):
+        definitions, residues_dir, triaged_dir, out_liabilities, out_scan_skip = _run_scan(batch)
+        out_variants, out_variants_skip = _run_variants(
+            batch, definitions, residues_dir, triaged_dir
+        )
+
+        _check_or_capture(out_liabilities, "liabilities.tsv")
+        _check_or_capture(out_scan_skip, "scan-skip.tsv")
+        _check_or_capture(out_variants, "variants.tsv")
+        _check_or_capture(out_variants_skip, "variants-skip.tsv")
+
+    def test_liabilities_mode_reproduces_every_golden_byte_for_byte(self, batch):
+        definitions, residues_dir, triaged_dir, out_liabilities, out_scan_skip = _run_scan(batch)
+        out_variants, out_variants_skip = _run_variants(
+            batch, definitions, residues_dir, triaged_dir,
+            extra_args=["--run-mode", "liabilities"],
+        )
+
+        _check_or_capture(out_liabilities, "liabilities.tsv")
+        _check_or_capture(out_scan_skip, "scan-skip.tsv")
+        _check_or_capture(out_variants, "variants.tsv")
+        _check_or_capture(out_variants_skip, "variants-skip.tsv")
+
+    def test_liabilities_and_humanization_mode_reproduces_every_golden_byte_for_byte(self, batch):
+        definitions, residues_dir, triaged_dir, out_liabilities, out_scan_skip = _run_scan(batch)
+        for stem in ("clone-1", "clone-2"):
+            self._stage_prior(batch.dir("tolerance"), stem)
+        out_variants, out_variants_skip = _run_variants(
+            batch, definitions, residues_dir, triaged_dir,
+            extra_args=["--run-mode", "liabilities + humanization"],
+        )
+
+        _check_or_capture(out_liabilities, "liabilities.tsv")
+        _check_or_capture(out_scan_skip, "scan-skip.tsv")
+        _check_or_capture(out_variants, "variants.tsv")
+        _check_or_capture(out_variants_skip, "variants-skip.tsv")
+
+    def test_all_three_runs_variants_all_name_the_liability_objective(self, batch):
+        definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
+        for stem in ("clone-1", "clone-2"):
+            self._stage_prior(batch.dir("tolerance"), stem)
+
+        for extra_args in (None, ["--run-mode", "liabilities"],
+                           ["--run-mode", "liabilities + humanization"]):
+            out_variants, _ = _run_variants(
+                batch, definitions, residues_dir, triaged_dir, extra_args=extra_args
+            )
+            rows = _rows_of(out_variants)
+            assert len(rows) > 0
+            assert {row["objective"] for row in rows} == {"liability"}
+
+    def test_an_unrecognised_mode_exits_non_zero_and_leaves_a_header_only_variants_tsv(
+        self, batch
+    ):
+        definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
+        out_variants = batch.path("variants.tsv")
+        variant_store.write_variants_header(out_variants)
+        tolerance_dir = batch.dir("tolerance")
+        for stem in ("clone-1", "clone-2"):
+            _stage_tolerance(tolerance_dir, residues_dir, stem)
+
+        with pytest.raises(SystemExit):
+            build_variants.main(
+                [
+                    "--triaged-dir", triaged_dir,
+                    "--tolerance-dir", tolerance_dir,
+                    "--residues-dir", residues_dir,
+                    "--pdb-index", batch.index,
+                    "--definitions", definitions,
+                    "--out-variants", out_variants,
+                    "--out-skip", batch.path("variants-skip.tsv"),
+                    "--run-mode", "misspelled-mode",
+                ]
+            )
+
+        assert _rows_of(out_variants) == []
 
 
 class TestWeightedCombinationAtTheEntrypoint:

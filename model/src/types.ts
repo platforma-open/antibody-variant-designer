@@ -6,11 +6,16 @@ import type { DatasetSelection, PlDataTableStateV2 } from "@platforma-sdk/model"
  *  a `PlRef` type. */
 export type PlRef = NonNullable<DatasetSelection["primary"]>["column"];
 
+/** Which objectives a run designs against: liability removal alone, or
+ *  liability removal together with humanization. */
+export type RunMode = "liabilities" | "liabilities + humanization";
+
 /** Unified user-editable state persisted by the model. */
 export type BlockData = {
   /** Structures dataset, and its optional Lead Selection subset, picked via
    *  `PlDatasetSelector`. */
   dataset?: DatasetSelection;
+  runMode: RunMode;
   rsasaBuriedCutoff: number;
   actOnFixability: string[];
   maxEditsPerVariant: number;
@@ -46,6 +51,7 @@ export type BlockData = {
 export type BlockArgs = {
   primaryRef: NonNullable<DatasetSelection["primary"]>;
   subsetRef?: PlRef;
+  runMode: RunMode;
   rsasaBuriedCutoff: number;
   actOnFixability: string[];
   maxEditsPerVariant: number;

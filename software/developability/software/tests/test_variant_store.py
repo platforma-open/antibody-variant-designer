@@ -45,8 +45,8 @@ class TestVariantsTsvRoundTrips:
         path = tmp_path / "variants.tsv"
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", [original])
-        [(clonotype_key, _, rehydrated)] = variant_store.read_variants_tsv(str(path))
+        variant_store.append_variants_tsv(str(path), "clone-1", "liability", [original])
+        [(clonotype_key, _, _, rehydrated)] = variant_store.read_variants_tsv(str(path))
 
         assert clonotype_key == "clone-1"
         assert rehydrated == original
@@ -56,9 +56,9 @@ class TestVariantsTsvRoundTrips:
 
         variant_store.write_variants_header(str(path))
         variant_store.append_variants_tsv(
-            str(path), "clone-1", [_variant(worst_confidence_angstroms=None)]
+            str(path), "clone-1", "liability", [_variant(worst_confidence_angstroms=None)]
         )
-        [(_, _, rehydrated)] = variant_store.read_variants_tsv(str(path))
+        [(_, _, _, rehydrated)] = variant_store.read_variants_tsv(str(path))
 
         assert rehydrated.worst_confidence_angstroms is None
 
@@ -69,6 +69,7 @@ class TestVariantsTsvRoundTrips:
         variant_store.append_variants_tsv(
             str(path),
             "clone-1",
+            "liability",
             [
                 _variant(rank=1, low_confidence_warning=True, changed_positions="H:N107D"),
                 _variant(rank=2, low_confidence_warning=False, changed_positions="H:N108D"),
@@ -91,8 +92,8 @@ class TestOneFileHoldsEveryParent:
         path = tmp_path / "variants.tsv"
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", [_variant()])
-        variant_store.append_variants_tsv(str(path), "clone-2", [_variant()])
+        variant_store.append_variants_tsv(str(path), "clone-1", "liability", [_variant()])
+        variant_store.append_variants_tsv(str(path), "clone-2", "liability", [_variant()])
 
         assert [r["clonotypeKey"] for r in _rows_of(path)] == ["clone-1", "clone-2"]
 
@@ -105,8 +106,8 @@ class TestOneFileHoldsEveryParent:
                _variant(rank=2, changed_positions="H:N108D")]
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", two)
-        variant_store.append_variants_tsv(str(path), "clone-2", two)
+        variant_store.append_variants_tsv(str(path), "clone-1", "liability", two)
+        variant_store.append_variants_tsv(str(path), "clone-2", "liability", two)
 
         assert [r["rank"] for r in _rows_of(path)] == ["1", "2", "1", "2"]
 
@@ -123,7 +124,7 @@ class TestVariantKeyIsAPerParentOrdinal:
                _variant(rank=2, changed_positions="H:N108D")]
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", two)
+        variant_store.append_variants_tsv(str(path), "clone-1", "liability", two)
 
         assert [r["variantKey"] for r in _rows_of(path)] == ["v01", "v02"]
 
@@ -135,7 +136,7 @@ class TestVariantKeyIsAPerParentOrdinal:
         path = tmp_path / "variants.tsv"
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", [_variant(rank=1)])
+        variant_store.append_variants_tsv(str(path), "clone-1", "liability", [_variant(rank=1)])
 
         rows = _rows_of(path)
         assert "blockId" not in variant_store.TSV_COLUMNS
@@ -148,12 +149,46 @@ class TestVariantKeyIsAPerParentOrdinal:
                _variant(rank=2, changed_positions="H:N108D")]
 
         variant_store.write_variants_header(str(path))
-        variant_store.append_variants_tsv(str(path), "clone-1", two)
-        variant_store.append_variants_tsv(str(path), "clone-2", two)
+        variant_store.append_variants_tsv(str(path), "clone-1", "liability", two)
+        variant_store.append_variants_tsv(str(path), "clone-2", "liability", two)
 
         rows = _rows_of(path)
         keys = [(r["clonotypeKey"], r["variantKey"]) for r in rows]
         assert len(set(keys)) == len(rows) == 4
+
+
+class TestObjectiveIsPerRow:
+    def test_the_objective_cell_is_the_name_the_caller_handed_in(self, tmp_path):
+        # Not a module constant: a second append under a different name
+        # writes that name, not the first call's.
+        path = tmp_path / "variants.tsv"
+
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(str(path), "clone-1", "liability", [_variant(rank=1)])
+        variant_store.append_variants_tsv(str(path), "clone-2", "humanness", [_variant(rank=1)])
+
+        assert [r["objective"] for r in _rows_of(path)] == ["liability", "humanness"]
+
+    def test_rewrite_global_rank_leaves_each_rows_own_objective_untouched(self, tmp_path):
+        # The second ranking pass is objective-blind: it only ever touches
+        # `rank`.
+        path = tmp_path / "variants.tsv"
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(
+            str(path), "clone-1", "liability",
+            [_variant(rank=1, structural_tolerance=5.0, changed_positions="H:N107D")],
+        )
+        variant_store.append_variants_tsv(
+            str(path), "clone-1", "humanness",
+            [_variant(rank=1, structural_tolerance=9.0, changed_positions="H:N108D")],
+        )
+
+        variant_store.rewrite_global_rank(str(path))
+
+        written = variant_store.read_variants_tsv(str(path))
+        assert {(objective, v.changed_positions) for _, _, objective, v in written} == {
+            ("liability", "H:N107D"), ("humanness", "H:N108D"),
+        }
 
 
 class TestRewriteGlobalRank:
@@ -163,27 +198,27 @@ class TestRewriteGlobalRank:
         # clone-2's one variant tolerates edits better than either of
         # clone-1's — it must come out ranked ahead of both.
         variant_store.append_variants_tsv(
-            str(path), "clone-1",
+            str(path), "clone-1", "liability",
             [
                 _variant(rank=1, structural_tolerance=9.0, changed_positions="H:N107D"),
                 _variant(rank=2, structural_tolerance=5.0, changed_positions="H:N108D"),
             ],
         )
         variant_store.append_variants_tsv(
-            str(path), "clone-2",
+            str(path), "clone-2", "liability",
             [_variant(rank=1, structural_tolerance=12.0, changed_positions="H:N109D")],
         )
 
         variant_store.rewrite_global_rank(str(path))
 
         written = variant_store.read_variants_tsv(str(path))
-        assert [(ck, v.rank) for ck, _, v in written] == [
+        assert [(ck, v.rank) for ck, _, _, v in written] == [
             ("clone-2", 1), ("clone-1", 2), ("clone-1", 3),
         ]
         # `parent_rank` is untouched: clone-1's two rows still read 1, 2 —
         # their own local order — even though the global `rank` column now
         # interleaves them with clone-2's.
-        assert [(ck, v.parent_rank) for ck, _, v in written] == [
+        assert [(ck, v.parent_rank) for ck, _, _, v in written] == [
             ("clone-2", 1), ("clone-1", 1), ("clone-1", 2),
         ]
 
@@ -191,17 +226,17 @@ class TestRewriteGlobalRank:
         path = tmp_path / "variants.tsv"
         variant_store.write_variants_header(str(path))
         variant_store.append_variants_tsv(
-            str(path), "clone-1", [_variant(rank=1, structural_tolerance=9.0)]
+            str(path), "clone-1", "liability", [_variant(rank=1, structural_tolerance=9.0)]
         )
         variant_store.append_variants_tsv(
-            str(path), "clone-2", [_variant(rank=1, structural_tolerance=5.0)]
+            str(path), "clone-2", "liability", [_variant(rank=1, structural_tolerance=5.0)]
         )
 
         variant_store.rewrite_global_rank(str(path))
 
         # Both parents' one survivor was locally rank 1, so both still
         # render `v01` — only the now-global `rank` column tells them apart.
-        assert [variant for _, variant, _ in variant_store.read_variants_tsv(str(path))] == [
+        assert [variant for _, variant, _, _ in variant_store.read_variants_tsv(str(path))] == [
             "v01", "v01",
         ]
 
@@ -209,13 +244,13 @@ class TestRewriteGlobalRank:
         path = tmp_path / "variants.tsv"
         variant_store.write_variants_header(str(path))
         tied = _variant(rank=1, structural_tolerance=5.0, changed_positions="H:N107D")
-        variant_store.append_variants_tsv(str(path), "clone-2", [tied])
-        variant_store.append_variants_tsv(str(path), "clone-1", [tied])
+        variant_store.append_variants_tsv(str(path), "clone-2", "liability", [tied])
+        variant_store.append_variants_tsv(str(path), "clone-1", "liability", [tied])
 
         variant_store.rewrite_global_rank(str(path))
 
         written = variant_store.read_variants_tsv(str(path))
-        assert [(ck, v.rank) for ck, _, v in written] == [("clone-1", 1), ("clone-2", 2)]
+        assert [(ck, v.rank) for ck, _, _, v in written] == [("clone-1", 1), ("clone-2", 2)]
 
     def test_an_empty_file_is_left_alone(self, tmp_path):
         path = tmp_path / "variants.tsv"

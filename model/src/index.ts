@@ -18,12 +18,15 @@ import {
   DataModelBuilder,
   getAxisId,
 } from "@platforma-sdk/model";
-import type { BlockArgs, BlockData, SkipReason, SkippedClonotype } from "./types";
+import type { BlockArgs, BlockData, RunMode, SkipReason, SkippedClonotype } from "./types";
 
-export type { BlockArgs, BlockData, PlRef, SkipReason, SkippedClonotype } from "./types";
+export type { BlockArgs, BlockData, PlRef, RunMode, SkipReason, SkippedClonotype } from "./types";
+
+const DEFAULT_RUN_MODE: RunMode = "liabilities";
 
 const dataModel = new DataModelBuilder().from<BlockData>("v1").init(() => ({
   dataset: undefined,
+  runMode: DEFAULT_RUN_MODE,
   rsasaBuriedCutoff: 0.075,
   actOnFixability: ["fixable", "easily_fixable"],
   maxEditsPerVariant: 5,
@@ -153,6 +156,10 @@ export const platforma = BlockModelV3.create(dataModel)
     return {
       primaryRef: data.dataset.primary,
       subsetRef: data.dataset.primary.filter,
+      // `.init()` seeds this only for a project created after this lands; a
+      // project that already ran carries persisted `BlockData` without the
+      // field.
+      runMode: data.runMode ?? DEFAULT_RUN_MODE,
       rsasaBuriedCutoff: data.rsasaBuriedCutoff,
       // A set, and the args are the run's content key: the workflow hands this
       // list to step 1's exec, and the backend canonicalizes a JSON resource's

@@ -113,6 +113,7 @@ _buildVariants := func(pdbIndex, triaged, tolerance, residues, definitions, args
 		residues: residues,
 		definitions: definitions,
 		params: {
+			runMode: args.runMode,
 			maxEditsPerVariant: args.maxEditsPerVariant,
 			candidateResiduesPerPosition: args.candidateResiduesPerPosition,
 			wStruct: args.wStruct,

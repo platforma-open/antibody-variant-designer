@@ -5,6 +5,7 @@ import {
   PlBtnGhost,
   PlCheckbox,
   PlDatasetSelector,
+  PlDropdown,
   PlMaskIcon24,
   PlNumberField,
   PlSectionSeparator,
@@ -52,6 +53,11 @@ const FIXABILITY_OPTIONS = [
   },
 ] as const;
 
+const RUN_MODE_OPTIONS = [
+  { value: "liabilities", label: "Liabilities" },
+  { value: "liabilities + humanization", label: "Liabilities + humanization" },
+] as const;
+
 function isFixabilityChecked(value: string): boolean {
   return app.model.data.actOnFixability.includes(value);
 }
@@ -85,6 +91,22 @@ function toggleFixability(value: string) {
     <PlAlert v-if="app.model.outputs.infoMessage" type="info" icon>
       {{ app.model.outputs.infoMessage }}
     </PlAlert>
+
+    <PlAccordionSection label="Objectives">
+      <PlDropdown
+        v-model="app.model.data.runMode"
+        label="Design against"
+        :options="RUN_MODE_OPTIONS"
+      >
+        <template #tooltip>
+          Which developability objectives this run designs against. Liabilities repairs detected
+          liability motifs, the default and the only behaviour before this option existed.
+          Liabilities + humanization additionally proposes framework substitutions that make the
+          antibody read as more human, over positions the liability objective never touches.
+          Default: Liabilities.
+        </template>
+      </PlDropdown>
+    </PlAccordionSection>
 
     <PlAccordionSection label="Exposure and confidence">
       <div class="field-grid">

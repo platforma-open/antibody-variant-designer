@@ -9,8 +9,6 @@ import io
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-OBJECTIVE = "liability"
-
 # This file carries no run or block id column.
 # The workflow attaches run identity to these columns downstream, once this process finishes.
 # That lets two blocks over one dataset share this exec, instead of
@@ -74,7 +72,7 @@ def write_variants_header(path: str) -> None:
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
 
 
-def _row(clonotype_key: str, variant_key_str: str, v: Variant) -> list:
+def _row(clonotype_key: str, variant_key_str: str, objective: str, v: Variant) -> list:
     """Returns one TSV row, in `TSV_COLUMNS` order.
 
     `append_variants_tsv` and `rewrite_global_rank` both call this to write
@@ -89,7 +87,7 @@ def _row(clonotype_key: str, variant_key_str: str, v: Variant) -> list:
         variant_key_str,
         v.rank,
         v.parent_rank,
-        OBJECTIVE,
+        objective,
         v.chain,
         v.addressed_target,
         v.changed_positions,
@@ -102,7 +100,9 @@ def _row(clonotype_key: str, variant_key_str: str, v: Variant) -> list:
     ]
 
 
-def append_variants_tsv(path: str, clonotype_key: str, variants: list[Variant]) -> None:
+def append_variants_tsv(
+    path: str, clonotype_key: str, objective: str, variants: list[Variant]
+) -> None:
     """Appends one parent's ranked variants to path.
 
     variantKey is computed here from parent_rank — the only place both the
@@ -112,15 +112,16 @@ def append_variants_tsv(path: str, clonotype_key: str, variants: list[Variant]) 
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
     for v in variants:
-        writer.writerow(_row(clonotype_key, variant_key(v.parent_rank), v))
+        writer.writerow(_row(clonotype_key, variant_key(v.parent_rank), objective, v))
     with Path(path).open("a") as fh:
         fh.write(buf.getvalue())
 
 
-def read_variants_tsv(path: str) -> list[tuple[str, str, Variant]]:
-    """`(clonotype_key, variant_key, variant)` per row, in file order.
-    `objective` round-trips through the file but not through `Variant` — it
-    is the fixed constant `OBJECTIVE`."""
+def read_variants_tsv(path: str) -> list[tuple[str, str, str, Variant]]:
+    """`(clonotype_key, variant_key, objective, variant)` per row, in file
+    order. `objective` round-trips through the file but not through
+    `Variant` — it is the objective that produced the row, carried
+    alongside it rather than on it."""
     variants = []
     with Path(path).open(newline="") as fh:
         for row in csv.DictReader(fh, delimiter="\t"):
@@ -128,6 +129,7 @@ def read_variants_tsv(path: str) -> list[tuple[str, str, Variant]]:
                 (
                     row["clonotypeKey"],
                     row["variantKey"],
+                    row["objective"],
                     Variant(
                         rank=int(row["rank"]),
                         parent_rank=int(row["parentRank"]),
@@ -163,11 +165,13 @@ def rewrite_global_rank(path: str) -> None:
     if not rows:
         return
     rows.sort(
-        key=lambda row: (-row[2].structural_tolerance, row[2].changed_positions, row[0], row[1])
+        key=lambda row: (-row[3].structural_tolerance, row[3].changed_positions, row[0], row[1])
     )
 
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-    for global_rank, (clonotype_key, variant_key_str, v) in enumerate(rows, start=1):
-        writer.writerow(_row(clonotype_key, variant_key_str, replace(v, rank=global_rank)))
+    for global_rank, (clonotype_key, variant_key_str, objective, v) in enumerate(rows, start=1):
+        writer.writerow(
+            _row(clonotype_key, variant_key_str, objective, replace(v, rank=global_rank))
+        )
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n" + buf.getvalue())

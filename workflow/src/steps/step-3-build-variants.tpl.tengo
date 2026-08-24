@@ -45,6 +45,7 @@ self.validateInputs({
 	definitions: validation.resource(),
 	params: {
 		"__options__,closed": "",
+		runMode: "string",
 		maxEditsPerVariant: "number",
 		candidateResiduesPerPosition: "number",
 		wStruct: "number",

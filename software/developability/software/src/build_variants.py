@@ -9,17 +9,15 @@ stay separate modules — only the exec is merged.
 
 import argparse
 import sys
-from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from engine import (
     antibody_batch,
-    design_objective,
-    humanness_objective,
-    liability_objective,
     liability_store,
     pdb_index_store,
     residue_store,
+    run_mode,
     taxonomy_store,
     tolerance_store,
     variant_candidates,
@@ -27,23 +25,9 @@ from engine import (
     variant_store,
 )
 
-LIABILITY = "liability"
-HUMANIZATION = "humanization"
-
-LIABILITY_NO_CANDIDATE_REASON = "no-candidate-cleared-motif"
+NO_CANDIDATE_REASON = "no-candidate-cleared-motif"
 
 PRIOR_SUFFIX = ".prior.tsv"
-
-
-def objective_factory(
-    name: str, prior_path: str
-) -> tuple[Callable[[list], design_objective.Objective], str]:
-    if name == HUMANIZATION:
-        return (
-            lambda residues: humanness_objective.build(prior_path, residues),
-            humanness_objective.NO_CANDIDATE_REASON,
-        )
-    return lambda _residues: liability_objective.OBJECTIVE, LIABILITY_NO_CANDIDATE_REASON
 
 
 def process_one(
@@ -51,8 +35,8 @@ def process_one(
     tolerance_path: str,
     residues_path: str,
     taxonomy: list[dict],
-    build_objective: Callable[[list], design_objective.Objective],
-    no_candidate_reason: str,
+    mode: str,
+    prior_path: str,
     max_edits_per_variant: int,
     candidate_residues_per_position: int,
     w_struct: float,
@@ -60,37 +44,49 @@ def process_one(
     variants_per_parent: int,
     low_tolerance_floor: float,
     epistasis_rescore_top_k: int,
-) -> tuple[str, list[variant_store.Variant]]:
-    """Gate then rank one antibody.
+) -> tuple[str, list[tuple[str, list[variant_store.Variant]]]]:
+    """Gate then rank one antibody against every objective `mode` runs.
 
-    Returns the skip reason, `""` on pass. Returns the ranked variants
-    the caller appends to the run's one `variants.tsv`."""
+    Returns the skip reason, `""` on pass. Returns each objective's ranked
+    variants as `(objective_name, variants)` pairs, in run order, for the
+    caller to append to the run's one `variants.tsv` under that name."""
     tolerance_lookup = tolerance_store.read_tolerance_tsv(tolerance_path)
     residues = residue_store.read_residues(residues_path)
-    objective = build_objective(residues)
-    cleared = variant_candidates.build_candidates(
-        liability_store.read_triaged(triaged_path),
-        tolerance_lookup,
-        residues,
-        taxonomy,
-        objective,
-        max_edits_per_variant,
-        candidate_residues_per_position,
-        w_struct,
-        w_obj,
-    )
-    if not cleared:
-        return no_candidate_reason, []
+    triaged = liability_store.read_triaged(triaged_path)
 
-    variants = variant_ranking.rank_variants(
-        cleared,
-        residues,
-        tolerance_lookup,
-        variants_per_parent,
-        low_tolerance_floor,
-        epistasis_rescore_top_k,
-    )
-    return "", variants
+    per_objective: list[tuple[str, list[variant_store.Variant]]] = []
+    emitted = 0  # the second objective numbers on from the first, never from v01
+    for name, build_objective in run_mode.objectives_for(mode, prior_path):
+        targets = run_mode.targets_for(name, triaged)
+        if not targets:
+            continue
+        cleared = variant_candidates.build_candidates(
+            targets,
+            tolerance_lookup,
+            residues,
+            taxonomy,
+            build_objective(residues),
+            max_edits_per_variant,
+            candidate_residues_per_position,
+            w_struct,
+            w_obj,
+        )
+        if not cleared:
+            continue
+
+        ranked = variant_ranking.rank_variants(
+            cleared,
+            residues,
+            tolerance_lookup,
+            variants_per_parent,
+            low_tolerance_floor,
+            epistasis_rescore_top_k,
+        )
+        ranked = [replace(v, parent_rank=v.parent_rank + emitted) for v in ranked]
+        emitted += len(ranked)
+        per_objective.append((name, ranked))
+
+    return ("" if emitted else NO_CANDIDATE_REASON), per_objective
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -149,10 +145,11 @@ def main(argv: list[str] | None = None) -> int:
         default=variant_ranking.DEFAULT_EPISTASIS_RESCORE_TOP_K,
     )
     parser.add_argument(
-        "--objective",
-        choices=[LIABILITY, HUMANIZATION],
-        default=LIABILITY,
-        help="which objective's target selection, prior and goal check to run",
+        "--run-mode",
+        dest="run_mode",
+        choices=list(run_mode.MODES),
+        default=run_mode.DEFAULT_MODE,
+        help="which objectives this run designs against",
     )
     args = parser.parse_args(argv)
 
@@ -179,17 +176,16 @@ def main(argv: list[str] | None = None) -> int:
             triaged_path.is_file() and tolerance_path.is_file() and residues_path.is_file()
         ):
             return None
-        if args.objective == HUMANIZATION and not prior_path.is_file():
+        if args.run_mode == run_mode.LIABILITIES_AND_HUMANIZATION and not prior_path.is_file():
             return None
 
-        build_objective, no_candidate_reason = objective_factory(args.objective, str(prior_path))
-        reason, variants = process_one(
+        reason, per_objective = process_one(
             str(triaged_path),
             str(tolerance_path),
             str(residues_path),
             taxonomy,
-            build_objective,
-            no_candidate_reason,
+            args.run_mode,
+            str(prior_path),
             args.max_edits_per_variant,
             args.candidate_residues_per_position,
             args.w_struct,
@@ -198,7 +194,10 @@ def main(argv: list[str] | None = None) -> int:
             args.low_tolerance_floor,
             args.epistasis_rescore_top_k,
         )
-        variant_store.append_variants_tsv(args.out_variants, entry.clonotype_key, variants)
+        for objective_name, variants in per_objective:
+            variant_store.append_variants_tsv(
+                args.out_variants, entry.clonotype_key, objective_name, variants
+            )
         return reason
 
     rc = antibody_batch.run(pdb_index_store.read_index(args.pdb_index), one, args.out_skip)
