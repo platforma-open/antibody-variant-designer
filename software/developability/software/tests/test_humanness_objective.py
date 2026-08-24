@@ -8,13 +8,16 @@ third-party model — with a stub, so no checkpoint and no `sapiens` install is 
 import json
 import math
 import socket
+from dataclasses import replace
 from pathlib import Path
 
 import antifold
 import pytest
 import sapiens_prior
 
+import humanness
 import humanness_objective
+import motifs
 import residue_store
 
 REGIONS = ["FR1", "CDR1", "FR2", "CDR2", "FR3", "CDR3", "FR4"]
@@ -416,3 +419,174 @@ class TestNetworkGuardWrapsThePriorCall:
                 str(tmp_path / "sapiens"),
                 str(tmp_path / "prior.tsv"),
             )
+
+
+# `build()` never reads `prior_path` eagerly — `position_prior` only loads it
+# when the engine calls it, which none of these cases do — so a placeholder
+# that names no real file is enough to build the objective under test.
+_UNUSED_PRIOR_PATH = "/unused/prior.tsv"
+
+
+def _gate_residue(chain, offset, region, wild_type, chain_role):
+    return residue_store.Residue(
+        chain=chain,
+        offset=offset,
+        imgt=str(offset + 1),
+        wild_type=wild_type,
+        res_name="ALA",
+        b_factor=20.0,
+        region=region,
+        chain_role=chain_role,
+    )
+
+
+def _gate_residues():
+    """H and L, each a short framework/CDR walk, plus one role-less residue
+    with no region at all — the same shape a constant-domain or antigen
+    residue would carry."""
+    return [
+        _gate_residue("H", 0, "FR1", "A", "H"),
+        _gate_residue("H", 1, "CDR1", "C", "H"),
+        _gate_residue("H", 2, "FR2", "D", "H"),
+        _gate_residue("H", 3, "FR3", "E", "H"),
+        _gate_residue("L", 0, "FR1", "M", "L"),
+        _gate_residue("L", 1, "FR2", "N", "L"),
+        _gate_residue("X", 0, None, "Z", None),
+    ]
+
+
+def _edited(residues, chain, offset, to):
+    """One mutated-site residue: the base residue at `(chain, offset)`, its
+    `wild_type` replaced by `to` — the shape `candidates.py` documents its
+    contract as producing."""
+    original = next(r for r in residues if r.chain == chain and r.offset == offset)
+    return [replace(original, wild_type=to)]
+
+
+class TestScoreCandidateGoalCheck:
+    """`humanness_objective.build(...).score_candidate` — the goal check a
+    candidate must clear: raise the one chain its site touches, at a
+    framework position, without spelling a second liability. Every case
+    here stubs `humanness.identity` (the measurement itself), so none of
+    them needs `promb` installed or a database loaded."""
+
+    def test_a_strict_rise_meets_the_goal(self, monkeypatch):
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+        scores = {"ACDE": 70.0, "QCDE": 80.0}
+        monkeypatch.setattr(humanness, "identity", lambda seq: scores[seq])
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.meets_goal is True
+        # The candidate's own humanness, not the parent's and not a diff.
+        assert result.score == 80.0
+
+    def test_a_tie_does_not_meet_the_goal(self, monkeypatch):
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+        scores = {"ACDE": 70.0, "QCDE": 70.0}
+        monkeypatch.setattr(humanness, "identity", lambda seq: scores[seq])
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.meets_goal is False
+
+    def test_a_fall_does_not_meet_the_goal(self, monkeypatch):
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+        scores = {"ACDE": 70.0, "QCDE": 60.0}
+        monkeypatch.setattr(humanness, "identity", lambda seq: scores[seq])
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.meets_goal is False
+
+    def test_a_rise_that_spells_another_motif_does_not_meet_the_goal(self, monkeypatch):
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+        calls = []
+        monkeypatch.setattr(humanness, "identity", lambda seq: calls.append(seq) or 999.0)
+        monkeypatch.setattr(motifs, "detect_all", lambda *_a, **_k: [object()])
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.meets_goal is False
+        assert result.score == 0.0
+        # The measurement never runs once a re-scan hit discards the
+        # candidate outright.
+        assert calls == []
+
+    def test_a_rise_at_a_cdr_position_does_not_meet_the_goal(self, monkeypatch):
+        residues = _gate_residues()
+        calls = []
+        monkeypatch.setattr(humanness, "identity", lambda seq: calls.append(seq) or 999.0)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+
+        cdr_site = _edited(residues, "H", 1, "X")
+        cdr_result = objective.score_candidate(cdr_site, [], {})
+
+        no_region_site = _edited(residues, "X", 0, "Y")
+        no_region_result = objective.score_candidate(no_region_site, [], {})
+
+        assert cdr_result.meets_goal is False
+        assert cdr_result.score == 0.0
+        assert no_region_result.meets_goal is False
+        assert no_region_result.score == 0.0
+        # The region check short-circuits before the measurement in both
+        # cases, never only the CDR one.
+        assert calls == []
+
+    def test_only_the_edited_chain_is_measured(self, monkeypatch):
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+        calls = []
+
+        def fake_identity(seq):
+            calls.append(seq)
+            return {"ACDE": 70.0, "QCDE": 80.0}[seq]
+
+        monkeypatch.setattr(humanness, "identity", fake_identity)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+
+        objective.score_candidate(mutated_site, [], {})
+
+        # Parent then candidate, both on H alone — L's "MN" reaches neither
+        # call, whether alone or concatenated onto either H sequence.
+        assert calls == ["ACDE", "QCDE"]
+        assert "MN" not in "".join(calls)
+
+    def test_an_unscoreable_side_discards_the_candidate(self, monkeypatch):
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+
+        def fake_identity(seq):
+            # Mirrors the real `humanness.identity` length guard: H's
+            # 4-residue chain never reaches the 9-residue window.
+            return None if len(seq) < humanness.MIN_WINDOW else 99.0
+
+        monkeypatch.setattr(humanness, "identity", fake_identity)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.meets_goal is False
+        assert result.score == 0.0
+
+    def test_a_site_spanning_two_chains_does_not_meet_the_goal(self, monkeypatch):
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q") + _edited(residues, "L", 0, "K")
+        calls = []
+        monkeypatch.setattr(humanness, "identity", lambda seq: calls.append(seq) or 999.0)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.meets_goal is False
+        assert result.score == 0.0
+        # Never measured against an arbitrary one of the two chains.
+        assert calls == []

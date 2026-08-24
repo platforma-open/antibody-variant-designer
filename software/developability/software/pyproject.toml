@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 # `exposure.py` is under test.
 dependencies = [
     "freesasa==2.2.1",
+    "promb==1.0.2",
 ]
 
 [dependency-groups]

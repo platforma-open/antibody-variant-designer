@@ -140,6 +140,21 @@ class TestGateAndRankInOnePass:
         assert skips == [("clone-1", "no-candidate-cleared-motif", "")]
         assert written == []
 
+    def test_the_liability_objective_still_names_its_own_skip_reason(self, batch):
+        # `--objective` omitted and `--objective liability` given explicitly
+        # must resolve to the identical skip reason — proving the
+        # humanization objective's own wiring left the default path's own
+        # skip-reason string untouched.
+        _stage(batch, "clone-1")
+
+        default_skips, default_written = _run(batch, ["--max-edits-per-variant", "1"])
+        explicit_skips, explicit_written = _run(
+            batch, ["--max-edits-per-variant", "1", "--objective", "liability"]
+        )
+
+        assert default_skips == explicit_skips == [("clone-1", "no-candidate-cleared-motif", "")]
+        assert default_written == explicit_written == []
+
     def test_a_gate_threshold_and_a_ranking_threshold_both_reach_this_one_command(self, batch):
         # The fused step owns both families of flag; neither is silently
         # ignored now that one command carries them.

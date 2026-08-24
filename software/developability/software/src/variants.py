@@ -23,10 +23,12 @@ loop's own per-antibody memory footprint — see that function's docstring.
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import batch
 import candidates
+import humanness_objective
 import liability_objective
 import liability_store
 import objectives
@@ -37,13 +39,32 @@ import taxonomy_store
 import tolerance_store
 import variant_store
 
+LIABILITY = "liability"
+HUMANIZATION = "humanization"
+
+LIABILITY_NO_CANDIDATE_REASON = "no-candidate-cleared-motif"
+
+PRIOR_SUFFIX = ".prior.tsv"
+
+
+def objective_factory(
+    name: str, prior_path: str
+) -> tuple[Callable[[list], objectives.Objective], str]:
+    if name == HUMANIZATION:
+        return (
+            lambda residues: humanness_objective.build(prior_path, residues),
+            humanness_objective.NO_CANDIDATE_REASON,
+        )
+    return lambda _residues: liability_objective.OBJECTIVE, LIABILITY_NO_CANDIDATE_REASON
+
 
 def process_one(
     triaged_path: str,
     tolerance_path: str,
     residues_path: str,
     taxonomy: list[dict],
-    objective: objectives.Objective,
+    build_objective: Callable[[list], objectives.Objective],
+    no_candidate_reason: str,
     max_edits_per_variant: int,
     candidate_residues_per_position: int,
     w_struct: float,
@@ -57,6 +78,7 @@ def process_one(
     `variants.tsv`."""
     tolerance_lookup = tolerance_store.read_tolerance_tsv(tolerance_path)
     residues = residue_store.read_residues(residues_path)
+    objective = build_objective(residues)
     cleared = candidates.build_candidates(
         liability_store.read_triaged(triaged_path),
         tolerance_lookup,
@@ -69,7 +91,7 @@ def process_one(
         w_obj,
     )
     if not cleared:
-        return "no-candidate-cleared-motif", []
+        return no_candidate_reason, []
 
     variants = ranking.rank_variants(
         cleared,
@@ -131,6 +153,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=ranking.DEFAULT_EPISTASIS_RESCORE_TOP_K,
     )
+    parser.add_argument(
+        "--objective",
+        choices=[LIABILITY, HUMANIZATION],
+        default=LIABILITY,
+        help="which objective's target selection, prior and goal check to run",
+    )
     args = parser.parse_args(argv)
 
     if not Path(args.definitions).is_file():
@@ -148,19 +176,24 @@ def main(argv: list[str] | None = None) -> int:
         triaged_path = triaged_dir / f"{entry.stem}.json"
         tolerance_path = tolerance_dir / f"{entry.stem}.tsv"
         residues_path = residues_dir / f"{entry.stem}.json"
+        prior_path = tolerance_dir / f"{entry.stem}{PRIOR_SUFFIX}"
         # Three predecessors feed this step, so any of them may have named
         # this antibody's reason already — a row here would count it twice.
         if not (
             triaged_path.is_file() and tolerance_path.is_file() and residues_path.is_file()
         ):
             return None
+        if args.objective == HUMANIZATION and not prior_path.is_file():
+            return None
 
+        build_objective, no_candidate_reason = objective_factory(args.objective, str(prior_path))
         reason, variants = process_one(
             str(triaged_path),
             str(tolerance_path),
             str(residues_path),
             taxonomy,
-            liability_objective.OBJECTIVE,
+            build_objective,
+            no_candidate_reason,
             args.max_edits_per_variant,
             args.candidate_residues_per_position,
             args.w_struct,
