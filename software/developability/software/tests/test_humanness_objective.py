@@ -5,6 +5,7 @@ Every case replaces `sapiens_prior._predict_scores` — the one function that ca
 third-party model — with a stub, so no checkpoint and no `sapiens` install is needed.
 """
 
+import json
 import math
 import socket
 from pathlib import Path
@@ -18,13 +19,34 @@ import residue_store
 
 REGIONS = ["FR1", "CDR1", "FR2", "CDR2", "FR3", "CDR3", "FR4"]
 
+# One wild type per region, so the sequence a stub receives identifies which
+# residues reached the model — a framework-only concatenation and a whole
+# in-scope chain are different strings, not just different lengths.
+REGION_WILD_TYPE = {
+    "FR1": "A",
+    "CDR1": "C",
+    "FR2": "D",
+    "CDR2": "E",
+    "FR3": "F",
+    "CDR3": "G",
+    "FR4": "H",
+}
+
+# Large enough that no fixture in this file trips the bound by accident;
+# the bound's own arithmetic and its enforcement get dedicated cases below.
+_NO_BOUND = 10_000
+
 
 def _residue(chain, offset, region, chain_role, imgt=None):
+    # "Z" for a region this table doesn't name (the role-less antigen
+    # residue): distinct from every region's own letter, so an
+    # over-correction that leaked it into a call's sequence would show up
+    # as content, not only as a stray length.
     return residue_store.Residue(
         chain=chain,
         offset=offset,
         imgt=imgt or str(offset + 1),
-        wild_type="A",
+        wild_type=REGION_WILD_TYPE.get(region, "Z"),
         res_name="ALA",
         b_factor=20.0,
         region=region,
@@ -49,6 +71,13 @@ def _two_chain_residues():
     )
 
 
+def _lift_the_bound(monkeypatch):
+    """Every case in this file but `TestCheckpointBound` is about something
+    other than the bound, so they all lift it out of the way through this
+    one helper rather than repeating the same `monkeypatch.setattr`."""
+    monkeypatch.setattr(sapiens_prior, "_max_scored_residues", lambda _checkpoint_dir: _NO_BOUND)
+
+
 def _uniform_frame(sequence):
     """A `frame[aa][position]` reader returning the same raw logit for every
     amino acid — `_log_softmax` turns that into a uniform log(1/20) row,
@@ -60,6 +89,55 @@ def _stub_uniform_scores(monkeypatch):
     monkeypatch.setattr(
         sapiens_prior, "_predict_scores", lambda sequence, *_a, **_k: _uniform_frame(sequence)
     )
+    _lift_the_bound(monkeypatch)
+
+
+def _recording_stub(monkeypatch):
+    """Replaces `_predict_scores` with one that records every call's sequence
+    and role, and lifts the bound out of the way — the cases using this stub
+    are about which chain reaches the model, not about the bound."""
+    calls = []
+
+    def _stub(sequence, chain_role, checkpoint_dir, tokenizer_dir):
+        calls.append(
+            {
+                "sequence": sequence,
+                "chain_role": chain_role,
+                "checkpoint_dir": checkpoint_dir,
+                "tokenizer_dir": tokenizer_dir,
+            }
+        )
+        return _uniform_frame(sequence)
+
+    monkeypatch.setattr(sapiens_prior, "_predict_scores", _stub)
+    _lift_the_bound(monkeypatch)
+    return calls
+
+
+def _position_encoding_frame(sequence):
+    """`frame[aa][i]` peaks on `AMINO_ACIDS[i % 20]`, so an emitted row's
+    argmax names the index the model was asked about — and a row read back
+    at the wrong index names the wrong amino acid."""
+    return {
+        aa: [
+            0.0 if sapiens_prior.AMINO_ACIDS[i % 20] == aa else -1000.0
+            for i in range(len(sequence))
+        ]
+        for aa in sapiens_prior.AMINO_ACIDS
+    }
+
+
+def _stub_position_encoding(monkeypatch):
+    monkeypatch.setattr(
+        sapiens_prior,
+        "_predict_scores",
+        lambda sequence, *_a, **_k: _position_encoding_frame(sequence),
+    )
+    _lift_the_bound(monkeypatch)
+
+
+def _argmax_amino_acid(row):
+    return max(sapiens_prior.AMINO_ACIDS, key=lambda aa: row[aa])
 
 
 class TestBuildPriorRows:
@@ -105,6 +183,164 @@ class TestBuildPriorRows:
             assert total == pytest.approx(1.0, abs=1e-6)
 
 
+class TestModelReadsTheWholeInScopeChain:
+    """The gate: the model is handed every in-scope residue of a chain, not
+    only its framework positions — and the framework filter moves to the
+    read-back side without widening or narrowing which rows get emitted."""
+
+    def test_model_reads_the_whole_in_scope_chain(self, monkeypatch):
+        calls = _recording_stub(monkeypatch)
+        residues = _chain_residues("H", "H")
+        in_scope = sorted((r for r in residues if r.in_scope), key=lambda r: r.offset)
+
+        sapiens_prior.build_prior_rows(residues, "/weights")
+
+        assert len(calls) == 1
+        # The per-region wild types make this a content check, not only a
+        # length one: "ACDEFGH" is the 7-residue whole chain (4 framework +
+        # 3 CDR); "ADFH" would be the 4-residue framework-only concatenation
+        # the defect used to send.
+        assert calls[0]["sequence"] == "".join(r.wild_type for r in in_scope) == "ACDEFGH"
+
+    def test_a_framework_row_reads_its_whole_chain_index(self, monkeypatch):
+        _stub_position_encoding(monkeypatch)
+        residues = _chain_residues("H", "H")
+        fr3 = next(r for r in residues if r.region == "FR3")
+        fr4 = next(r for r in residues if r.region == "FR4")
+
+        rows = sapiens_prior.build_prior_rows(residues, "/weights")
+        by_imgt = {row["imgt"]: row for row in rows}
+
+        # FR3 and FR4 sit at offsets 4 and 6 of the whole in-scope chain —
+        # two and three higher than their framework-only offsets of 2 and 3,
+        # which is exactly what the defect scored them at instead.
+        assert _argmax_amino_acid(by_imgt[fr3.imgt]) == sapiens_prior.AMINO_ACIDS[fr3.offset]
+        assert _argmax_amino_acid(by_imgt[fr4.imgt]) == sapiens_prior.AMINO_ACIDS[fr4.offset]
+
+    def test_one_call_per_chain_with_its_own_role(self, monkeypatch):
+        calls = _recording_stub(monkeypatch)
+        residues = _two_chain_residues()
+
+        sapiens_prior.build_prior_rows(residues, "/weights")
+
+        assert len(calls) == 2  # one call per role-bearing chain, H and L
+        by_role = {call["chain_role"]: call for call in calls}
+        assert set(by_role) == {"H", "L"}
+        for role in ("H", "L"):
+            same_chain = (r for r in residues if r.chain_role == role)
+            expected = "".join(r.wild_type for r in sorted(same_chain, key=lambda r: r.offset))
+            # Each call's sequence is exactly its own chain's residues — a
+            # 14-character sequence here would mean the two chains bled
+            # into one call instead of two.
+            assert by_role[role]["sequence"] == expected
+            assert len(by_role[role]["sequence"]) == 7
+
+    def test_out_of_scope_residues_reach_neither_input_nor_output(self, monkeypatch):
+        calls = _recording_stub(monkeypatch)
+        residues = _two_chain_residues()  # includes the role-less antigen residue "X"
+
+        rows = sapiens_prior.build_prior_rows(residues, "/weights")
+
+        # No third call for the role-less chain — over-correcting the filter
+        # into "send everything" would add one, and its "Z" wild type would
+        # then show up inside an H or L call's sequence.
+        assert len(calls) == 2
+        assert {call["chain_role"] for call in calls} == {"H", "L"}
+        assert not any("Z" in call["sequence"] for call in calls)
+        assert not any(row["chain"] == "X" for row in rows)
+
+
+def test_prior_still_covers_exactly_the_framework_positions(monkeypatch):
+    """The regression guard the whole-chain change must not break: reading a
+    longer sequence must not widen or narrow the emitted row set."""
+    _stub_uniform_scores(monkeypatch)
+    residues = _two_chain_residues()
+    framework_positions = [r for r in residues if r.in_scope and r.region.startswith("FR")]
+    cdr_keys = {(r.chain, r.imgt) for r in residues if r.region and r.region.startswith("CDR")}
+
+    rows = sapiens_prior.build_prior_rows(residues, "/weights")
+
+    assert len(rows) == len(framework_positions) == 8
+    assert not any((row["chain"], row["imgt"]) in cdr_keys for row in rows)
+    header = sapiens_prior.render(rows).splitlines()[0]
+    assert header.split("\t") == ["chain", "imgt", *list("ACDEFGHIKLMNPQRSTVWY")]
+
+
+def _checkpoint_dir_with_bound(tmp_path, in_scope_residues):
+    """A tmp checkpoint directory whose `config.json` declares just enough
+    `max_position_embeddings` to score exactly `in_scope_residues` residues —
+    so a chain at, or one past, the bound is a handful of residues, never
+    the real checkpoints' 126/142."""
+    checkpoint_dir = tmp_path / "checkpoint"
+    checkpoint_dir.mkdir()
+    max_position_embeddings = in_scope_residues + sapiens_prior.POSITION_ID_OFFSET + 2
+    (checkpoint_dir / "config.json").write_text(
+        json.dumps({"max_position_embeddings": max_position_embeddings})
+    )
+    return checkpoint_dir
+
+
+class TestCheckpointBound:
+    def test_the_bound_comes_from_the_checkpoints_own_config(self, tmp_path):
+        checkpoint_dir = tmp_path / "vh"
+        checkpoint_dir.mkdir()
+        (checkpoint_dir / "config.json").write_text(
+            json.dumps({"max_position_embeddings": 146})
+        )
+
+        assert sapiens_prior._max_scored_residues(str(checkpoint_dir)) == 142
+
+        other_checkpoint_dir = tmp_path / "vl"
+        other_checkpoint_dir.mkdir()
+        (other_checkpoint_dir / "config.json").write_text(
+            json.dumps({"max_position_embeddings": 130})
+        )
+
+        # The two mounted checkpoints declare different values — the bound
+        # is read per checkpoint, never carried over from the other one.
+        assert sapiens_prior._max_scored_residues(str(other_checkpoint_dir)) == 126
+
+    def test_a_chain_at_the_bound_is_scored(self, monkeypatch, tmp_path):
+        bound = 5
+        # Every residue in scope and framework, so the row count also proves
+        # the read-back reaches every position the model scored.
+        residues = [_residue("H", offset, "FR1", "H") for offset in range(bound)]
+        checkpoint_dir = _checkpoint_dir_with_bound(tmp_path, bound)
+        calls = []
+
+        def _stub(sequence, chain_role, checkpoint_dir_arg, tokenizer_dir):
+            del chain_role, tokenizer_dir
+            calls.append(sequence)
+            return _uniform_frame(sequence)
+
+        monkeypatch.setattr(sapiens_prior, "_predict_scores", _stub)
+        monkeypatch.setattr(sapiens_prior, "_checkpoint_dir", lambda *_a, **_k: str(checkpoint_dir))
+
+        rows = sapiens_prior.build_prior_rows(residues, "/weights")
+
+        assert len(calls) == 1
+        assert len(rows) == bound  # every framework position emitted a row
+
+    def test_a_chain_past_the_bound_names_itself_and_raises(self, monkeypatch, tmp_path):
+        bound = 5
+        residues = [_residue("H", offset, "FR1", "H") for offset in range(bound + 1)]
+        checkpoint_dir = _checkpoint_dir_with_bound(tmp_path, bound)
+        calls = []
+
+        def _stub(sequence, chain_role, checkpoint_dir_arg, tokenizer_dir):
+            del chain_role, tokenizer_dir
+            calls.append(sequence)
+            return _uniform_frame(sequence)
+
+        monkeypatch.setattr(sapiens_prior, "_predict_scores", _stub)
+        monkeypatch.setattr(sapiens_prior, "_checkpoint_dir", lambda *_a, **_k: str(checkpoint_dir))
+
+        with pytest.raises(ValueError, match=r"chain H has 6 in-scope residues.*scores at most 5"):
+            sapiens_prior.build_prior_rows(residues, "/weights")
+
+        assert not calls  # the model is never reached
+
+
 class TestLoadPrior:
     def test_round_trip_keys_on_chain_and_imgt(self, monkeypatch, tmp_path):
         _stub_uniform_scores(monkeypatch)
@@ -129,6 +365,7 @@ class TestPredictScoresReceivesLocalPaths:
             return _uniform_frame(sequence)
 
         monkeypatch.setattr(sapiens_prior, "_predict_scores", _stub)
+        _lift_the_bound(monkeypatch)
         weights_root = tmp_path / "sapiens"
         weights_root.mkdir()
 
@@ -160,6 +397,10 @@ class TestNetworkGuardWrapsThePriorCall:
                 for r in h_l_residues
             ],
         )
+        # `antifold.py` imports `sapiens_prior` bare, so it shares this test's
+        # own `sapiens_prior` module object — both patches below reach the
+        # one `antifold.process_one` calls through.
+        _lift_the_bound(monkeypatch)
 
         def _open_a_socket(*_a, **_k):
             socket.socket()

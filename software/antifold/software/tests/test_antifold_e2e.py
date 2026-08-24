@@ -22,6 +22,8 @@ builds — never the predicted values.
 """
 
 import importlib.util
+import math
+import statistics
 import sys
 from pathlib import Path
 
@@ -30,6 +32,7 @@ import pytest
 import liability_store
 import pdb_index
 import residue_store
+import sapiens_prior
 import skip_store
 import triage
 
@@ -191,13 +194,14 @@ class TestRealEntrypointWithTheHumanPrior:
         entries = []
         for stem in ("parent-1", "parent-2"):
             (pdb_dir / f"{stem}.pdb").write_text(pdb_text)
-            # The ten residues `_NANOBODY_LIKE_PDB` stages, all inside FR1 (well
-            # short of CDR1's start at IMGT 27) — every one a framework position
-            # the prior must cover.
+            # The ten residues `_NANOBODY_LIKE_PDB` stages: eight framework
+            # positions and, at offsets 3-4, one contiguous CDR1 pair — so the
+            # prior's row count must differ from the residue count, proving
+            # the framework filter still applies to a whole-chain scoring.
             residues = [
                 residue_store.Residue(
                     chain="H", offset=i, imgt=str(i + 1), wild_type="A", res_name="ALA",
-                    b_factor=20.0, region="FR1", chain_role="H",
+                    b_factor=20.0, region="CDR1" if i in (3, 4) else "FR1", chain_role="H",
                 )
                 for i in range(10)
             ]
@@ -250,8 +254,10 @@ class TestRealEntrypointWithTheHumanPrior:
             assert (out_dir / f"{stem}.tsv").is_file()
             prior_path = out_dir / f"{stem}{isolated_antifold_module.sapiens_prior.PRIOR_SUFFIX}"
             assert prior_path.is_file()
-            # Header plus one row per framework position — all ten of them.
-            assert len(prior_path.read_text().splitlines()) - 1 == 10
+            # Header plus one row per framework position — eight, not the ten
+            # residues staged: the two CDR1 offsets reached the model (the
+            # whole-chain scoring) but are absent from what got emitted.
+            assert len(prior_path.read_text().splitlines()) - 1 == 8
 
 
 class TestNanobodyReachesTheForwardPass:
@@ -290,3 +296,137 @@ class TestNanobodyReachesTheForwardPass:
         )
 
         assert len(rows) == 10
+
+
+# Trastuzumab's real heavy-chain V-domain (RCSB 1N8Z chain B, V-domain part),
+# the same sequence the manual test drives `humanness.identity` against.
+_TRASTUZUMAB_VH = (
+    "EVQLVESGGGLVQPGGSLRLSCAASGFNIKDTYIHWVRQAPGKGLEWVARIYPTNGYTRYADSVKGRFTI"
+    "SADTSKNTAYLQMNSLRAEDTAVYYCSRWGGDGFYAMDYWGQGTLVTVSS"
+)
+
+# Trastuzumab's canonical IMGT heavy-chain CDR loops, located by substring
+# within the V-domain above rather than hardcoded as offsets — the spans and
+# the loop strings this list names can never disagree.
+_CDR_LOOPS = ("GFNIKDTY", "RIYPTNGYT", "SRWGGDGFYAMDY")
+
+
+def _span(loop):
+    start = _TRASTUZUMAB_VH.index(loop)
+    return start, start + len(loop)
+
+
+_CDR_SPANS = dict(zip(("CDR1", "CDR2", "CDR3"), (_span(loop) for loop in _CDR_LOOPS), strict=True))
+
+
+def _region_at(offset):
+    for name, (start, end) in _CDR_SPANS.items():
+        if start <= offset < end:
+            return name
+    if offset < _CDR_SPANS["CDR1"][0]:
+        return "FR1"
+    if offset < _CDR_SPANS["CDR2"][0]:
+        return "FR2"
+    if offset < _CDR_SPANS["CDR3"][0]:
+        return "FR3"
+    return "FR4"
+
+
+def _heavy_chain_index():
+    """Trastuzumab's real heavy-chain V-domain, indexed with its real CDR
+    spans — the fixture the divergence case scores."""
+    return [
+        residue_store.Residue(
+            chain="H",
+            offset=offset,
+            imgt=str(offset + 1),
+            wild_type=wild_type,
+            res_name="ALA",
+            b_factor=20.0,
+            region=_region_at(offset),
+            chain_role="H",
+        )
+        for offset, wild_type in enumerate(_TRASTUZUMAB_VH)
+    ]
+
+
+def _log_softmax_rows(frame, length):
+    return [
+        dict(
+            zip(
+                sapiens_prior.AMINO_ACIDS,
+                sapiens_prior._log_softmax(
+                    [float(frame[aa][position]) for aa in sapiens_prior.AMINO_ACIDS]
+                ),
+                strict=True,
+            )
+        )
+        for position in range(length)
+    ]
+
+
+def _argmax_amino_acid(row):
+    return max(sapiens_prior.AMINO_ACIDS, key=lambda aa: row[aa])
+
+
+def _kl_divergence(p_log, q_log):
+    return sum(math.exp(p_log[aa]) * (p_log[aa] - q_log[aa]) for aa in sapiens_prior.AMINO_ACIDS)
+
+
+class TestThePriorMatchesAWholeChainScoring:
+    """Scores the same real heavy chain two ways outside `build_prior_rows` —
+    once over the whole in-scope chain, once over the framework-only
+    concatenation the defect used to send — and quantifies how far apart
+    they land. `emitted` must match the whole-chain scoring exactly and
+    diverge from the framework-only one: the claim this row exists for."""
+
+    def test_the_prior_matches_a_whole_chain_scoring(self, sapiens_weights_root):
+        pytest.importorskip("sapiens")
+
+        residues = _heavy_chain_index()
+        framework_residues = sorted(
+            (r for r in residues if r.region.startswith("FR")), key=lambda r: r.offset
+        )
+        # Pins the IMGT partition itself: a future re-scheme of `_CDR_LOOPS`
+        # that silently shrinks or grows the CDR set must fail here first,
+        # rather than only move the printed divergence number.
+        assert len(framework_residues) == 90
+        whole_sequence = "".join(r.wild_type for r in sorted(residues, key=lambda r: r.offset))
+        fr_only_sequence = "".join(r.wild_type for r in framework_residues)
+
+        checkpoint_dir = sapiens_prior._checkpoint_dir(sapiens_weights_root, "H")
+        tokenizer_dir = str(Path(sapiens_weights_root) / "tokenizer")
+
+        whole_rows = _log_softmax_rows(
+            sapiens_prior._predict_scores(whole_sequence, "H", checkpoint_dir, tokenizer_dir),
+            len(whole_sequence),
+        )
+        fr_only_rows = _log_softmax_rows(
+            sapiens_prior._predict_scores(fr_only_sequence, "H", checkpoint_dir, tokenizer_dir),
+            len(fr_only_sequence),
+        )
+        emitted = sapiens_prior.build_prior_rows(residues, sapiens_weights_root)
+        emitted_by_imgt = {row["imgt"]: row for row in emitted}
+
+        divergences = []
+        flips = 0
+        for position, residue in enumerate(framework_residues):
+            whole_row = whole_rows[residue.offset]
+            fr_only_row = fr_only_rows[position]
+            divergences.append(_kl_divergence(whole_row, fr_only_row))
+            if _argmax_amino_acid(whole_row) != _argmax_amino_acid(fr_only_row):
+                flips += 1
+
+            emitted_row = emitted_by_imgt[residue.imgt]
+            for aa in sapiens_prior.AMINO_ACIDS:
+                assert emitted_row[aa] == pytest.approx(whole_row[aa])
+
+        print(
+            f"prior divergence over {len(framework_residues)} framework positions: "
+            f"mean KL {statistics.mean(divergences):.4f} nats, max KL {max(divergences):.4f} nats, "
+            f"{flips} top-scoring-residue flip(s)"
+        )
+        # A whole-chain scoring that agreed everywhere with the framework-only
+        # one would mean the CDRs never moved anything — not what a checkpoint
+        # with absolute position embeddings does with a shorter input.
+        assert flips > 0
