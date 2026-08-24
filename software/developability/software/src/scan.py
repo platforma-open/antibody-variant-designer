@@ -30,7 +30,7 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
-import batch
+import antibody_batch
 import exposure
 import liability_objective
 import liability_store
@@ -277,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         return reason
 
-    return batch.run(pdb_index.read_index(args.pdb_index), one, args.out_skip)
+    return antibody_batch.run(pdb_index.read_index(args.pdb_index), one, args.out_skip)
 
 
 if __name__ == "__main__":

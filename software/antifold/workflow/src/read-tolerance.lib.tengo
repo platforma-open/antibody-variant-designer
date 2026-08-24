@@ -76,7 +76,7 @@ VRAM := "6GiB"
 /**
  * The RAM to ask for, given how many antibodies the staged structures hold.
  *
- * `batch.py` runs one antibody at a time and releases it before the next one
+ * `antibody_batch.py` runs one antibody at a time and releases it before the next one
  * starts, so the peak is BASE_RAM plus the LARGEST single structure. The average
  * stands in for the largest: a tag is measured by its total bytes and the DSL has
  * no maximum, so dividing by the antibody count keeps this term tracking how big

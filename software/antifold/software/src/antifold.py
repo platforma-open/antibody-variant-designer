@@ -41,7 +41,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-import batch
+import antibody_batch
 import pdb_index
 import residue_store
 import sapiens_prior
@@ -315,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
     # `error_reason` is passed here and nowhere else: AntiFold swallows its
     # own exceptions and exits 0, so this loop is the only place a backend
     # fault can still be attributed to the antibody that caused it.
-    return batch.run(runnable, one, args.out_skip, error_reason="backend-failed")
+    return antibody_batch.run(runnable, one, args.out_skip, error_reason="backend-failed")
 
 
 if __name__ == "__main__":

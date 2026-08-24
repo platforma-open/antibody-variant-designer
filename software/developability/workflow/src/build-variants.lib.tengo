@@ -50,7 +50,7 @@ DEFAULT_CPU := 2
 /**
  * The RAM to ask for, given how many antibodies the staged files hold.
  *
- * `batch.py` runs one antibody at a time and releases it before the next one
+ * `antibody_batch.py` runs one antibody at a time and releases it before the next one
  * starts, and every row it produces is appended rather than accumulated, so the
  * peak is BASE_RAM plus the largest single antibody. The average stands in for
  * the largest — see the same note in `index-and-scan.lib.tengo`.

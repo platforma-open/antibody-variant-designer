@@ -1,9 +1,9 @@
-"""Unit tests for `batch.py` — the loop the five entrypoints share, and the
-attribution rules that replace one-exec-per-antibody."""
+"""Unit tests for `antibody_batch.py` — the loop the three entrypoints
+share, and the attribution rules that replace one-exec-per-antibody."""
 
 import pytest
 
-import batch
+import antibody_batch
 import pdb_index
 import skip_store
 
@@ -16,7 +16,7 @@ class TestOneRowPerAttemptedClonotype:
     def test_a_passing_clonotype_gets_an_empty_reason_row(self, tmp_path):
         out_skip = tmp_path / "skip.tsv"
 
-        batch.run(_entries("a", "b"), lambda _e: "", str(out_skip))
+        antibody_batch.run(_entries("a", "b"), lambda _e: "", str(out_skip))
 
         assert skip_store.read_skips(str(out_skip)) == [("a", "", ""), ("b", "", "")]
 
@@ -26,7 +26,7 @@ class TestOneRowPerAttemptedClonotype:
         def one(entry):
             return "no-structure" if entry.clonotype_key == "b" else ""
 
-        batch.run(_entries("a", "b", "c"), one, str(out_skip))
+        antibody_batch.run(_entries("a", "b", "c"), one, str(out_skip))
 
         assert skip_store.read_skips(str(out_skip)) == [
             ("a", "", ""),
@@ -40,14 +40,14 @@ class TestOneRowPerAttemptedClonotype:
         def one(entry):
             return None if entry.clonotype_key == "a" else ""
 
-        batch.run(_entries("a", "b"), one, str(out_skip))
+        antibody_batch.run(_entries("a", "b"), one, str(out_skip))
 
         assert skip_store.read_skips(str(out_skip)) == [("b", "", "")]
 
     def test_an_empty_index_leaves_a_header_only_skip_tsv_and_exits_zero(self, tmp_path):
         out_skip = tmp_path / "skip.tsv"
 
-        rc = batch.run([], lambda _e: "", str(out_skip))
+        rc = antibody_batch.run([], lambda _e: "", str(out_skip))
 
         assert rc == 0
         assert skip_store.read_skips(str(out_skip)) == []
@@ -61,7 +61,7 @@ class TestExceptionsPropagateUnlessTheStepOptsIn:
             raise ValueError("a bug, not a bad antibody")
 
         with pytest.raises(ValueError, match="a bug"):
-            batch.run(_entries("a"), one, str(out_skip))
+            antibody_batch.run(_entries("a"), one, str(out_skip))
 
     def test_with_an_error_reason_the_failing_antibody_is_named_and_the_rest_continue(
         self, tmp_path, capsys
@@ -75,7 +75,7 @@ class TestExceptionsPropagateUnlessTheStepOptsIn:
                 raise RuntimeError("torch exploded")
             return ""
 
-        rc = batch.run(
+        rc = antibody_batch.run(
             _entries("first", "middle", "last"), one, str(out_skip), error_reason="backend-failed"
         )
 

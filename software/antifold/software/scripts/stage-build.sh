@@ -3,8 +3,8 @@
 # at — the python `root` and the docker `context`.
 #
 # It exists because `antifold.py` imports four modules that belong to the
-# developability package (`batch`, `residue_store`, `pdb_index`,
-# `tolerance_store`, and `skip_store` through `batch`), while the python
+# developability package (`antibody_batch`, `residue_store`, `pdb_index`,
+# `tolerance_store`, and `skip_store` through `antibody_batch`), while the python
 # artifact schema takes a single `root` directory and offers no second root,
 # no include list, and no artifact-to-artifact dependency. One directory must
 # therefore hold source from both packages, and a copy is the only way to

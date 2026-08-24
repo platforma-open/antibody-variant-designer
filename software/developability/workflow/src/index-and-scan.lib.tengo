@@ -68,7 +68,7 @@ DEFAULT_CPU := 2
  *
  * The two terms have different shapes because the two inputs live for different
  * lengths of time. `_load_confidence_tsv` reads the whole table before the loop
- * and holds it to the end, so the confidence term is the TOTAL. `batch.py` runs
+ * and holds it to the end, so the confidence term is the TOTAL. `antibody_batch.py` runs
  * one antibody at a time and releases it before the next one starts, so a
  * structure only ever costs the largest one, and the average stands in for it: a
  * tag is measured by its total bytes and the DSL has no maximum, so dividing by

@@ -1,5 +1,5 @@
-"""The loop every one of the five entrypoints wraps its per-antibody
-function in.
+"""The loop each of the three entrypoints runs its per-antibody function
+under.
 
 One exec now covers the whole dataset, so this is where per-clonotype
 attribution lives: each iteration contributes at most one skip row, and the
@@ -13,7 +13,7 @@ iterations would have to raise the RAM those recipes request.
 
 A `process_one` returning `None` means the antibody's inputs are absent
 because an earlier step already named its reason. No row is written for it,
-so summing the five skip files counts it once rather than twice.
+so summing the three skip files counts it once rather than twice.
 """
 
 import sys

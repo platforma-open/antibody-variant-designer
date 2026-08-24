@@ -13,7 +13,7 @@ from a file per invocation to a row per antibody.
 `detail` is free text, empty for every reason except `backend-failed`: the
 six other reasons are named, deterministic conditions the operator-facing
 docs already explain in full, so a per-row repeat of that explanation would
-only drift from it. `backend-failed` is `batch.run`'s catch-all for an
+only drift from it. `backend-failed` is `antibody_batch.run`'s catch-all for an
 exception `process_one` raised, and which exception varies row to row — the
 caught message is the only thing that says which.
 """
