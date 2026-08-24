@@ -18,6 +18,8 @@ export type BlockData = {
   cdrConfThresh: number;
   variantsPerParent: number;
   candidateResiduesPerPosition: number;
+  wStruct: number;
+  wObj: number;
   lowToleranceFloor: number;
   epistasisRescoreTopK: number;
   /** Results-table sort / filter / column state, one per page. */
@@ -51,6 +53,8 @@ export type BlockArgs = {
   cdrConfThresh: number;
   variantsPerParent: number;
   candidateResiduesPerPosition: number;
+  wStruct: number;
+  wObj: number;
   lowToleranceFloor: number;
   epistasisRescoreTopK: number;
   indexAndScanCpu?: number;

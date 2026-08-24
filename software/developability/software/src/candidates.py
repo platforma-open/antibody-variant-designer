@@ -32,6 +32,8 @@ import objectives
 
 DEFAULT_MAX_EDITS_PER_VARIANT = 5
 DEFAULT_CANDIDATE_RESIDUES_PER_POSITION = 3
+DEFAULT_W_STRUCT = 1.0
+DEFAULT_W_OBJ = 1.0
 
 
 @dataclass(frozen=True)
@@ -74,18 +76,35 @@ class Candidate:
     changed_positions: str
 
 
-def _combined_scores(residue, log_probs: dict[str, float], prior: dict | None) -> dict[str, float]:
-    """The structural log-probability row, elementwise-summed with the
-    objective's position prior at this residue when one is offered — an
-    uncovered position, or an objective with no prior at all, falls back
-    to the log-probability row alone."""
+def _combined_scores(
+    residue,
+    log_probs: dict[str, float],
+    prior: dict | None,
+    w_struct: float,
+    w_obj: float,
+) -> dict[str, float]:
+    """The structural log-probability row and the objective's position
+    prior at this residue, each scaled by its own weight before they
+    combine — an uncovered position, or an objective with no prior at
+    all, still takes the `w_struct` scaling alone, so the weight means
+    the same thing on every path."""
     prior_row = None if prior is None else prior.get((residue.chain, residue.imgt))
     if prior_row is None:
-        return log_probs
-    return {aa: value + prior_row.get(aa, 0.0) for aa, value in log_probs.items()}
+        return {aa: w_struct * value for aa, value in log_probs.items()}
+    return {
+        aa: w_struct * value + w_obj * prior_row.get(aa, 0.0)
+        for aa, value in log_probs.items()
+    }
 
 
-def _top_substitutions(residue, tolerance_lookup: dict, k: int, prior: dict | None) -> list[str]:
+def _top_substitutions(
+    residue,
+    tolerance_lookup: dict,
+    k: int,
+    prior: dict | None,
+    w_struct: float,
+    w_obj: float,
+) -> list[str]:
     """Up to `k` amino acids at `residue`'s position, ranked by the
     combined score, wild type excluded — substituting a position to its
     own residue would neither change nor clear anything, so it is never a
@@ -93,7 +112,7 @@ def _top_substitutions(residue, tolerance_lookup: dict, k: int, prior: dict | No
     row = tolerance_lookup.get((residue.chain, residue.imgt))
     if row is None:
         return []
-    scores = _combined_scores(residue, row["logProbs"], prior)
+    scores = _combined_scores(residue, row["logProbs"], prior, w_struct, w_obj)
     ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
     return [aa for aa, _ in ranked if aa != residue.wild_type][:k]
 
@@ -135,6 +154,8 @@ def build_candidates(
     objective: objectives.Objective,
     max_edits_per_variant: int,
     candidate_residues_per_position: int,
+    w_struct: float,
+    w_obj: float,
 ) -> list[Candidate]:
     """Every candidate whose objective goal check passed, one liability at
     a time. Every position in a liability's site is substituted together,
@@ -154,7 +175,14 @@ def build_candidates(
         if len(site) > max_edits_per_variant:
             continue
         per_position_options = [
-            _top_substitutions(residue, tolerance_lookup, candidate_residues_per_position, prior)
+            _top_substitutions(
+                residue,
+                tolerance_lookup,
+                candidate_residues_per_position,
+                prior,
+                w_struct,
+                w_obj,
+            )
             for residue in site
         ]
         if any(len(options) == 0 for options in per_position_options):

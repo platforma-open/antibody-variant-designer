@@ -82,6 +82,7 @@ class TestBuildCandidatesRescanGate:
             [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=3,
+            w_struct=1.0, w_obj=1.0,
         )
 
         survivors = {tuple(e.to for e in c.edits) for c in candidates_out}
@@ -94,6 +95,7 @@ class TestBuildCandidatesRescanGate:
             [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=3,
+            w_struct=1.0, w_obj=1.0,
         )
 
         survivors = {tuple(e.to for e in c.edits) for c in candidates_out}
@@ -106,6 +108,7 @@ class TestBuildCandidatesRescanGate:
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
+                w_struct=1.0, w_obj=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -119,6 +122,7 @@ class TestBuildCandidatesRescanGate:
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
+                w_struct=1.0, w_obj=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -136,6 +140,7 @@ class TestBuildCandidatesRescanGate:
                 _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
+                w_struct=1.0, w_obj=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -151,6 +156,7 @@ class TestBuildCandidatesRescanGate:
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
+                w_struct=1.0, w_obj=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -164,6 +170,7 @@ class TestBuildCandidatesRescanGate:
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
+                w_struct=1.0, w_obj=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -184,7 +191,9 @@ class TestTopSubstitutionsRanksByLogProbability:
         residue = _residue("H", 6, "N", imgt="107")
         lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=3.0)}
 
-        assert candidates._top_substitutions(residue, lookup, k=2, prior=None) == ["D", "Q"]
+        assert candidates._top_substitutions(
+            residue, lookup, k=2, prior=None, w_struct=1.0, w_obj=1.0
+        ) == ["D", "Q"]
 
     def test_a_prior_favourite_that_disagrees_with_the_log_row_wins_first(self):
         # The prior adds an elementwise term over the amino-acid order
@@ -195,16 +204,79 @@ class TestTopSubstitutionsRanksByLogProbability:
         lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=3.0)}
         prior = {("H", "107"): {"E": 10.0}}
 
-        assert candidates._top_substitutions(residue, lookup, k=2, prior=prior) == ["E", "D"]
+        assert candidates._top_substitutions(
+            residue, lookup, k=2, prior=prior, w_struct=1.0, w_obj=1.0
+        ) == ["E", "D"]
 
     def test_a_prior_with_no_row_for_this_position_falls_back_to_prior_none(self):
         residue = _residue("H", 6, "N", imgt="107")
         lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=3.0)}
         prior = {("H", "999"): {"E": 10.0}}  # a different position — uncovered here
 
-        assert candidates._top_substitutions(residue, lookup, k=2, prior=prior) == (
-            candidates._top_substitutions(residue, lookup, k=2, prior=None)
+        assert candidates._top_substitutions(
+            residue, lookup, k=2, prior=prior, w_struct=1.0, w_obj=1.0
+        ) == (
+            candidates._top_substitutions(residue, lookup, k=2, prior=None, w_struct=1.0, w_obj=1.0)
         )
+
+
+class TestCombinedScoresWeighting:
+    def test_default_weights_equal_the_plain_elementwise_sum(self):
+        residue = _residue("H", 6, "N", imgt="107")
+        log_probs = _row(["D", "Q", "A"], wild_type="N")["logProbs"]
+        prior = {("H", "107"): {"D": 0.4, "Q": 0.2}}
+
+        weighted = candidates._combined_scores(residue, log_probs, prior, w_struct=1.0, w_obj=1.0)
+
+        prior_row = prior[("H", "107")]
+        unweighted = {aa: value + prior_row.get(aa, 0.0) for aa, value in log_probs.items()}
+        assert weighted == unweighted
+
+    def test_a_high_objective_weight_lets_the_prior_favourite_win_where_default_does_not(self):
+        # "E" scores far below every log-probability favourite on its own;
+        # a modest prior term is not enough to overcome that gap at
+        # `w_obj = 1.0`, but tripling it is.
+        residue = _residue("H", 6, "N", imgt="107")
+        log_probs = _row(["D", "Q", "A"], wild_type="N")["logProbs"]
+        prior = {("H", "107"): {"E": 2.0}}
+
+        at_default = candidates._combined_scores(residue, log_probs, prior, w_struct=1.0, w_obj=1.0)
+        at_triple = candidates._combined_scores(residue, log_probs, prior, w_struct=1.0, w_obj=3.0)
+
+        assert max(at_default, key=lambda aa: (at_default[aa], aa)) != "E"
+        assert max(at_triple, key=lambda aa: (at_triple[aa], aa)) == "E"
+
+    def test_a_zero_objective_weight_switches_the_prior_off_cleanly(self):
+        residue = _residue("H", 6, "N", imgt="107")
+        log_probs = _row(["D", "Q", "A"], wild_type="N")["logProbs"]
+        prior = {("H", "107"): {"D": 5.0, "Q": -5.0}}
+
+        with_prior_zeroed = candidates._combined_scores(
+            residue, log_probs, prior, w_struct=1.0, w_obj=0.0
+        )
+        with_no_prior_at_all = candidates._combined_scores(
+            residue, log_probs, None, w_struct=1.0, w_obj=0.0
+        )
+        assert with_prior_zeroed == with_no_prior_at_all
+
+    def test_an_uncovered_position_still_takes_the_structural_weight_scaling(self):
+        residue = _residue("H", 6, "N", imgt="107")
+        log_probs = _row(["D", "Q", "A"], wild_type="N")["logProbs"]
+        prior = {("H", "999"): {"E": 10.0}}  # a different position — uncovered here
+
+        scores = candidates._combined_scores(residue, log_probs, prior, w_struct=2.5, w_obj=1.0)
+
+        assert scores == {aa: 2.5 * value for aa, value in log_probs.items()}
+
+    def test_zero_structural_weight_with_no_prior_collapses_to_the_shared_alphabetical_order(self):
+        residue = _residue("H", 6, "N", imgt="107")
+        lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N")}
+
+        substitutions = candidates._top_substitutions(
+            residue, lookup, k=5, prior=None, w_struct=0.0, w_obj=1.0
+        )
+
+        assert substitutions == [aa for aa in tolerance_store.AMINO_ACIDS if aa != "N"][:5]
 
 
 class TestBuildCandidatesEditBudget:
@@ -213,6 +285,7 @@ class TestBuildCandidatesEditBudget:
             [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             max_edits_per_variant=1, candidate_residues_per_position=3,
+            w_struct=1.0, w_obj=1.0,
         )
 
         assert candidates_out == []
@@ -224,6 +297,7 @@ class TestBuildCandidatesEditBudget:
             [_triaged(_ng_site())], lookup, _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=3,
+            w_struct=1.0, w_obj=1.0,
         )
 
         assert candidates_out == []
@@ -257,6 +331,7 @@ class TestBuildCandidatesRiskLevelOrder:
             [low, high, medium], lookup, [], TAXONOMY,
             objective=_OBJECTIVE,
             max_edits_per_variant=5, candidate_residues_per_position=1,
+            w_struct=1.0, w_obj=1.0,
         )
 
         assert [c.target_definition_id for c in candidates_out] == [

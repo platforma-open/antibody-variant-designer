@@ -47,6 +47,8 @@ self.validateInputs({
 		"__options__,closed": "",
 		maxEditsPerVariant: "number",
 		candidateResiduesPerPosition: "number",
+		wStruct: "number",
+		wObj: "number",
 		variantsPerParent: "number",
 		lowToleranceFloor: "number",
 		epistasisRescoreTopK: "number"

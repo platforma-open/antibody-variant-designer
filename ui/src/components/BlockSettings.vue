@@ -182,6 +182,31 @@ function toggleFixability(value: string) {
             it. Default 3.
           </template>
         </PlNumberField>
+        <PlNumberField
+          v-model="app.model.data.wStruct"
+          label="Fold tolerance weight"
+          :minValue="0"
+          :maxValue="5"
+          :step="0.1"
+        >
+          <template #tooltip>
+            How much a position's fold tolerance counts when ranking the substitutions offered
+            there. 0 ignores the fold entirely; higher favours residues the structure accepts.
+            Default 1.
+          </template>
+        </PlNumberField>
+        <PlNumberField
+          v-model="app.model.data.wObj"
+          label="Objective prior weight"
+          :minValue="0"
+          :maxValue="5"
+          :step="0.1"
+        >
+          <template #tooltip>
+            How much the objective's own per-residue preference counts against the fold tolerance. 0
+            ignores it; higher favours the residues the objective prefers. Default 1.
+          </template>
+        </PlNumberField>
       </div>
     </PlAccordionSection>
 

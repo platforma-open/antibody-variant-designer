@@ -115,6 +115,8 @@ _buildVariants := func(pdbIndex, triaged, tolerance, residues, definitions, args
 		params: {
 			maxEditsPerVariant: args.maxEditsPerVariant,
 			candidateResiduesPerPosition: args.candidateResiduesPerPosition,
+			wStruct: args.wStruct,
+			wObj: args.wObj,
 			variantsPerParent: args.variantsPerParent,
 			lowToleranceFloor: args.lowToleranceFloor,
 			epistasisRescoreTopK: args.epistasisRescoreTopK

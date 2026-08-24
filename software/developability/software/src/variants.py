@@ -46,6 +46,8 @@ def process_one(
     objective: objectives.Objective,
     max_edits_per_variant: int,
     candidate_residues_per_position: int,
+    w_struct: float,
+    w_obj: float,
     variants_per_parent: int,
     low_tolerance_floor: float,
     epistasis_rescore_top_k: int,
@@ -63,6 +65,8 @@ def process_one(
         objective,
         max_edits_per_variant,
         candidate_residues_per_position,
+        w_struct,
+        w_obj,
     )
     if not cleared:
         return "no-candidate-cleared-motif", []
@@ -103,6 +107,18 @@ def main(argv: list[str] | None = None) -> int:
         "--candidate-residues-per-position",
         type=int,
         default=candidates.DEFAULT_CANDIDATE_RESIDUES_PER_POSITION,
+    )
+    parser.add_argument(
+        "--w-struct",
+        type=float,
+        default=candidates.DEFAULT_W_STRUCT,
+        help="weight on the structural tolerance term of the per-residue score",
+    )
+    parser.add_argument(
+        "--w-obj",
+        type=float,
+        default=candidates.DEFAULT_W_OBJ,
+        help="weight on the objective's position-prior term of the per-residue score",
     )
     parser.add_argument(
         "--variants-per-parent", type=int, default=ranking.DEFAULT_VARIANTS_PER_PARENT
@@ -147,6 +163,8 @@ def main(argv: list[str] | None = None) -> int:
             liability_objective.OBJECTIVE,
             args.max_edits_per_variant,
             args.candidate_residues_per_position,
+            args.w_struct,
+            args.w_obj,
             args.variants_per_parent,
             args.low_tolerance_floor,
             args.epistasis_rescore_top_k,

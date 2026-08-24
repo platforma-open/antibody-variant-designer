@@ -152,6 +152,16 @@ class TestGateAndRankInOnePass:
         assert len(written) == 1
         assert [v.rank for _, _, v in written] == [1]
 
+    def test_the_weight_flags_default_to_one(self, batch):
+        # The entrypoint's own `default=` carries the same `1.0` the block
+        # arg does — passing it explicitly must not move a single byte.
+        _stage(batch, "clone-1")
+
+        _, omitted = _run(batch)
+        _, explicit = _run(batch, ["--w-struct", "1.0", "--w-obj", "1.0"])
+
+        assert explicit == omitted
+
 
 class TestDatasetWideVariantsTsv:
     def test_one_file_holds_every_parent_with_rank_global_across_the_run(self, batch):

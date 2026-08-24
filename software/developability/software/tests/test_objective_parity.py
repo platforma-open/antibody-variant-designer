@@ -93,7 +93,7 @@ def _run_scan(batch):
     return definitions, residues_dir, triaged_dir, out_liabilities, out_scan_skip
 
 
-def _run_variants(batch, definitions, residues_dir, triaged_dir):
+def _run_variants(batch, definitions, residues_dir, triaged_dir, extra_args=None):
     tolerance_dir = batch.dir("tolerance")
     _stage_tolerance(tolerance_dir, residues_dir, "clone-1")
     _stage_tolerance(tolerance_dir, residues_dir, "clone-2")
@@ -110,6 +110,7 @@ def _run_variants(batch, definitions, residues_dir, triaged_dir):
             "--out-variants", out_variants,
             "--out-skip", out_variants_skip,
         ]
+        + (extra_args or [])
     )
     assert rc == 0
     return out_variants, out_variants_skip
@@ -161,3 +162,43 @@ class TestObjectiveSeamParity:
         rows = _rows_of(out_variants)
         assert len(rows) > 0
         assert {row["objective"] for row in rows} == {"liability"}
+
+
+class TestWeightedCombinationAtTheEntrypoint:
+    def test_explicit_default_weights_match_omitted_weights(self, batch):
+        definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
+
+        omitted, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
+        omitted_bytes = Path(omitted).read_bytes()
+
+        explicit, _ = _run_variants(
+            batch, definitions, residues_dir, triaged_dir,
+            extra_args=["--w-struct", "1.0", "--w-obj", "1.0"],
+        )
+        assert Path(explicit).read_bytes() == omitted_bytes
+
+    def test_raising_only_the_objective_weight_is_inert(self, batch):
+        # The only selectable objective offers no prior, so `w_obj` scales
+        # nothing yet — moving it changes no byte of output today.
+        definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
+
+        default, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
+        default_bytes = Path(default).read_bytes()
+
+        raised, _ = _run_variants(
+            batch, definitions, residues_dir, triaged_dir, extra_args=["--w-obj", "5.0"]
+        )
+        assert Path(raised).read_bytes() == default_bytes
+
+    def test_a_zero_structural_weight_changes_the_proposed_substitutions(self, batch):
+        definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
+
+        default, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
+        default_bytes = Path(default).read_bytes()
+        default_changed = {row["changedPositions"] for row in _rows_of(default)}
+
+        zeroed, _ = _run_variants(
+            batch, definitions, residues_dir, triaged_dir, extra_args=["--w-struct", "0.0"]
+        )
+        assert Path(zeroed).read_bytes() != default_bytes
+        assert {row["changedPositions"] for row in _rows_of(zeroed)} != default_changed
