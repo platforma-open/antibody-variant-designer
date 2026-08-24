@@ -1,8 +1,8 @@
 """Residue-index construction from a PDB's own ATOM records.
 
-A module, not an entrypoint: `scan.py` runs this as its index phase and then
-scans in the same exec, because the two share one deployment unit and the
-index is read by nothing between them.
+`index_and_scan.py` runs this as its index phase and then scans in the same
+exec, because the two share one deployment unit and the index is read by
+nothing between them.
 
 Parses `(chain, resSeq, insertionCode, resName, bFactor)` straight off the
 ATOM records, builds the `(chain, offset)` spine from the order those

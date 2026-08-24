@@ -2,7 +2,7 @@
 # Assemble `build/`, the one directory both of this package's artifacts point
 # at — the python `root` and the docker `context`.
 #
-# It exists because `antifold.py` imports four modules that belong to the
+# It exists because `read_tolerance.py` imports four modules that belong to the
 # developability package (`antibody_batch`, `residue_store`, `pdb_index`,
 # `tolerance_store`, and `skip_store` through `antibody_batch`), while the python
 # artifact schema takes a single `root` directory and offers no second root,
@@ -11,7 +11,7 @@
 # build it.
 #
 # The whole sibling source tree is copied rather than a named list of five
-# modules: a list drifts the moment `antifold.py` imports one more module, and
+# modules: a list drifts the moment `read_tolerance.py` imports one more module, and
 # the light source is a few tens of KiB against a torch install of about 2 GiB.
 #
 # `dependencies` in package.json (not `devDependencies`) plus turbo's

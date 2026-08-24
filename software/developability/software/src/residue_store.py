@@ -8,7 +8,7 @@ exact same shape, so a field added on one side is never silently ignored,
 or missing, on the other.
 
 This module holds `residues.json`, written by `structure.py` and read
-independently by `scan.py` and `antifold.py`. The other three boundary
+independently by `index_and_scan.py` and `read_tolerance.py`. The other three boundary
 files live in their own modules: `triaged.json` in `liability_store.py`,
 `tolerance.tsv` in `tolerance_store.py`, `candidates.json` in
 `candidate_store.py`.

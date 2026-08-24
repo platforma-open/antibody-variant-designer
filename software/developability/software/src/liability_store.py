@@ -1,4 +1,4 @@
-"""Read/write helpers for the two files `scan.py` writes.
+"""Read/write helpers for the two files `index_and_scan.py` writes.
 
 `triaged.json` carries only the liabilities `candidates.py` may act on —
 verdict `"exposed"` — since that is the exact `actionable` set this file

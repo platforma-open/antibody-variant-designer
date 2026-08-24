@@ -3,7 +3,7 @@
 The taxonomy package writes one JSON **object** keyed by `schemaVersion` /
 `liabilities` / `fixabilityWeights`, never the flat list `motifs.py` and
 `cysteine.py` iterate. Both entrypoints that scan against the taxonomy —
-`scan.py` and `variants.py` — must therefore unwrap it the same way, and the
+`index_and_scan.py` and `build_variants.py` — must therefore unwrap it the same way, and the
 re-scan gate is only a gate if it reads the identical detector set the first
 scan did.
 

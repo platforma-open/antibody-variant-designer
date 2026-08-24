@@ -63,7 +63,7 @@ e2e = [
 [tool.ruff]
 extend = "../../ruff.toml"
 # `../../developability/software/src` is here for the same reason it is on `pythonpath`
-# below: `antifold.py` imports that package's stores as bare names, and they
+# below: `read_tolerance.py` imports that package's stores as bare names, and they
 # must sort as first-party here exactly as they do there.
 src = ["src", "../../developability/software/src", "tests"]
 # Vendored third-party source (BSD 3-Clause, commit 789d467) — ours to run,
@@ -72,7 +72,7 @@ extend-exclude = ["src/vendor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `antifold.py` imports the developability package's stores at module level, so
+# `read_tolerance.py` imports the developability package's stores at module level, so
 # this package's own source is not enough to load it.
 pythonpath = ["src", "../../developability/software/src", "tests"]
 markers = [

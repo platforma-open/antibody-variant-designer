@@ -1,17 +1,17 @@
-"""Unit tests for `variants.py` — the fused gate-then-rank entrypoint, and
+"""Unit tests for `build_variants.py` — the fused gate-then-rank entrypoint, and
 the dataset-wide `variants.tsv` it writes."""
 
 from pathlib import Path
 
 import pytest
 
+import build_variants
 import liability_store
 import residue_store
 import skip_store
 import tolerance_store
 import triage
 import variant_store
-import variants
 
 TAXONOMY = [
     {"id": "deamidation_ng", "name": "Deamidation (N[GS])", "liabilityType": "deamidation",
@@ -95,7 +95,7 @@ def _run(batch, extra_args=None):
     out_variants = batch.path("variants.tsv")
     out_skip = batch.path("skip.tsv")
 
-    rc = variants.main(
+    rc = build_variants.main(
         [
             "--triaged-dir", batch.dir("triaged"),
             "--tolerance-dir", batch.dir("tolerance"),
@@ -246,7 +246,7 @@ class TestMainRequiresTheTaxonomy:
         missing = batch.path("definitions.json")
 
         with pytest.raises(SystemExit, match=missing):
-            variants.main(
+            build_variants.main(
                 [
                     "--triaged-dir", batch.dir("triaged"),
                     "--tolerance-dir", batch.dir("tolerance"),

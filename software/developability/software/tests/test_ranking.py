@@ -1,6 +1,6 @@
 """Unit tests for `ranking.py` — banding, sequence rendering and the
 rank/truncate/epistasis-rescore pass, as a module. Its CLI lives in
-`variants.py`, tested in `test_variants.py`."""
+`build_variants.py`, tested in `test_build_variants.py`."""
 
 
 import pytest

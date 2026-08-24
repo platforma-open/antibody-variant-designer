@@ -1,4 +1,4 @@
-"""End-to-end tests for the humanization objective through `variants.main` —
+"""End-to-end tests for the humanization objective through `build_variants.main` —
 the exact command `build-variants` invokes — against the real `promb`
 measurement and a real staged prior TSV. Nothing here is stubbed:
 `humanness.identity` runs for real against the bundled `human-oas`
@@ -8,13 +8,13 @@ uninformative) TSV file.
 
 from pathlib import Path
 
+import build_variants
 import liability_store
 import residue_store
 import skip_store
 import tolerance_store
 import triage
 import variant_store
-import variants
 
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
 
@@ -116,7 +116,9 @@ def _stage(batch, clonotype_key, offset, favored_aa):
         [_steered_tolerance_row(site_residue, favored_aa)],
     )
     residue_store.write_residues(str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues)
-    Path(batch.dir("tolerance"), f"{entry.stem}{variants.PRIOR_SUFFIX}").write_text("chain\timgt\n")
+    Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}").write_text(
+        "chain\timgt\n"
+    )
     return entry
 
 
@@ -139,7 +141,7 @@ def _run(batch, objective=None, extra_args=None):
     ]
     if objective is not None:
         argv += ["--objective", objective]
-    rc = variants.main(argv + (extra_args or []))
+    rc = build_variants.main(argv + (extra_args or []))
 
     assert rc == 0
     return skip_store.read_skips(out_skip), variant_store.read_variants_tsv(out_variants)

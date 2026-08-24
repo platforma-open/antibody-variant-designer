@@ -1,4 +1,4 @@
-"""Unit tests for `antifold.py`.
+"""Unit tests for `read_tolerance.py`.
 
 Every case here avoids torch and the vendored AntiFold package: `pick_chains`
 and `build_tolerance_rows` are plain-Python functions over `residue_store`
@@ -15,8 +15,8 @@ import math
 import socket
 from pathlib import Path
 
-import antifold
 import pytest
+import read_tolerance
 import sapiens_prior
 
 import liability_store
@@ -62,14 +62,14 @@ class TestPickChains:
     def test_h_and_l_roles_give_paired_mode(self):
         residues = [_residue("H", 0, role="H"), _residue("L", 0, role="L")]
 
-        h_chain, l_chain, nanobody_mode = antifold.pick_chains(residues)
+        h_chain, l_chain, nanobody_mode = read_tolerance.pick_chains(residues)
 
         assert (h_chain, l_chain, nanobody_mode) == ("H", "L", False)
 
     def test_h_role_alone_gives_nanobody_mode(self):
         residues = [_residue("H", 0, role="H"), _residue("X", 0, role=None)]
 
-        h_chain, l_chain, nanobody_mode = antifold.pick_chains(residues)
+        h_chain, l_chain, nanobody_mode = read_tolerance.pick_chains(residues)
 
         assert (h_chain, l_chain, nanobody_mode) == ("H", None, True)
 
@@ -78,7 +78,7 @@ class TestPickChains:
         # never be picked ahead of the one role-bearing chain.
         residues = [_residue("A", 0, role=None), _residue("H", 0, role="H")]
 
-        h_chain, _, _ = antifold.pick_chains(residues)
+        h_chain, _, _ = read_tolerance.pick_chains(residues)
 
         assert h_chain == "H"
 
@@ -86,17 +86,17 @@ class TestPickChains:
         residues = [_residue("A", 0, role=None)]
 
         with pytest.raises(ValueError, match="H role"):
-            antifold.pick_chains(residues)
+            read_tolerance.pick_chains(residues)
 
 
 class TestLogSoftmax:
     def test_uniform_logits_give_uniform_log_probs(self):
-        log_probs = antifold._log_softmax([0.0] * 20)
+        log_probs = read_tolerance._log_softmax([0.0] * 20)
 
         assert all(math.isclose(p, math.log(1 / 20), abs_tol=1e-9) for p in log_probs)
 
     def test_result_exponentiates_to_a_distribution_summing_to_one(self):
-        log_probs = antifold._log_softmax([1.0, 2.0, -3.0, 0.5])
+        log_probs = read_tolerance._log_softmax([1.0, 2.0, -3.0, 0.5])
 
         assert math.isclose(sum(math.exp(p) for p in log_probs), 1.0, abs_tol=1e-9)
 
@@ -106,7 +106,7 @@ class TestBuildToleranceRows:
         residues = [_residue("H", 0, imgt="1", role="H")]
         logits_rows = [_logits_row("H", "1", perplexity=7.5)]
 
-        [row] = antifold.build_tolerance_rows(residues, logits_rows)
+        [row] = read_tolerance.build_tolerance_rows(residues, logits_rows)
 
         assert row["perplexity"] == 7.5
 
@@ -114,7 +114,7 @@ class TestBuildToleranceRows:
         residues = [_residue("H", 0, imgt="1", role="H")]
         logits_rows = [_logits_row("H", "1", value=0.0)]
 
-        [row] = antifold.build_tolerance_rows(residues, logits_rows)
+        [row] = read_tolerance.build_tolerance_rows(residues, logits_rows)
 
         # A uniform raw-logit row must not survive as literal 0.0s — every
         # amino-acid column has to carry the same log(1/20), not the input.
@@ -125,7 +125,7 @@ class TestBuildToleranceRows:
         logits_rows = [_logits_row("H", "1")]  # imgt "2" never comes back
 
         with pytest.raises(ValueError, match="1 residue"):
-            antifold.build_tolerance_rows(residues, logits_rows)
+            read_tolerance.build_tolerance_rows(residues, logits_rows)
 
     def test_a_chain_with_no_role_is_never_required_to_join(self):
         # An antigen chain is fed to neither AntiFold nor this join, so its
@@ -133,7 +133,7 @@ class TestBuildToleranceRows:
         residues = [_residue("H", 0, imgt="1", role="H"), _residue("X", 0, imgt="1", role=None)]
         logits_rows = [_logits_row("H", "1")]
 
-        rows = antifold.build_tolerance_rows(residues, logits_rows)
+        rows = read_tolerance.build_tolerance_rows(residues, logits_rows)
 
         assert len(rows) == 1
 
@@ -147,7 +147,7 @@ class TestPdbsFrame:
     def test_a_nanobody_still_gets_an_lchain_column(self):
         pd = pytest.importorskip("pandas")
 
-        df = antifold._pdbs_frame("clone-1", "H", None)
+        df = read_tolerance._pdbs_frame("clone-1", "H", None)
 
         assert set(df.columns) == {"pdb", "Hchain", "Lchain"}
         assert pd.isna(df.loc[0, "Lchain"])
@@ -155,7 +155,7 @@ class TestPdbsFrame:
     def test_a_paired_antibody_carries_both_chain_letters(self):
         pytest.importorskip("pandas")
 
-        df = antifold._pdbs_frame("clone-1", "H", "L")
+        df = read_tolerance._pdbs_frame("clone-1", "H", "L")
 
         assert (df.loc[0, "Hchain"], df.loc[0, "Lchain"]) == ("H", "L")
 
@@ -164,14 +164,14 @@ class TestBlockNetwork:
     def test_opening_a_socket_inside_the_guard_raises(self):
         with (
             pytest.raises(RuntimeError, match="network access is disabled"),
-            antifold._block_network(),
+            read_tolerance._block_network(),
         ):
             socket.socket()
 
     def test_the_guard_restores_the_real_socket_class_on_exit(self):
         original = socket.socket
 
-        with antifold._block_network():
+        with read_tolerance._block_network():
             pass
 
         assert socket.socket is original
@@ -179,7 +179,7 @@ class TestBlockNetwork:
     def test_the_guard_restores_the_real_socket_class_even_after_a_raise(self):
         original = socket.socket
 
-        with pytest.raises(ValueError, match="boom"), antifold._block_network():
+        with pytest.raises(ValueError, match="boom"), read_tolerance._block_network():
             raise ValueError("boom")
 
         assert socket.socket is original
@@ -227,7 +227,7 @@ def _run(batch, weights):
     out_dir = batch.dir("tolerance")
     out_skip = batch.path("skip.tsv")
 
-    rc = antifold.main(
+    rc = read_tolerance.main(
         [
             "--pdb-dir", str(batch.pdb_dir),
             "--residues-dir", batch.dir("residues"),
@@ -249,13 +249,13 @@ class TestMissingWeightsRaisesBeforeAnyModelCall:
         def _fail_if_called(*_args, **_kwargs):
             raise AssertionError("the model must never be called when --weights is missing")
 
-        monkeypatch.setattr(antifold, "load_model", _fail_if_called)
-        monkeypatch.setattr(antifold, "_run_model", _fail_if_called)
+        monkeypatch.setattr(read_tolerance, "load_model", _fail_if_called)
+        monkeypatch.setattr(read_tolerance, "_run_model", _fail_if_called)
         _stage(batch, "clone-1")
         missing_weights = str(Path(batch.root, "absent", "model.pt"))
 
         with pytest.raises(SystemExit, match=missing_weights):
-            antifold.main(
+            read_tolerance.main(
                 [
                     "--pdb-dir", str(batch.pdb_dir),
                     "--residues-dir", batch.dir("residues"),
@@ -287,8 +287,8 @@ class TestMainWiresTheJoinAndWritesTheTsv:
             )
             return [_logits_row("H", "1", perplexity=4.2)]
 
-        monkeypatch.setattr(antifold, "load_model", lambda _w: "loaded-model")
-        monkeypatch.setattr(antifold, "_run_model", _fake_run_model)
+        monkeypatch.setattr(read_tolerance, "load_model", lambda _w: "loaded-model")
+        monkeypatch.setattr(read_tolerance, "_run_model", _fake_run_model)
 
         skips, out_dir = _run(batch, _weights(batch))
 
@@ -317,10 +317,10 @@ class TestBatchCli:
         loads = []
 
         monkeypatch.setattr(
-            antifold, "load_model", lambda _w: loads.append(1) or "loaded-model"
+            read_tolerance, "load_model", lambda _w: loads.append(1) or "loaded-model"
         )
         monkeypatch.setattr(
-            antifold,
+            read_tolerance,
             "_run_model",
             lambda *_a, **_k: [_logits_row("H", "1", perplexity=4.2)],
         )
@@ -345,8 +345,8 @@ class TestBatchCli:
                 raise RuntimeError("torch exploded")
             return [_logits_row("H", "1", perplexity=4.2)]
 
-        monkeypatch.setattr(antifold, "load_model", lambda _w: "loaded-model")
-        monkeypatch.setattr(antifold, "_run_model", _fake_run_model)
+        monkeypatch.setattr(read_tolerance, "load_model", lambda _w: "loaded-model")
+        monkeypatch.setattr(read_tolerance, "_run_model", _fake_run_model)
 
         skips, out_dir = _run(batch, _weights(batch))
 
@@ -369,13 +369,13 @@ class TestBatchCli:
         batch.add("skipped-earlier", "ATOM")  # no residues file written
         seen = []
 
-        monkeypatch.setattr(antifold, "load_model", lambda _w: "loaded-model")
+        monkeypatch.setattr(read_tolerance, "load_model", lambda _w: "loaded-model")
 
         def _fake_run_model(_model, pdb_path, *_a, **_k):
             seen.append(pdb_path)
             return [_logits_row("H", "1", perplexity=4.2)]
 
-        monkeypatch.setattr(antifold, "_run_model", _fake_run_model)
+        monkeypatch.setattr(read_tolerance, "_run_model", _fake_run_model)
 
         skips, _ = _run(batch, _weights(batch))
 
@@ -392,9 +392,9 @@ class TestBatchCli:
         _stage(batch, "nothing-to-fix", triaged=False)
         seen = []
 
-        monkeypatch.setattr(antifold, "load_model", lambda _w: "loaded-model")
+        monkeypatch.setattr(read_tolerance, "load_model", lambda _w: "loaded-model")
         monkeypatch.setattr(
-            antifold,
+            read_tolerance,
             "_run_model",
             lambda _m, pdb_path, *_a, **_k: seen.append(pdb_path)
             or [_logits_row("H", "1", perplexity=4.2)],
@@ -412,7 +412,7 @@ class TestBatchCli:
         def _fail_if_called(*_args, **_kwargs):
             raise AssertionError("every antibody is gated out — the 540 MiB load buys nothing")
 
-        monkeypatch.setattr(antifold, "load_model", _fail_if_called)
+        monkeypatch.setattr(read_tolerance, "load_model", _fail_if_called)
 
         skips, _ = _run(batch, _weights(batch))
 
@@ -422,7 +422,7 @@ class TestBatchCli:
         def _fail_if_called(*_args, **_kwargs):
             raise AssertionError("nothing runnable — the 540 MiB load buys nothing")
 
-        monkeypatch.setattr(antifold, "load_model", _fail_if_called)
+        monkeypatch.setattr(read_tolerance, "load_model", _fail_if_called)
 
         skips, _ = _run(batch, _weights(batch))
 

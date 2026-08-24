@@ -1,5 +1,5 @@
 """Unit tests for `candidates.py` — the objective-driven gate, as a module. Its CLI
-lives in `variants.py`, tested in `test_variants.py`."""
+lives in `build_variants.py`, tested in `test_build_variants.py`."""
 
 
 import pytest

@@ -1,19 +1,15 @@
-"""End-to-end tests for `antifold.py` against the real vendored AntiFold
+"""End-to-end tests for `read_tolerance.py` against the real vendored AntiFold
 package. The only test file in this package, and the only one that needs the
 heavy set: run it with `uv run --extra antifold --group e2e pytest -m e2e`.
 Every other test of this module is a unit test and lives in the
 developability package's suite, which never installs torch — so this file
 skips itself whenever torch is absent.
 
-`src/antifold.py` and the vendored `src/vendor/AntiFold/antifold/` package
-share the literal name `antifold`. Our flat script wins that name whenever
-it is imported first, and then AntiFold's own internal `import
-antifold.antiscripts` resolves against the script instead of the package —
-which only bites once `_run_model` runs for real, as it does here and
-nowhere else. `_isolated_antifold_module` loads our script under a private
-name and clears any such stale binding around each test, so this file's
-result never depends on what imported `antifold` before it, and it never
-leaves a changed `sys.modules['antifold']` behind.
+`isolated_antifold_module` loads our script under a private name and clears
+every `antifold`/`antifold.*` entry around each test, so a case starts from
+a fresh import of the vendored package rather than from whatever an earlier
+case left in `sys.modules`, and leaves none of its own behind. Only
+`_run_model` imports that package for real, here and nowhere else.
 
 No real checkpoint is needed: `_load_IF1_local()` alone builds a full,
 untrained model, and every case here only checks that AntiFold's own
@@ -40,7 +36,7 @@ pytest.importorskip("torch")
 
 pytestmark = pytest.mark.e2e
 
-_SCRIPT_PATH = Path(__file__).parent.parent / "src" / "antifold.py"
+_SCRIPT_PATH = Path(__file__).parent.parent / "src" / "read_tolerance.py"
 
 # The real, tiny (4.4 MiB) Sapiens checkpoint + tokenizer TODO-11.1 already fetched, in
 # the sibling asset repo this multi-repo workspace checks out beside this one. A
@@ -54,12 +50,12 @@ _SAPIENS_WEIGHTS_ROOT = (
 
 @pytest.fixture
 def isolated_antifold_module():
-    """Load our own script under a name distinct from `antifold`, and evict
-    any `antifold`/`antifold.*` entry already in `sys.modules` — a sibling
-    test file's `import antifold` would otherwise poison the lookup our
-    script's internal `import antifold.antiscripts` performs. Restores the
-    prior state afterward so a later test file's own `import antifold` is
-    unaffected by this one having run."""
+    """Load our own script from its path, and evict any `antifold`/`antifold.*`
+    entry already in `sys.modules` — a partially imported vendored package
+    left by an earlier case would otherwise poison the lookup our script's
+    internal `import antifold.antiscripts` performs. Restores the prior state
+    afterward so a later test file's own vendored import is unaffected by
+    this one having run."""
     saved = {name: mod for name, mod in sys.modules.items() if name.split(".")[0] == "antifold"}
     for name in saved:
         del sys.modules[name]
@@ -170,7 +166,7 @@ def antifold_weights_path(tmp_path, untrained_model):
 
 
 class TestRealEntrypointWithTheHumanPrior:
-    """Enters `antifold.main(argv)` itself — the exact entrypoint the workflow
+    """Enters `read_tolerance.main(argv)` itself — the exact entrypoint the workflow
     invokes — rather than `_run_model` or `_predict_scores` directly, so this
     covers the wiring between the tolerance read and the prior read too."""
 

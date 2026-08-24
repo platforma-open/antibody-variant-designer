@@ -39,14 +39,14 @@
           "artifact": "developability",
           "cmd": [
             "python",
-            "{pkg}/scan.py"
+            "{pkg}/index_and_scan.py"
           ]
         },
         "docker": {
           "artifact": "developability-docker",
           "cmd": [
             "python",
-            "{pkg}/scan.py"
+            "{pkg}/index_and_scan.py"
           ]
         }
       },
@@ -55,14 +55,14 @@
           "artifact": "developability",
           "cmd": [
             "python",
-            "{pkg}/variants.py"
+            "{pkg}/build_variants.py"
           ]
         },
         "docker": {
           "artifact": "developability-docker",
           "cmd": [
             "python",
-            "{pkg}/variants.py"
+            "{pkg}/build_variants.py"
           ]
         }
       }

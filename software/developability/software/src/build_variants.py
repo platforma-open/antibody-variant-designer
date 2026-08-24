@@ -109,8 +109,12 @@ def main(argv: list[str] | None = None) -> int:
         description="Build candidate substitutions, re-scan each for new liabilities, and rank "
         "what survives."
     )
-    parser.add_argument("--triaged-dir", required=True, help="scan.py's --out-triaged-dir")
-    parser.add_argument("--tolerance-dir", required=True, help="antifold.py's --out-tolerance-dir")
+    parser.add_argument(
+        "--triaged-dir", required=True, help="index_and_scan.py's --out-triaged-dir"
+    )
+    parser.add_argument(
+        "--tolerance-dir", required=True, help="read_tolerance.py's --out-tolerance-dir"
+    )
     parser.add_argument("--residues-dir", required=True, help="structure.py's output directory")
     parser.add_argument("--pdb-index", required=True, help="the pdb_index")
     parser.add_argument(

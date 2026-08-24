@@ -264,7 +264,7 @@ class TestCase6HalfMab:
 
 
 class TestBoundaryFileCarriesTheRole:
-    """`chain_role` crosses the boundary file — `scan.py` and `antifold.py`
+    """`chain_role` crosses the boundary file — `index_and_scan.py` and `read_tolerance.py`
     both re-read `residues.json` and apply the same scope rule the writer
     applied."""
 

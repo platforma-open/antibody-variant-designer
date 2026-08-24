@@ -1,9 +1,9 @@
 """Ranking, binding-risk banding and sequence rendering.
 
-A module, not an entrypoint: `variants.py` calls this straight after
-`candidates.py` in one exec. Nothing here filters — every candidate reaching
-this module already cleared the re-scan gate — so this is a presentation
-pass, and its own thresholds only order and truncate.
+`build_variants.py` calls this straight after `candidates.py` in one exec.
+Nothing here filters — every candidate reaching this module already cleared
+the re-scan gate — so this is a presentation pass, and its own thresholds
+only order and truncate.
 
 There is no paratope model and no binding-affinity prediction anywhere in
 this package, so `binding_risk` is a band, not a score: a CDR edit at a
@@ -35,7 +35,7 @@ Rendering a variant's sequence needs the residue index as well as the
 edits: the wild-type residues at every unedited position are what the edits
 are applied over, and the index is the only place they are. The same index
 also derives whether the antibody is a VHH — no residue carries the `L`
-role — the same test `antifold.pick_chains` already makes, so this module
+role — the same test `read_tolerance.pick_chains` already makes, so this module
 never carries that as a boundary field.
 """
 

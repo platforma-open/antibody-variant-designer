@@ -30,7 +30,7 @@ src = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `../../antifold/software/src` carries `antifold.py`, whose unit tests live here rather
+# `../../antifold/software/src` carries `read_tolerance.py`, whose unit tests live here rather
 # than with the wrapper: they need the `batch` fixture in `tests/conftest.py`,
 # and the module keeps every torch import inside a function, so loading it
 # costs nothing this environment does not already have. The wrapper's own

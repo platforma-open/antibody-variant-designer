@@ -11,8 +11,8 @@ import socket
 from dataclasses import replace
 from pathlib import Path
 
-import antifold
 import pytest
+import read_tolerance
 import sapiens_prior
 
 import humanness
@@ -392,17 +392,17 @@ class TestNetworkGuardWrapsThePriorCall:
 
         h_l_residues = [r for r in residues if r.chain_role in ("H", "L")]
         monkeypatch.setattr(
-            antifold,
+            read_tolerance,
             "_run_model",
             lambda *_a, **_k: [
                 {"chain": r.chain, "posins": r.imgt, "perplexity": 1.0,
-                 "logits": dict.fromkeys(antifold.AMINO_ACIDS, 0.0)}
+                 "logits": dict.fromkeys(read_tolerance.AMINO_ACIDS, 0.0)}
                 for r in h_l_residues
             ],
         )
-        # `antifold.py` imports `sapiens_prior` bare, so it shares this test's
+        # `read_tolerance.py` imports `sapiens_prior` bare, so it shares this test's
         # own `sapiens_prior` module object — both patches below reach the
-        # one `antifold.process_one` calls through.
+        # one `read_tolerance.process_one` calls through.
         _lift_the_bound(monkeypatch)
 
         def _open_a_socket(*_a, **_k):
@@ -411,7 +411,7 @@ class TestNetworkGuardWrapsThePriorCall:
         monkeypatch.setattr(sapiens_prior, "_predict_scores", _open_a_socket)
 
         with pytest.raises(RuntimeError, match="network access is disabled"):
-            antifold.process_one(
+            read_tolerance.process_one(
                 "loaded-model",
                 "unused.pdb",
                 str(residues_path),

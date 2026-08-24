@@ -14,13 +14,11 @@ inside the loop and recorded as `backend-failed` against that antibody
 alone. AntiFold swallows its own exceptions and exits 0, so the loop is
 the only place such a fault can still be named after its cause.
 
-The vendored `antifold` package under `vendor/AntiFold` shares this file's
-own name, so the vendor directory is pushed to the front of `sys.path`
-right before it is imported — the interpreter's own auto-prepended script
-directory would otherwise shadow the package with this very file. That
-import, and every other torch-dependent call, is deferred inside
-`_run_model`, so loading this module for its pure functions never requires
-the heavy backend to be installed.
+The vendored `antifold` package under `vendor/AntiFold` is on no default
+path, so the vendor directory is added to `sys.path` right before it is
+imported. That import, and every other torch-dependent call, is deferred
+inside `_run_model`, so loading this module for its pure functions never
+requires the heavy backend to be installed.
 
 The checkpoint always comes from the mounted `--weights` path, never a
 download. The vendored package ships two functions that can reach the
@@ -254,11 +252,13 @@ def main(argv: list[str] | None = None) -> int:
         description="Read AntiFold's per-position tolerance for every staged antibody."
     )
     parser.add_argument("--pdb-dir", required=True)
-    parser.add_argument("--residues-dir", required=True, help="scan.py's --out-residues-dir")
+    parser.add_argument(
+        "--residues-dir", required=True, help="index_and_scan.py's --out-residues-dir"
+    )
     parser.add_argument(
         "--triaged-dir",
         required=True,
-        help="scan.py's --out-triaged-dir, read as a gate only — never opened",
+        help="index_and_scan.py's --out-triaged-dir, read as a gate only — never opened",
     )
     parser.add_argument("--pdb-index", required=True, help="the pdb_index")
     parser.add_argument("--weights", required=True, help="mounted models/model.pt")

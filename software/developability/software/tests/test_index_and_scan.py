@@ -1,4 +1,4 @@
-"""Unit tests for `scan.py`: exposure, detection and triage fused into one
+"""Unit tests for `index_and_scan.py`: exposure, detection and triage fused into one
 exec, writing both `--out-triaged` and `--out-liabilities`."""
 
 import csv
@@ -6,8 +6,8 @@ import io
 import json
 from pathlib import Path
 
+import index_and_scan
 import liability_store
-import scan
 import skip_store
 from pdb_fixtures import make_pdb, platforma_cdr_remark
 
@@ -55,7 +55,7 @@ def _run(batch, extra_args=None):
     out_liabilities = batch.path("liabilities.tsv")
     out_skip = batch.path("skip.tsv")
 
-    rc = scan.main(
+    rc = index_and_scan.main(
         [
             "--pdb-dir", str(batch.pdb_dir),
             "--pdb-index", batch.index,
@@ -97,7 +97,7 @@ def _write_keyed_tsv(path, rows):
 
 
 def _index(pdb_text, role="H", chain="H"):
-    """Run `structure.py` for real so `scan.py` reads its actual output shape."""
+    """Run `structure.py` for real so `index_and_scan.py` reads its actual output shape."""
     import structure
 
     parsed = structure.parse_pdb(pdb_text)

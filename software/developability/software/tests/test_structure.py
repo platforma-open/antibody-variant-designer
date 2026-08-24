@@ -2,7 +2,7 @@
 `(chain, offset)` residue index.
 
 The module has no CLI — it is the index phase of the `index-and-scan`
-entrypoint — so the end-to-end cases live in `test_scan.py`, and the format
+entrypoint — so the end-to-end cases live in `test_index_and_scan.py`, and the format
 cases in `test_formats.py`."""
 
 import residue_store

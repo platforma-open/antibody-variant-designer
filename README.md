@@ -45,9 +45,9 @@ failed job.
 
 | Step | Entrypoint | Does | Resources |
 |---|---|---|---|
-| 1. `index-and-scan` | `scan.py` | builds the residue index from the ATOM records, computes solvent exposure, detects every liability motif, then triages each hit into `exposed` / `buried` / `fixability-declined` with an independent low-confidence flag | `onCPU` 2 cpu / 4 GiB |
-| 2. `read-tolerance` | `antifold.py` | loads the AntiFold checkpoint once, then reads per-position log-probabilities and perplexity for every antibody that still has actionable work | `onCPU` or `onGPU` 4 cpu / 8 GiB / 6 GiB vram |
-| 3. `build-variants` | `variants.py` | proposes substitutions at editable positions, **re-scans each candidate** and discards any that fails to clear its target or introduces a new liability, then ranks what survives | `onCPU` 2 cpu / 4 GiB |
+| 1. `index-and-scan` | `index_and_scan.py` | builds the residue index from the ATOM records, computes solvent exposure, detects every liability motif, then triages each hit into `exposed` / `buried` / `fixability-declined` with an independent low-confidence flag | `onCPU` 2 cpu / 4 GiB |
+| 2. `read-tolerance` | `read_tolerance.py` | loads the AntiFold checkpoint once, then reads per-position log-probabilities and perplexity for every antibody that still has actionable work | `onCPU` or `onGPU` 4 cpu / 8 GiB / 6 GiB vram |
+| 3. `build-variants` | `build_variants.py` | proposes substitutions at editable positions, **re-scans each candidate** and discards any that fails to clear its target or introduces a new liability, then ranks what survives | `onCPU` 2 cpu / 4 GiB |
 
 ## Data Flow
 

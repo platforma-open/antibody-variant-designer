@@ -1,9 +1,8 @@
 """Candidate substitutions and the objective's goal check — the block's only real
 filter between a triaged liability and a variant.
 
-A module, not an entrypoint: `variants.py` runs this and then `ranking.py`
-in one exec, because ranking discards nothing and reads nothing this module
-did not just produce.
+`build_variants.py` runs this and then `ranking.py` in one exec, because
+ranking discards nothing and reads nothing this module did not just produce.
 
 This gate never sees the residue index or the PDB — only a triaged
 liability and the tolerance table — so a candidate's own site (the exact

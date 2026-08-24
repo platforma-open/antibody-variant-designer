@@ -12,11 +12,11 @@ import io
 import os
 from pathlib import Path
 
+import build_variants
+import index_and_scan
 import residue_store
-import scan
 import skip_store
 import tolerance_store
-import variants
 from pdb_fixtures import make_pdb, platforma_cdr_remark
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -78,7 +78,7 @@ def _run_scan(batch):
     out_liabilities = batch.path("liabilities.tsv")
     out_scan_skip = batch.path("scan-skip.tsv")
 
-    rc = scan.main(
+    rc = index_and_scan.main(
         [
             "--pdb-dir", str(batch.pdb_dir),
             "--pdb-index", batch.index,
@@ -100,7 +100,7 @@ def _run_variants(batch, definitions, residues_dir, triaged_dir, extra_args=None
     out_variants = batch.path("variants.tsv")
     out_variants_skip = batch.path("variants-skip.tsv")
 
-    rc = variants.main(
+    rc = build_variants.main(
         [
             "--triaged-dir", triaged_dir,
             "--tolerance-dir", tolerance_dir,

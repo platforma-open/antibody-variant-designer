@@ -1,4 +1,4 @@
-"""Read/write for `tolerance.tsv`, written by `antifold.py`.
+"""Read/write for `tolerance.tsv`, written by `read_tolerance.py`.
 
 One row per position AntiFold scored: `chain`, `posins` (the IMGT label,
 matching `residue_store.Residue.imgt`), `perplexity` (entropy in bits,
