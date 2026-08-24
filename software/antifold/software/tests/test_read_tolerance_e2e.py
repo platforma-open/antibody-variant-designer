@@ -295,7 +295,7 @@ class TestNanobodyReachesTheForwardPass:
 
 
 # Trastuzumab's real heavy-chain V-domain (RCSB 1N8Z chain B, V-domain part),
-# the same sequence the manual test drives `oasis_gate.identity` against.
+# the same sequence the manual test drives `humanness_gate.identity` against.
 _TRASTUZUMAB_VH = (
     "EVQLVESGGGLVQPGGSLRLSCAASGFNIKDTYIHWVRQAPGKGLEWVARIYPTNGYTRYADSVKGRFTI"
     "SADTSKNTAYLQMNSLRAEDTAVYYCSRWGGDGFYAMDYWGQGTLVTVSS"

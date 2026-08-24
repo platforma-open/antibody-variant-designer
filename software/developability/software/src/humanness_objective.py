@@ -5,8 +5,8 @@ from pathlib import Path
 
 import cysteine
 import design_objective
+import humanness_gate
 import motifs
-import oasis_gate
 
 NO_CANDIDATE_REASON = "no-candidate-raised-humanness"
 
@@ -37,8 +37,8 @@ def build(prior_path: str, residues: list) -> design_objective.Objective:
 
     def parent_identity(chain: str) -> float | None:
         if chain not in parent_by_chain:
-            sequence = oasis_gate.chain_sequence(residues, chain, [])
-            parent_by_chain[chain] = oasis_gate.identity(sequence)
+            sequence = humanness_gate.chain_sequence(residues, chain, [])
+            parent_by_chain[chain] = humanness_gate.identity(sequence)
         return parent_by_chain[chain]
 
     def score_candidate(
@@ -65,7 +65,9 @@ def build(prior_path: str, residues: list) -> design_objective.Objective:
 
         chain = next(iter(chains))
         parent = parent_identity(chain)
-        candidate = oasis_gate.identity(oasis_gate.chain_sequence(residues, chain, mutated_site))
+        candidate = humanness_gate.identity(
+            humanness_gate.chain_sequence(residues, chain, mutated_site)
+        )
         if parent is None or candidate is None:
             return design_objective.GoalCheck(meets_goal=False, score=0.0)
 
