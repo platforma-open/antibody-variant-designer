@@ -1,16 +1,9 @@
 """Total, non-destructive motif detection.
 
-Finds every regex match of every motif-bearing taxonomy entry over each
-chain's own sequence. This module has no exposure or confidence input at
-all, so it cannot suppress a buried match the way a scoring step might —
-that separation is deliberate: whether a hit is worth acting on is a later
-question (`triage.py`), never one this module answers by omission.
-
-Only entries whose `motif` is a regex string qualify. The two cysteine
-entries carry `motif: None` (`cysteine.py` evaluates those by counting, not
-matching) and the two sequence-artifact entries (`contains_stop_codon`,
-`out_of_frame`) are sequence-QC checks that a structural block never runs —
-this module skips both by construction, not by an explicit id blocklist.
+Finds every regex match of every motif-bearing taxonomy entry, over each
+chain's own sequence. This module takes no exposure or confidence input.
+It therefore never suppresses a buried match itself. Whether a hit is
+worth acting on is `triage.py`'s question, not this module's.
 """
 
 import re
@@ -18,10 +11,12 @@ from dataclasses import dataclass
 
 import residue_store
 
-# Index within each regex match of the residue that actually undergoes the
-# chemical change — the Asn in `N[GS]` deamidation sits at match position 0,
-# but the Asn in `[STK]N` sits at position 1, since the motif's first
-# character there is the residue ahead of it, not the reactive one itself.
+# Index, within each regex match, of the residue whose chemistry
+# actually changes. In the `N[GS]` deamidation motif, the reactive Asn
+# sits at match position 0. In `[STK]N`, the reactive residue sits at
+# position 1 instead. There, the motif's first character is the
+# residue just ahead of the reactive one, not the reactive residue
+# itself.
 CHEMICALLY_RELEVANT_INDEX = {
     "deamidation_ng": 0,
     "fragmentation_dp": 0,
@@ -41,11 +36,13 @@ CHEMICALLY_RELEVANT_INDEX = {
 class DetectedMotif:
     """One regex match against one chain's sequence.
 
-    `site` is the match's full span, offset order — this is the set of
-    positions a later step is allowed to edit, since the residues around
-    the reactive one are also part of what makes the motif a motif.
-    `relevant` is the single residue within that span whose chemistry
-    actually changes, the one whose rSASA a later triage step reads."""
+    `site` holds the match's full span, in offset order. A later step
+    may edit any position in that span, because the residues flanking
+    the reactive one help define the motif itself.
+
+    `relevant` is the single residue within `site` whose chemistry
+    actually changes. It is the residue whose rSASA a later triage step
+    reads."""
 
     definition_id: str
     liability_type: str
@@ -56,6 +53,13 @@ class DetectedMotif:
 
 
 def _qualifying_entries(taxonomy: list[dict]) -> list[dict]:
+    """Only entries whose `motif` is a regex string qualify.
+
+    The two cysteine entries carry `motif: None` — `cysteine.py`
+    evaluates them by counting, not matching. The two sequence-artifact
+    entries, `contains_stop_codon` and `out_of_frame`, are sequence-QC
+    checks a structural block never runs. Both kinds are skipped by
+    construction here, never through an explicit id blocklist."""
     return [
         entry
         for entry in taxonomy
@@ -64,11 +68,13 @@ def _qualifying_entries(taxonomy: list[dict]) -> list[dict]:
 
 
 def _by_chain(residues: list[residue_store.Residue]) -> dict:
-    """Only in-scope residues — see `CLAUDE.md` § The scope rule. Dropping
-    the rest before the sequence is joined is what keeps a constant domain,
-    a second Fab arm and an antigen out of the scan, and what stops a motif
-    matching across a V-domain / linker or V-domain / C-domain junction
-    where no such motif exists."""
+    """Only in-scope residues: a residue whose chain carries a role and
+    which itself carries an IMGT region.
+
+    Dropping the rest before the sequence is joined keeps a constant
+    domain, a second Fab arm, and an antigen out of the scan. It also
+    stops a motif from matching across a V-domain/linker or a
+    V-domain/C-domain junction, where no such motif exists."""
     chains: dict = {}
     for residue in residues:
         if not residue.in_scope:
@@ -83,7 +89,9 @@ def detect_all(
     residues: list[residue_store.Residue], taxonomy: list[dict]
 ) -> list[DetectedMotif]:
     """Every motif match over every chain, taxonomy entry by taxonomy
-    entry — total by construction, since nothing here reads exposure or
+    entry.
+
+    This is total by construction: nothing here reads exposure or
     confidence before deciding whether to keep a match."""
     hits: list[DetectedMotif] = []
     entries = _qualifying_entries(taxonomy)

@@ -1,26 +1,12 @@
-"""Residue indexing, total liability scan and non-destructive triage — the
-`index-and-scan` entrypoint, which writes the residue index, one
-`triaged.json` per antibody and the dataset-wide `liabilities.tsv`.
+"""The `index-and-scan` entrypoint: indexes residues, scans them for
+liabilities, and triages each hit.
 
-Four phases, one exec, because they are one deployment unit and nothing
-between them is read by anything else. `structure.py` indexes; `exposure.py`,
-`motifs.py`, `cysteine.py` and `triage.py` do the rest. They stay separate
-modules — only the exec is one. A verdict needs exposure and detection at
-once, so no boundary inside the scan could attribute a skip anyway.
+Writes the residue index, one `triaged.json` per antibody, and the
+dataset-wide `liabilities.tsv`.
 
-**One reason per antibody.** The index phase short-circuits the scan phase,
-so a structure that cannot be indexed is named by the index phase alone. And
-every output file is written only for the antibodies that got that far: a
-skipped antibody leaves no `residues.json` and no `triaged.json`, which is
-what lets a later step read absence as "already named". An empty placeholder
-would make that check a no-op and the antibody would be counted twice.
-
-`--out-triaged-dir` carries only the liabilities this run may act on —
-verdict `"exposed"` — the exact set the re-scan gate reads.
-`--out-liabilities` carries every triaged liability, including the ones
-triage declined, because the Parents page has no other source for a `buried`
-or `fixability-declined` row. It is appended for every antibody that reached
-triage at all, so an antibody with zero variants still has data there.
+The four phases run in one exec because a verdict needs exposure and
+detection together. No boundary inside the scan could name a skip on
+its own. Each antibody therefore gets exactly one skip reason.
 """
 
 import argparse
@@ -46,11 +32,10 @@ DEFAULT_FR_CONFIDENCE_THRESHOLD = 4.0
 DEFAULT_CDR_CONFIDENCE_THRESHOLD = 6.0
 DEFAULT_ACT_ON_FIXABILITY = "fixable,easily_fixable"
 
-# `process_one`'s two reasons for having actually reached triage — the index
-# phase's own reasons (`no-structure`, `structure-not-imgt`,
-# `structure-multi-domain-chain`, `no-researchable-residue`) mean the scan
-# phase never ran, so `triaged` is `[]` from the short-circuit, not from a
-# clean scan. Only these two are safe to summarize into `liabilities.tsv`.
+# The two reasons meaning `process_one` reached the scan phase at all.
+# Every other reason comes from `structure.py`'s index phase and leaves
+# `triaged` as `[]` too — from the short-circuit, not a clean scan.
+# Only these two are safe to summarize into `liabilities.tsv`.
 _REACHED_TRIAGE_REASONS = ("", "no-liability-survived-triage")
 
 
@@ -74,11 +59,13 @@ def _iter_clonotype_keyed_tsv(path: Path) -> Iterator[tuple[str, str]]:
 
 
 def _load_confidence_tsv(path: str | None) -> dict[str, list[dict]]:
-    """Per-clonotype `pl7.app/structure/confidence/perResidue` records, from
-    the one dataset-wide TSV `main.tpl.tengo` exports — never a directory of
-    per-stem files. A clonotype absent here, or whose value fails to parse
-    as a JSON list, falls through to its own B-factor column, the second
-    source `_confidence_lookup` reads."""
+    """Per-clonotype `pl7.app/structure/confidence/perResidue` records,
+    read from the one dataset-wide TSV `main.tpl.tengo` exports, not from
+    a directory of per-stem files.
+
+    A clonotype falls through to its own B-factor column when it is
+    missing here, or when its value fails to parse as a JSON list. That
+    column is the second source `_confidence_lookup` reads."""
     result: dict[str, list[dict]] = {}
     if path is None or not Path(path).is_file():
         return result
@@ -94,10 +81,11 @@ def _load_confidence_tsv(path: str | None) -> dict[str, list[dict]]:
 
 def _load_clonotype_filter(path: str | None) -> set[str] | None:
     """The optional Lead Selection subset, exported as one dataset-wide TSV.
-    `None` means no filter was picked — process the whole pdb_index. A picked
-    filter yields a (possibly empty) keep set; a clonotype whose value is
-    falsy is treated as not selected, same grammar as the sibling block's
-    `--clonotype-filter`."""
+
+    `None` means no filter was picked, so the whole `pdb_index` gets
+    processed. A picked filter yields a keep set, possibly empty. A
+    clonotype whose value is falsy is treated as not selected — the same
+    grammar the sibling block's `--clonotype-filter` uses."""
     if path is None or not Path(path).is_file():
         return None
     keep: set[str] = set()
@@ -117,12 +105,14 @@ def _load_clonotype_filter(path: str | None) -> set[str] | None:
 def _confidence_lookup(
     residues: list[residue_store.Residue], confidence_records: list[dict] | None
 ) -> dict[tuple[str, str], float | None]:
-    """Per-residue confidence, this antibody's sidecar records first, the
-    PDB B-factor column as the second source — the only available check on
-    index alignment, since ImmuneBuilder writes the same error array to
-    both. A residue the sidecar does not mention falls through to its own
-    B-factor; a residue with neither stays unmeasured, read as `None` by
-    `triage.py`, never as high-confidence."""
+    """Per-residue confidence: sidecar records first, the PDB B-factor
+    column second.
+
+    ImmuneBuilder writes the same error array to both, so a residue's
+    B-factor also works as a check on index alignment. A residue the
+    sidecar omits falls through to its own B-factor. A residue with
+    neither stays unmeasured, reported as `None`. `triage.py` never
+    reads a `None` confidence as high."""
     from_sidecar: dict[tuple[str, str], float] = {}
     for record in confidence_records or []:
         if not isinstance(record, dict):
@@ -154,15 +144,17 @@ def process_one(
     cdr_confidence_threshold: float,
     act_on_fixability: list[str],
 ) -> tuple[str, list[triage.Triaged]]:
-    """Index, then scan and triage, one antibody. Returns **one** skip reason
-    (`""` on pass) and every triaged liability, whatever its verdict — the
-    caller appends those to the run's one `liabilities.tsv`, because the
-    Parents page needs the declined ones too.
+    """Index, scan, and triage one antibody.
 
-    The index phase short-circuits the scan phase: an antibody that cannot be
-    indexed carries the index phase's reason and nothing else, so a
-    non-IMGT structure is named once rather than reported again as having no
-    surviving liability."""
+    Returns skip reason (empty on pass) and every triaged liability (the
+    Parents page needs declined ones too). out_triaged holds only "exposed"
+    verdicts — the set the re-scan gate reads.
+
+    Index phase short-circuits scan; a non-indexable antibody carries only
+    the index reason.
+
+    Skipped antibodies write no residues.json or triaged.json. A missing
+    file indicates "already skipped"; an empty file would double-count."""
     index_reason = structure.index_one(pdb_path, out_residues)
     if index_reason:
         return index_reason, []
@@ -243,15 +235,15 @@ def main(argv: list[str] | None = None) -> int:
     liability_store.write_liabilities_header(args.out_liabilities)
 
     def one(entry: pdb_index.Entry) -> str | None:
-        # A picked filter narrows which parents this step attempts; a
-        # filtered-out clonotype gets no skip row at all, since it was never
-        # in scope rather than having failed.
+        # A picked filter narrows which parents this step attempts. A
+        # filtered-out clonotype was never in scope, so it gets no skip
+        # row at all.
         if keep_clonotypes is not None and entry.clonotype_key not in keep_clonotypes:
             return None
         pdb_path = pdb_dir / entry.filename
-        # A clonotype the upstream block failed for has no staged blob at
-        # all — never a null one — so absence is this step's own named
-        # reason rather than an error.
+        # A clonotype the upstream block failed for leaves no staged blob
+        # at all, never an empty placeholder. This step treats that
+        # absence as its own named skip reason, not a raised error.
         if not pdb_path.is_file():
             return "no-structure"
 
@@ -267,10 +259,10 @@ def main(argv: list[str] | None = None) -> int:
             args.cdr_confidence_gating_threshold,
             act_on_fixability,
         )
-        # Appended even when triage declined everything, so an antibody that
-        # produces no variant still has Parents-page data — but only once it
-        # actually reached triage. An index-phase failure never scanned, so
-        # it must not contribute a false "none" verdict.
+        # Appended for every antibody that reached triage, so a
+        # zero-variant antibody still gets Parents-page data. An antibody
+        # that failed at the index phase never scanned, so appending its
+        # absence here would read as a false "none" verdict.
         if reason in _REACHED_TRIAGE_REASONS:
             liability_store.append_liabilities_tsv(
                 args.out_liabilities, entry.clonotype_key, triaged

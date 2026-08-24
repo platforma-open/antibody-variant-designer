@@ -1,17 +1,10 @@
-"""Read/write helpers for the two files `index_and_scan.py` writes.
+"""Read/write helpers for the two files `index_and_scan.py` writes: `triaged.json` and
+`liabilities.tsv`.
 
-`triaged.json` carries only the liabilities `candidates.py` may act on —
-verdict `"exposed"` — since that is the exact `actionable` set this file
-carries across unchanged. `liabilities.tsv` carries one row per parent, a
-coarse verdict plus a summary of every triaged liability including the ones
-triage declined, because the Parents page has no other source for them
-(`082-decision-the-liabilities-group-drops-to-one-axis`).
-
-Each `Triaged` site round-trips as full `residue_store.Residue` rows rather
-than bare offsets: `candidates.py` needs each edited residue's chain, IMGT
-label and wild type to build an edit, and re-deriving that by re-joining
-offsets back onto `residues.json` would be a second index read for data
-this file already carries once triage has run.
+A `Triaged` site round-trips as full `residue_store.Residue` rows.
+`candidates.py` needs each edited residue's chain, IMGT label and wild
+type to build an edit. Rejoining bare offsets onto `residues.json` would
+read the index a second time.
 """
 
 import csv
@@ -34,16 +27,15 @@ def _tsv_value(value) -> str:
 
 
 def liability_key(triaged: triage.Triaged) -> str:
-    """`<liabilityType>@<chain><imgtLabel>` from the site's first residue —
-    the span start, so two liabilities of one type can never share a key
-    within a parent."""
+    """`<liabilityType>@<chain><imgtLabel>` built from the site's first residue, the span start.
+    Two liabilities of the same type can never share a key within one parent."""
     start = triaged.site[0]
     return f"{triaged.liability_type}@{start.chain}{start.imgt}"
 
 
 def write_triaged(path: str, triaged_list: list[triage.Triaged]) -> None:
-    """Only the actionable subset — verdict `"exposed"` — belongs here.
-    The caller decides which rows qualify; this function does not filter."""
+    """Takes only the actionable subset: rows with verdict `"exposed"`.
+    The caller filters; this function writes whatever list it receives."""
     rows = [
         {
             "definitionId": t.definition_id,
@@ -80,24 +72,18 @@ def read_triaged(path: str) -> list[triage.Triaged]:
 
 
 def write_liabilities_header(path: str) -> None:
-    """Start the run's one dataset-wide file. Called once, before the batch
-    loop, so an empty pdb_index still leaves a header-only TSV rather than no
-    file at all."""
+    """Start the run's one dataset-wide file. Call this once, before the batch loop begins.
+    An empty pdb_index then still produces a header-only TSV, not zero files."""
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
 
 
 def summarize_liabilities(triaged_list: list[triage.Triaged]) -> tuple[str, str]:
-    """A coarse verdict plus one joined summary line for a parent's triaged
-    liabilities, mirroring the sibling block's
-    `_create_sequence_liabilities_summary_str`
-    (`antibody-sequence-liabilities/liabilities-calc-script/src/main.py:133-226`).
+    """Build coarse verdict ("present" or "none") and summary line for a parent's triaged
+    liabilities.
 
-    `verdict` is `"present"` when the parent carries at least one triaged
-    liability, `"none"` when it triaged clean. `summary` lists every one,
-    declined ones included, each written `<liabilityType>@<chain><imgtLabel>
-    (<verdict>)` — the fixability class is appended for a
-    `fixability-declined` site, since that is the only place its decline
-    reason survives once the per-liability columns are gone.
+    summary lists each liability as <type>@<chain><imgtLabel> (<verdict>), declined ones
+    included. fixability-declined sites append their fixability class — the only place this
+    decline reason survives after the per-liability columns are dropped.
     """
     if not triaged_list:
         return "none", "None"
@@ -114,13 +100,11 @@ def summarize_liabilities(triaged_list: list[triage.Triaged]) -> tuple[str, str]
 def append_liabilities_tsv(
     path: str, clonotype_key: str, triaged_list: list[triage.Triaged]
 ) -> None:
-    """Append one row for this antibody — a coarse verdict plus a summary of
-    every triaged liability, whatever its verdict, since the Parents page has
-    no other source for a `buried` or `fixability-declined` site.
+    """Append one row: coarse verdict plus summary of every triaged liability.
 
-    Appends rather than returning a row to collect: one file now holds the
-    whole dataset, and accumulating every antibody's row before a single
-    write is what the sequential-streaming constraint forbids."""
+    The summary includes buried and fixability-declined sites — the Parents page has no
+    other source for them. This function appends (not returns) because one file holds the
+    whole dataset and the pipeline streams one antibody at a time."""
     verdict, summary = summarize_liabilities(triaged_list)
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")

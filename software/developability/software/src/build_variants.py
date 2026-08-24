@@ -1,24 +1,10 @@
-"""Candidate generation, the re-scan gate and ranking — the entrypoint that
-writes `variants.tsv`, the block's final artifact.
+"""This entrypoint writes `variants.tsv`, the block's final artifact.
 
-Two concerns in one exec on purpose. `ranking.py` discards nothing and reads
-nothing `candidates.py` did not just produce, so a boundary between them
-would buy no parallelism and no independent failure attribution, while
-costing a second job bootstrap and forcing a whole directory of per-antibody
-candidate files to be written out and staged back in. The gate and the
-ranking policy stay separate *modules*; only the exec is one.
-
-Both thresholds a reviewer checks therefore arrive at the same command.
-`--max-edits-per-variant` and `--candidate-residues-per-position` belong to
-the gate; `--variants-per-parent`, `--low-tolerance-floor` and
-`--epistasis-rescore-top-k` belong to the ranking. Nothing else reads any of
-them.
-
-`main` closes with one more pass over `variants.tsv` after the batch loop
-returns: `variant_store.rewrite_global_rank` turns each parent's own local
-rank into one ordinal across every surviving variant in the run. It runs
-after, not inside, the loop that writes the file, so it never grows the
-loop's own per-antibody memory footprint — see that function's docstring.
+Candidate generation, the re-scan gate, and ranking run in one exec.
+`ranking.py` reads only what `candidates.py` just produced. It discards
+nothing. Splitting them would add a job bootstrap and a staging
+directory, for no parallelism gained. The gate and the ranking policy
+stay separate modules — only the exec is merged.
 """
 
 import argparse
@@ -73,9 +59,10 @@ def process_one(
     low_tolerance_floor: float,
     epistasis_rescore_top_k: int,
 ) -> tuple[str, list[variant_store.Variant]]:
-    """Gate then rank one antibody. Returns its skip reason (`""` on pass)
-    and the ranked variants the caller appends to the run's one
-    `variants.tsv`."""
+    """Gate then rank one antibody.
+
+    Returns the skip reason, `""` on pass. Returns the ranked variants
+    the caller appends to the run's one `variants.tsv`."""
     tolerance_lookup = tolerance_store.read_tolerance_tsv(tolerance_path)
     residues = residue_store.read_residues(residues_path)
     objective = build_objective(residues)
@@ -124,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out-variants", required=True)
     parser.add_argument("--out-skip", required=True)
+    # The gate reads these two flags. Nothing else does.
     parser.add_argument(
         "--max-edits-per-variant",
         type=int,
@@ -146,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         default=candidates.DEFAULT_W_OBJ,
         help="weight on the objective's position-prior term of the per-residue score",
     )
+    # Ranking reads these three flags. Nothing else does.
     parser.add_argument(
         "--variants-per-parent", type=int, default=ranking.DEFAULT_VARIANTS_PER_PARENT
     )
@@ -181,8 +170,9 @@ def main(argv: list[str] | None = None) -> int:
         tolerance_path = tolerance_dir / f"{entry.stem}.tsv"
         residues_path = residues_dir / f"{entry.stem}.json"
         prior_path = tolerance_dir / f"{entry.stem}{PRIOR_SUFFIX}"
-        # Three predecessors feed this step, so any of them may have named
-        # this antibody's reason already — a row here would count it twice.
+        # Three predecessors feed this step.
+        # Any one of them may have already named this antibody's skip
+        # reason. A row here would then count it twice.
         if not (
             triaged_path.is_file() and tolerance_path.is_file() and residues_path.is_file()
         ):
@@ -210,9 +200,10 @@ def main(argv: list[str] | None = None) -> int:
         return reason
 
     rc = antibody_batch.run(pdb_index.read_index(args.pdb_index), one, args.out_skip)
-    # After the loop, not inside it: by now every antibody's working state is
-    # released, and only the small already-filtered survivor set remains to
-    # renumber (088-decision-rank-becomes-a-global-ordinal-via-a-second-pass).
+    # This runs after the loop, not inside it, once every antibody's
+    # working state is already released. Only the small survivor set
+    # remains to renumber. `rewrite_global_rank` turns each parent's own
+    # local rank into one ordinal across the whole run.
     variant_store.rewrite_global_rank(args.out_variants)
     return rc
 

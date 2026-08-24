@@ -1,14 +1,14 @@
-"""Read the shared liability taxonomy `definitions.json`.
+"""Read the shared liability taxonomy definitions.json.
 
-The taxonomy package writes one JSON **object** keyed by `schemaVersion` /
-`liabilities` / `fixabilityWeights`, never the flat list `motifs.py` and
-`cysteine.py` iterate. Both entrypoints that scan against the taxonomy —
-`index_and_scan.py` and `build_variants.py` — must therefore unwrap it the same way, and the
-re-scan gate is only a gate if it reads the identical detector set the first
-scan did.
+The taxonomy package writes one JSON object keyed by schemaVersion, liabilities,
+and fixabilityWeights — never the flat list that motifs.py and cysteine.py iterate.
 
-Nothing here writes: the file crosses into every exec from the taxonomy
-package's own run, so this module is read-only unlike its `*_store` siblings.
+index_and_scan.py and build_variants.py both scan against the taxonomy and must
+unwrap this object the same way. The re-scan gate only works if it reads the
+identical detector set the first scan read.
+
+This module is read-only (unlike *_store siblings) — the taxonomy package produces
+this file once, then every exec reads it already written.
 """
 
 import json
@@ -18,10 +18,12 @@ DOCUMENT_KEY = "liabilities"
 
 
 def read_taxonomy(path: str) -> list[dict]:
-    """The taxonomy's liability list. A payload that is not the package's
-    document shape raises rather than reading as an empty taxonomy — an empty
-    list detects nothing, so every antibody would skip with
-    `no-liability-survived-triage` and the run would look like clean input."""
+    """Returns the taxonomy's liability list.
+
+    Raises when the payload is not the shared package's document shape. Reading it as an empty
+    taxonomy instead would detect nothing. Every antibody would then skip with
+    `no-liability-survived-triage`, making the run look like clean input rather than a taxonomy
+    failure."""
     parsed = json.loads(Path(path).read_text())
     if not isinstance(parsed, dict) or not isinstance(parsed.get(DOCUMENT_KEY), list):
         raise ValueError(

@@ -1,9 +1,10 @@
 """The seam between the design engine and what it is designing toward.
 
-The engine owns exposure, triage, the confidence gate, binding-risk banding and ranking — every
-`Objective` plugs into it rather than reimplementing any of that. An objective owns exactly three
-things: which positions to target, an optional per-position residue preference, and whether a
-candidate met the goal.
+The engine owns exposure, triage, the confidence gate, binding-risk banding and ranking. Every
+`Objective` plugs into that machinery rather than reimplementing it.
+
+An objective owns exactly three things: which positions to target, an optional per-position
+residue preference, and whether a candidate met the goal.
 """
 
 from collections.abc import Callable

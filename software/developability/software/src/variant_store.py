@@ -1,36 +1,7 @@
-"""Read/write for `variants.tsv`, written by `ranking.py` — the block's
-final artifact, the one file downstream imports as a PFrame.
+"""Reads and writes variants.tsv, the block's final artifact.
 
-One dataset-wide file for the whole run, so every row carries its axis
-values as columns: `clonotypeKey` for the parent and `variantKey` for the
-variant. `xsv.importFile` builds each axis from a column, and there is
-nowhere else a per-row axis value could come from.
-
-**The run carries no column here.** Run identity is a spec domain the
-workflow applies to the emitted columns after this process has run, so no
-block id reaches it — which is what lets two blocks over one dataset share
-this exec instead of computing the same variants twice.
-
-`variantKey` is a per-parent ordinal — `v01`, `v02`, … in the rank order
-`ranking.rank_variants` fixed, zero-padded to two digits. The key therefore
-depends on that per-parent order: a settings change that reorders one
-parent's variants renumbers them, which is the CSV's contract, not an
-accident — the CSV is a per-run artifact, never a stable cross-run
-identifier.
-
-`rank` itself is written twice. `append_variants_tsv` first writes each
-parent's own local position — the value `variantKey` is fixed from, and the
-only one available while the batch loop is still mid-run. `rewrite_global_rank`
-then reads the finished file back and overwrites `rank` with one ordinal
-across every parent's survivors, by the same order `ranking.rank_variants`
-already sorts by. `variantKey` is not touched by that second pass — it stays
-the per-parent identifier `append_variants_tsv` already fixed
-(`088-decision-rank-becomes-a-global-ordinal-via-a-second-pass`).
-
-`parentRank` carries the value `rank` used to hold before that decision: the
-per-parent-only position, fixed once by `ranking.rank_variants` and never
-touched again — the Variants page's own column for "best pick of this
-antibody", now that `rank` answers "best pick of the whole run" instead.
+Every row carries axis values: clonotypeKey for the parent, variantKey for the
+variant. xsv.importFile builds each axis from a column.
 """
 
 import csv
@@ -40,6 +11,10 @@ from pathlib import Path
 
 OBJECTIVE = "liability"
 
+# This file carries no run or block id column.
+# The workflow attaches run identity to these columns downstream, once this process finishes.
+# That lets two blocks over one dataset share this exec, instead of
+# computing the same variants twice.
 TSV_COLUMNS = [
     "clonotypeKey",
     "variantKey",
@@ -60,8 +35,8 @@ TSV_COLUMNS = [
 
 @dataclass(frozen=True)
 class Variant:
-    rank: int
-    parent_rank: int
+    rank: int  # Global ordinal across the whole run, written by rewrite_global_rank.
+    parent_rank: int  # Local rank inside one parent. The Variants page shows it as "best pick of this antibody".
     chain: str  # "H" for a VHH, "H,L" for a paired Fv
     addressed_target: str
     changed_positions: str
@@ -82,26 +57,33 @@ def _low_confidence_warning_str(variant: Variant) -> str:
 
 
 def variant_key(parent_rank: int) -> str:
-    """The per-parent ordinal variant axis value — `v01`, `v02`, … in that
-    parent's own local rank order. No hash, no `blockId`: uniqueness across
-    parents already comes from pairing this with `clonotypeKey`, and run
-    identity is a domain on the emitted axis rather than an ingredient
-    folded into this one."""
+    """Returns zero-padded v01, v02, … from parent_rank.
+
+    A settings change that changes the order of a parent's variants renumbers
+    this value. variantKey identifies
+    rows only within one run. Pairing it with clonotypeKey ensures uniqueness
+    across parents."""
     return f"v{parent_rank:02d}"
 
 
 def write_variants_header(path: str) -> None:
-    """Start the run's one dataset-wide file, before the batch loop, so an
-    empty pdb_index still leaves a header-only TSV."""
+    """Writes the header for the run's one dataset-wide file.
+
+    Call this before the batch loop starts. Then an empty `pdb_index`
+    still leaves a header-only TSV."""
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
 
 
 def _row(clonotype_key: str, variant_key_str: str, v: Variant) -> list:
-    """One TSV row, in `TSV_COLUMNS` order. Shared by `append_variants_tsv`
-    and `rewrite_global_rank`, which write the same columns from two
-    different moments — mid-run with the local rank, and once more with the
-    global one — but never the variant key or `parent_rank`, which only the
-    first ever computes."""
+    """Returns one TSV row, in `TSV_COLUMNS` order.
+
+    `append_variants_tsv` and `rewrite_global_rank` both call this to write
+    the same columns, at two different moments:
+    - mid-run, with the local `rank`
+    - once more, with the global `rank`
+
+    Only `append_variants_tsv` computes `variantKey` and `parent_rank`.
+    `rewrite_global_rank` passes through the values `v` already carries."""
     return [
         clonotype_key,
         variant_key_str,
@@ -121,11 +103,12 @@ def _row(clonotype_key: str, variant_key_str: str, v: Variant) -> list:
 
 
 def append_variants_tsv(path: str, clonotype_key: str, variants: list[Variant]) -> None:
-    """Append one parent's ranked variants, computing each row's
-    `variantKey` here from `parent_rank` — this is the one place a variant's
-    local rank and its parent are both in hand at once. `rewrite_global_rank`
-    overwrites `rank` afterwards; it never touches `variantKey` or
-    `parent_rank`."""
+    """Appends one parent's ranked variants to path.
+
+    variantKey is computed here from parent_rank — the only place both the
+    variant's rank and its parent clonotype are available. Later,
+    rewrite_global_rank overwrites rank with a dataset-wide ordinal without
+    touching variantKey or parent_rank."""
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
     for v in variants:
@@ -166,19 +149,16 @@ def read_variants_tsv(path: str) -> list[tuple[str, str, Variant]]:
 
 
 def rewrite_global_rank(path: str) -> None:
-    """Read every surviving variant back, sort once across the whole run by
-    the same key `ranking.rank_variants` already sorts by inside one
-    parent — structural tolerance descending, then `changed_positions` —
-    with `(clonotypeKey, variantKey)` added so two parents' tied variants
-    still order deterministically, then overwrite `rank` 1..N over the
-    file. `variantKey` and `parent_rank` are untouched: both already carry
-    the per-parent position `append_variants_tsv` fixed, and `_row` never
-    recomputes either.
+    """Overwrites rank in path as one dataset-wide ordinal, 1..N.
 
-    Called once, after the whole batch loop finishes writing this file —
-    not from inside it — so the peak memory this holds is the run's
-    already-filtered survivor set, never the per-antibody working state the
-    loop itself is bounded by (`088-decision-rank-becomes-a-global-ordinal-via-a-second-pass`)."""
+    Reads all surviving variants, sorts by structural tolerance (descending)
+    then changed_positions, breaking ties by clonotypeKey and variantKey for
+    determinism.
+
+    variantKey and parent_rank stay unchanged. Call this once after the batch
+    loop finishes. No single parent's iteration holds the other parents' data.
+    This function holds only the run's surviving variants in memory, never the
+    per-antibody working state of the loop."""
     rows = read_variants_tsv(path)
     if not rows:
         return

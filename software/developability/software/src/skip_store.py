@@ -1,27 +1,17 @@
-"""Read/write for a step's skip TSV: `clonotypeKey`, `reason`, `detail`.
+"""Skip log: one row per clonotype the step attempted. The reason is empty on pass.
 
-One row per clonotype the step **attempted**, with an empty reason when it
-passed. A clonotype whose reason a predecessor already named is absent
-rather than empty, so summing the five files counts it once — the reduce in
-`main.tpl.tengo` takes the first non-empty reason in step order, and a
-second row for an already-skipped clonotype would double-count it.
-
-This is what keeps failure attribution per clonotype now that one exec
-covers the whole dataset: the failure unit stays the reporting unit, moved
-from a file per invocation to a row per antibody.
-
-`detail` is free text, empty for every reason except `backend-failed`: the
-six other reasons are named, deterministic conditions the operator-facing
-docs already explain in full, so a per-row repeat of that explanation would
-only drift from it. `backend-failed` is `antibody_batch.run`'s catch-all for an
-exception `process_one` raised, and which exception varies row to row — the
-caught message is the only thing that says which.
+A clonotype that an earlier step already skipped gets no row here. The reduce in
+`main.tpl.tengo` takes the first non-empty reason in step order. A second row for
+that clonotype would count it twice.
 """
 
 import csv
 import io
 from pathlib import Path
 
+# `detail` holds the caught exception message on a `backend-failed` row, because
+# the exception differs from row to row. Every other reason is a named condition,
+# and the operator docs explain each one in full. A copy here would drift.
 COLUMNS = ["clonotypeKey", "reason", "detail"]
 
 

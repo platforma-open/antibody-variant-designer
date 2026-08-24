@@ -1,17 +1,10 @@
-"""Shared read/write helpers for the files that cross a step boundary.
+"""Read/write helpers for residues.json, a plain-file boundary between pipeline steps.
 
-Every intermediate between the five pipeline steps is a plain file, staged
-workdir-to-workdir by `main.tpl.tengo` — never a PFrame, since no reader
-outside the pipeline ever touches one. One helper pair per boundary file
-keeps the producer and the consumer of that file reading and writing the
-exact same shape, so a field added on one side is never silently ignored,
-or missing, on the other.
+structure.py writes it. index_and_scan.py and read_tolerance.py read it independently.
 
-This module holds `residues.json`, written by `structure.py` and read
-independently by `index_and_scan.py` and `read_tolerance.py`. The other three boundary
-files live in their own modules: `triaged.json` in `liability_store.py`,
-`tolerance.tsv` in `tolerance_store.py`, `candidates.json` in
-`candidate_store.py`.
+Each boundary file gets one helper pair shared by producer and consumer. This ensures
+reading and writing the same shape — a field added to one side cannot silently go missing
+on the other.
 """
 
 import json
@@ -21,18 +14,16 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Residue:
-    """One row of `residues.json`.
+    """One row of residues.json.
 
-    `offset` is the ordinal position of this residue within its chain,
-    assigned in the order its ATOM records appear in the file — never
-    derived from `res_seq`, so insertion codes (`111`, `111A`, `111B`, …)
-    and a chain whose first residue isn't `1` don't disturb it.
+    offset counts this residue's position within its chain (from ATOM record
+    order, not res_seq). An insertion code or chain starting at residue other
+    than 1 leaves offset unchanged.
 
-    `imgt` is `res_seq` with `i_code` appended, kept as a string end to
-    end so an insertion-code label like `"111A"` survives every step.
+    imgt is res_seq + i_code as a string, so "111A" survives every step.
 
-    `chain_role` is "H" / "L" from the `REMARK 99 PLATFORMA CDR` records,
-    or None for a chain no record names — a second Fab arm, an antigen.
+    chain_role is "H" or "L" (from REMARK 99 PLATFORMA CDR records), or None
+    if no record names the chain (second Fab arm, antigen).
     """
 
     chain: str
@@ -46,14 +37,11 @@ class Residue:
 
     @property
     def in_scope(self) -> bool:
-        """True iff this residue is one the block researches — scans for
-        liabilities and may propose an edit at. See `CLAUDE.md` § The scope
-        rule: a role-bearing chain, and an IMGT region on the residue.
+        """True when this residue's chain carries a role and the residue carries an IMGT region.
 
-        The index stays total; only research is narrowed. A constant-domain
-        residue, an antigen residue and a second-arm residue all fail this
-        test, yet each still shapes burial in `exposure.py` and still lines
-        the index up with AntiFold's own read of the same PDB."""
+        In-scope residues are scanned for liabilities and are edit targets. The index is total
+        (including constant and antigen residues) but only in-scope residues enter research.
+        Those excluded still shape burial and align the index with AntiFold's read."""
         return self.chain_role in ("H", "L") and self.region is not None
 
     def to_json(self) -> dict:

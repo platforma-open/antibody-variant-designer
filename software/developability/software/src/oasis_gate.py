@@ -1,8 +1,9 @@
 """How human a sequence reads, and the sequence to read it on.
 
-Wraps promb's OASis peptide-content measurement behind a narrow seam: the rest of the package
-sees only a 0-100 score, or `None` when a sequence cannot be scored — never the database, the
-tier it is measured at, or how loading it is cached.
+Wraps promb's OASis peptide-content measurement behind a narrow seam.
+The rest of the package sees a 0-100 score, or `None` when a sequence
+cannot be scored. It never sees the database, the tier the score is
+measured at, or how loading it is cached.
 """
 
 from functools import lru_cache
@@ -21,10 +22,13 @@ def _database():
 
 
 def identity(sequence: str | None) -> float | None:
-    """The sequence's humanness, 0-100, two decimals — `None` when it cannot be scored: too
-    short to yield one peptide window, or holding a character outside `AA_ALPHABET` once
-    uppercased. An unscoreable sequence must discard the candidate it belongs to, never raise,
-    so every exit here returns `None` rather than propagating."""
+    """Scores how human `sequence` reads: 0-100, rounded to two decimals.
+
+    Returns `None` when the sequence cannot be scored — too short to yield one peptide window,
+    or holding a character outside `AA_ALPHABET` once uppercased.
+
+    An unscoreable sequence must discard its candidate. This function always returns `None` for
+    that case, never raises."""
     if not isinstance(sequence, str) or len(sequence) < MIN_WINDOW:
         return None
     upper = sequence.upper()
@@ -42,10 +46,15 @@ def chain_sequence(
     chain: str,
     substituted: list[residue_store.Residue],
 ) -> str:
-    """One chain's in-scope residues, offset order, each replaced by its entry in `substituted`
-    when one shares its `(chain, offset)`, its own wild type otherwise. Reproduces the grouping
-    a liability scan matches its motifs on, so this measures the same sequence. Pass an empty
-    `substituted` for a sequence with no edits applied."""
+    """One chain's in-scope residues, in offset order.
+
+    Each residue is replaced by its entry in `substituted` when one shares its
+    `(chain, offset)`; otherwise its own wild type stands.
+
+    This reproduces the grouping a liability scan uses to match its motifs. It measures the
+    same sequence a scan would see.
+
+    Pass an empty `substituted` for a sequence with no edits applied."""
     replacement = {(r.chain, r.offset): r.wild_type for r in substituted}
     chain_residues = sorted(
         (r for r in residues if r.in_scope and r.chain == chain),

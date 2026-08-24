@@ -1,27 +1,10 @@
-"""Candidate substitutions and the objective's goal check — the block's only real
-filter between a triaged liability and a variant.
+"""Builds candidate substitutions and checks each one against its
+objective's goal — the last filter between a triaged liability and a
+shipped variant.
 
-`build_variants.py` runs this and then `ranking.py` in one exec, because
-ranking discards nothing and reads nothing this module did not just produce.
-
-This gate never sees the residue index or the PDB — only a triaged
-liability and the tolerance table — so a candidate's own site (the exact
-residues its originating motif or cysteine check matched over) is the only
-window an objective's `score_candidate` can see. A liability whose site
-runs longer than `max_edits_per_variant` is skipped outright, since
-substituting every one of its positions would exceed the edit budget
-before the objective is ever asked.
-
-A surviving candidate's `tolerance` is the score its objective's
-`score_candidate` returned — for the liability-removal objective, the
-**mean** AntiFold perplexity over its edited positions, a property of the
-positions themselves, independent of which amino acid was substituted
-there, unlike the per-amino-acid log-probability `_top_substitutions`
-ranks by. `region`, `low_confidence` and `worst_confidence_angstroms` ride
-along unchanged from the triaged liability; `addressed_target` and
-`changed_positions` are built here, from the taxonomy's own label and the
-fixed `<chain>:<wt><imgtLabel><mut>` rendering, so `ranking.py` never has
-to re-read the triaged liabilities or the taxonomy to report either one.
+`build_variants.py` runs this module and then `ranking.py` in one exec.
+Ranking discards nothing and reads nothing this module did not just
+produce, so nothing needs to cross a process boundary between the two.
 """
 
 import itertools
@@ -39,9 +22,10 @@ DEFAULT_W_OBJ = 1.0
 class Edit:
     """One substitution: `wild_type` at `(chain, offset)` becomes `to`.
 
-    Carries `imgt` alongside `offset` for the same reason `residue_store`
-    does — the display label and the join key are different things, and a
-    reader needing either finds it here without a second lookup."""
+    Carries `imgt` alongside `offset` for the same reason
+    `residue_store` does. The display label and the join key are
+    different things. A reader needing either finds it here, with no
+    second lookup."""
 
     chain: str
     offset: int
@@ -52,25 +36,24 @@ class Edit:
 
 @dataclass(frozen=True)
 class Candidate:
-    """One re-scan-cleared substitution set, still keyed to the one
-    liability it was built to address.
-
-    `region`, `low_confidence` and `worst_confidence_angstroms` are carried
-    forward unchanged from the `triage.Triaged` this candidate was built
-    from — this module computes none of them itself. `addressed_target` and
-    `changed_positions` are its own output: a human-readable label for the
-    liability the edits target, and the fixed-spelling
-    `<chain>:<wt><imgtLabel><mut>` rendering of the edits.
-
-    Never serialized. Candidates are handed straight to `ranking.py` inside
-    one exec, so this type crosses no boundary and needs no wire format."""
+    """One re-scan-cleared substitution set, still keyed to the liability it was built to
+    address. Handed straight to `ranking.py` in the same exec, so it is never serialized."""
 
     target_definition_id: str
     edits: tuple[Edit, ...]
+    # The objective's score_candidate result. For the liability-removal objective, the mean
+    # AntiFold perplexity over the edited positions — the entropy, in bits, of AntiFold's
+    # amino-acid distribution at each position, a property of the positions rather than of the
+    # substituted amino acid, unlike the per-amino-acid log-probability `_top_substitutions`
+    # ranks by.
     tolerance: float
+    # region, low_confidence and worst_confidence_angstroms ride forward unchanged from the
+    # triage.Triaged this candidate was built from; this module computes none of them.
     region: str | None
     low_confidence: bool
     worst_confidence_angstroms: float | None
+    # addressed_target and changed_positions are this module's own output: a human-readable label
+    # for the targeted liability, and the fixed-spelling rendering of the edits.
     addressed_target: str
     changed_positions: str
 
@@ -83,10 +66,11 @@ def _combined_scores(
     w_obj: float,
 ) -> dict[str, float]:
     """The structural log-probability row and the objective's position
-    prior at this residue, each scaled by its own weight before they
-    combine — an uncovered position, or an objective with no prior at
-    all, still takes the `w_struct` scaling alone, so the weight means
-    the same thing on every path."""
+    prior at this residue, each scaled by its own weight, then summed.
+
+    An uncovered position, or an objective with no prior at all, takes
+    only the `w_struct` scaling. The weight then means the same thing on
+    every path."""
     prior_row = None if prior is None else prior.get((residue.chain, residue.imgt))
     if prior_row is None:
         return {aa: w_struct * value for aa, value in log_probs.items()}
@@ -105,9 +89,10 @@ def _top_substitutions(
     w_obj: float,
 ) -> list[str]:
     """Up to `k` amino acids at `residue`'s position, ranked by the
-    combined score, wild type excluded — substituting a position to its
-    own residue would neither change nor clear anything, so it is never a
-    candidate substitution."""
+    combined score, wild type excluded.
+
+    Substituting a position to its own residue changes nothing, so that
+    substitution never becomes a candidate."""
     row = tolerance_lookup.get((residue.chain, residue.imgt))
     if row is None:
         return []
@@ -126,17 +111,19 @@ _RISK_LEVEL_ORDER = {"High": 0, "Medium": 1, "Low": 2}
 
 
 def _risk_level_order(triaged) -> int:
-    """`High` before `Medium` before `Low` — the input order `build_candidates`
-    iterates in, so a High-risk liability's candidates are built (and reach
-    ranking) before a Low-risk one's, within one parent."""
+    """Sort key from `_RISK_LEVEL_ORDER`, the order `build_candidates`
+    iterates liabilities in.
+
+    A higher-risk liability's candidates are therefore built, and reach
+    ranking, before a lower-risk one's, within one parent."""
     return _RISK_LEVEL_ORDER[triaged.risk_level]
 
 
 def _addressed_target(definition_id: str, site: list, taxonomy_by_id: dict) -> str:
     """A human-readable label for the liability this candidate was built
-    to clear — the taxonomy's own name plus where it sits, since neither
-    `triage.Triaged` nor `Candidate` carries a display
-    string on its own."""
+    to clear: the taxonomy's own name plus where it sits. Neither
+    `triage.Triaged` nor `Candidate` carries a display string of its
+    own."""
     definition = taxonomy_by_id.get(definition_id, {})
     name = definition.get("name") or definition_id
     start = site[0]
@@ -156,12 +143,13 @@ def build_candidates(
     w_struct: float,
     w_obj: float,
 ) -> list[Candidate]:
-    """Every candidate whose objective goal check passed, one liability at
-    a time. Every position in a liability's site is substituted together,
-    so each candidate's edit count equals that site's length — a site
-    longer than `max_edits_per_variant` is skipped, and a site with no
-    admissible substitution at any of its positions is skipped, both
-    before the objective is asked at all."""
+    """One candidate per liability whose objective goal check passed. Every position in the site
+    is substituted together, so a candidate's edit count equals the site's length.
+
+    A site longer than `max_edits_per_variant`, or holding a position with no admissible
+    substitution, is skipped before the objective runs.
+
+    `score_candidate` sees only the candidate's site, never the residue index or the PDB."""
     taxonomy_by_id = {d["id"]: d for d in taxonomy}
     prior = (
         None

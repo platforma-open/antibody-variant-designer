@@ -1,13 +1,9 @@
-"""Read/write for `pdb_index.tsv`, the pdb_index every batch entrypoint loops
-over.
+"""Read/write for pdb_index.tsv, the index batch entrypoints loop over.
 
-Two columns, `clonotypeKey` and `filename`, written once per run by the
-workflow in sorted-key order. It is the only place a clonotype key and a
-filename are related, which is why every step reads it: a clonotype key is
-a JSON-encoded array and is not a legal filename, so no step may ever
-derive a path from a key directly. Each per-clonotype artifact is named
-after the staged PDB's `stem` instead — the filename with its extension
-removed.
+The workflow writes one row per clonotype (once per run, sorted by key). This is
+the only mapping of clonotype key to filename. Clonotype keys are JSON arrays
+(illegal as filenames), so per-clonotype artifacts are named after the staged
+PDB's stem instead.
 """
 
 import csv

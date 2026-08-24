@@ -1,20 +1,7 @@
-"""Residue-index construction from a PDB's own ATOM records.
+"""Builds the residue index from a PDB's ATOM records.
 
-`index_and_scan.py` runs this as its index phase and then scans in the same
-exec, because the two share one deployment unit and the index is read by
-nothing between them.
-
-Parses `(chain, resSeq, insertionCode, resName, bFactor)` straight off the
-ATOM records, builds the `(chain, offset)` spine from the order those
-records appear in the file, and projects the IMGT label as a string. This
-block is IMGT-only: unlike the sibling liabilities block, it never
-translates between numbering schemes, so a structure that isn't
-IMGT-numbered is a skip, not a best-effort guess.
-
-The parsing shape below (`Atom`, `Residue`, `ParsedPdb`, `parse_pdb`, the
-`REMARK 99 PLATFORMA CDR` regex) is copied from
-`3D-Structure-Based-Liabilities/software/liabilities-script/structure.py`,
-proven against ImmuneBuilder output, rather than re-derived.
+index_and_scan.py runs this as its index phase. It then scans in the same
+process, sharing one deployment unit between the two steps.
 """
 
 import re
@@ -27,6 +14,12 @@ import residue_store
 # Section 1: PDB parsing
 # ---------------------------------------------------------------------------
 
+# The parsing shape below — `Atom`, `Residue`, `ParsedPdb`, `parse_pdb`, and
+# the CDR regex — is copied from
+# `3D-Structure-Based-Liabilities/software/liabilities-script/structure.py`.
+# That version is already proven against ImmuneBuilder output. It is copied
+# here rather than re-derived.
+
 
 @dataclass
 class Atom:
@@ -34,10 +27,11 @@ class Atom:
     x: float
     y: float
     z: float
-    # PDB B-factor (temperature factor). ImmuneBuilder repurposes this column
-    # to carry per-atom predicted positional error in Angstroms (upstream
-    # guarantee). For experimental crystal structures it stays the literal
-    # B-factor; both are treated interchangeably for confidence gating.
+    # PDB B-factor column (temperature factor). ImmuneBuilder writes
+    # per-atom predicted positional error in Angstroms here instead — a
+    # guarantee from that upstream tool. An experimental crystal structure
+    # keeps the literal B-factor here instead. This module reads the column
+    # the same way for confidence gating, whichever value it holds.
     b_factor: float = 0.0
 
 
@@ -59,25 +53,25 @@ class Residue:
 class ParsedPdb:
     chain_order: list[str] = field(default_factory=list)
     residues_by_chain: dict[str, list[Residue]] = field(default_factory=dict)
-    # CDR ranges from `REMARK 99 PLATFORMA CDR*` records emitted by the
+    # CDR ranges from `REMARK 99 PLATFORMA CDR*` records, written by the
     # Structure Prediction block. Shape: {"H": {"CDR1": (start, end), ...},
-    # "L": {...}}. Empty when not present; region_for then uses the fixed
-    # IMGT ranges below.
+    # "L": {...}}. Empty when absent. `region_for` then falls back to the
+    # fixed IMGT ranges below.
     platforma_cdrs: dict[str, dict[str, tuple[int, int]]] = field(default_factory=dict)
-    # REMARK 99 chain identity is authoritative. Maps role ("H"/"L") to the
-    # physical PDB chain letter the records reference.
+    # Maps role (`H`/`L`) to the physical PDB chain letter the `REMARK 99`
+    # records name. Nothing else overrides this mapping.
     chain_role_to_pdb_chain: dict[str, str] = field(default_factory=dict)
-    # Chains where a `(res_seq, i_code)` pair appears twice in
-    # non-contiguous ATOM blocks — two domains sharing one chain letter,
-    # each numbered from 1 (an scFv's VH+VL, a Fab chain whose CH1
-    # restarts). `(chain, imgt)` stops identifying one residue there, and
-    # every downstream join uses that pair, so this is a skip.
+    # Chain letters where a `(res_seq, i_code)` pair repeats across two
+    # non-contiguous ATOM blocks. That means two domains share one chain
+    # letter, each numbered from 1 — an scFv's VH+VL, or a Fab chain whose
+    # CH1 restarts numbering. Every downstream step joins residues on
+    # `(chain, imgt)`. A repeat here breaks that join, so this is a skip.
     multi_domain_chains: set[str] = field(default_factory=set)
 
 
-# `REMARK 99 PLATFORMA CDRH1 H27-H38`. Capture both the role letter
-# (group 1) and the chain letter at each end of the range (groups 3, 5) so
-# we can also extract the chain identity.
+# Example: `REMARK 99 PLATFORMA CDRH1 H27-H38`. Group 1 is the role letter.
+# Groups 3 and 5 are the chain letter at each end of the range, which also
+# gives the chain identity for that role.
 _PLATFORMA_CDR_RE = re.compile(
     r"^REMARK\s+99\s+PLATFORMA\s+CDR([HL])([123])\s+([A-Za-z])(\d+)-([A-Za-z])(\d+)\s*$"
 )
@@ -93,9 +87,9 @@ def parse_pdb(text: str) -> ParsedPdb:
     model_count = 0
 
     for raw in text.splitlines():
-        # PDB lines are nominally 80 columns; many producers strip trailing
-        # whitespace. Pad to a full 80 so fixed-offset slicing further down
-        # never reads past the end of `raw`.
+        # PDB lines are usually 80 columns wide. Many producers strip
+        # trailing whitespace, so a short line pads out to a full 80 here.
+        # That keeps every fixed-offset slice below inside `raw`.
         line = raw.ljust(80)
         tag = line[0:6].rstrip()
 
@@ -120,10 +114,11 @@ def parse_pdb(text: str) -> ParsedPdb:
                 if end < start:
                     continue
                 out.platforma_cdrs.setdefault(role, {})[f"CDR{cdr_idx}"] = (start, end)
-                # Record the physical PDB chain letter for this role. Later
-                # records for the same role must agree; conflicts are
-                # silently dropped (region tagging then sees no role for
-                # that chain rather than a wrong one).
+                # Records the physical PDB chain letter for this role. A
+                # later record for the same role must name the same chain,
+                # or this drops the mapping for that role. Region tagging
+                # then finds no role for that chain. That is safer than
+                # leaving a wrong chain letter attached to the role.
                 existing = out.chain_role_to_pdb_chain.get(role)
                 if existing is None:
                     out.chain_role_to_pdb_chain[role] = chain_start
@@ -132,7 +127,7 @@ def parse_pdb(text: str) -> ParsedPdb:
         elif tag in ("ATOM", "HETATM"):
             if not in_first_model:
                 continue
-            # ATOM / HETATM record fixed offsets (PDB v3.30). We pull:
+            # ATOM / HETATM record fixed offsets (PDB v3.30). Columns used:
             #   12-15 atom name        16    altLoc
             #   17-19 residue 3-letter 21    chainID
             #   22-25 residue seq num  26    iCode (insertion code)
@@ -166,11 +161,12 @@ def parse_pdb(text: str) -> ParsedPdb:
 
             key = f"{chain_id}|{res_seq}|{i_code}"
             res = residues.get(key)
-            # A residue's own ATOM records are contiguous in every producer
-            # this block reads, so the residue a new atom belongs to is
-            # always the last one opened on that chain. Seeing a key again
-            # after the chain has moved on is therefore a second domain
-            # reusing the first domain's numbering, not a stray atom.
+            # A residue's own ATOM records sit next to each other in every
+            # producer this block reads. The residue a new atom belongs to
+            # is therefore always the last one opened on that chain. A key
+            # seen again after the chain has moved on means a second domain
+            # is reusing the first domain's numbering. It is not a stray
+            # atom line.
             if res is not None and res is not open_residue.get(chain_id):
                 out.multi_domain_chains.add(chain_id)
                 continue
@@ -193,8 +189,9 @@ def parse_pdb(text: str) -> ParsedPdb:
 
 # Fixed IMGT CDR ranges (inclusive), used whenever `REMARK 99 PLATFORMA CDR`
 # records are absent or incomplete for a role. This block never falls back
-# to Chothia or Kabat: an unrecognised numbering scheme is the
-# `structure-not-imgt` skip, not a different region table.
+# to Chothia or Kabat, unlike the sibling liabilities block. An
+# unrecognised numbering scheme here is the `structure-not-imgt` skip, not
+# a different region table.
 IMGT_CDR_RANGES = {
     "H": {"CDR1": (27, 38), "CDR2": (56, 65), "CDR3": (105, 117)},
     "L": {"CDR1": (27, 38), "CDR2": (56, 65), "CDR3": (105, 117)},
@@ -212,11 +209,12 @@ AA_THREE_TO_ONE = {
     "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
 }
 
-# A residue must carry all three to be seated in the index. Missing even
-# one means AntiFold's own structure reader will not place this residue
-# either, so dropping it here — rather than emitting it with a hole in its
-# geometry — keeps this index and AntiFold's own tolerance matrix aligned
-# on the same residue set, with no silent shift between them.
+# A residue needs all three backbone atoms to be kept in the index.
+# AntiFold's own structure reader also requires them, and drops a residue
+# missing one. Dropping it here too keeps this index and AntiFold's
+# tolerance matrix aligned on the same residue set. The alternative was to
+# emit it with a hole in its geometry. That would let the two residue sets
+# drift apart silently.
 BACKBONE_ATOMS = ("N", "CA", "C")
 
 
@@ -225,13 +223,11 @@ def region_for(
     res_seq: int,
     platforma_cdrs: dict | None,
 ) -> str | None:
-    """Return "FR1" / "CDR1" / ... / "FR4", or None when `chain_role` is
-    unknown (e.g. an antigen chain) or `res_seq` falls outside the V-domain.
+    """Return "FR1" / "CDR1" / ... / "FR4", or None when chain_role is unknown
+    or res_seq falls outside the V-domain.
 
-    `platforma_cdrs` (preferred path): when it holds all three CDRs for
-    `chain_role`, those ranges override the fixed IMGT ranges — the
-    Structure Prediction block writes them as `REMARK 99 PLATFORMA CDR*`
-    records and we treat them as authoritative over the fixed table."""
+    platforma_cdrs overrides the fixed IMGT table when it holds all three CDR
+    ranges for chain_role (from REMARK 99 PLATFORMA CDR* records)."""
     if chain_role not in ("H", "L"):
         return None
 
@@ -267,16 +263,15 @@ def region_for(
 
 
 def is_imgt_numbered(parsed: ParsedPdb) -> bool:
-    """AntiFold never raises on a wrongly-numbered structure — it only
-    `log.error`s — so this block must catch it itself before a region tag
-    gets attached to the wrong residue.
+    """Return True when parsed uses IMGT numbering.
 
-    `REMARK 99 PLATFORMA CDR` records, when present, are conclusive: the
-    Structure Prediction block writes them only over IMGT-numbered output.
-    Absent that, fall back to a residue existing at IMGT position 10 — a
-    position every real V-domain FR1 covers, and one a mis-numbered
-    structure (e.g. plain sequential 1..N) will only hit by coincidence for
-    a chain shorter than 10 residues, which isn't a real antibody chain."""
+    AntiFold does not raise on wrongly-numbered structures. This block must
+    catch the problem before region tags attach to wrong residues.
+
+    A REMARK 99 PLATFORMA CDR record (if present) confirms IMGT numbering.
+    Absent that, check for a residue at IMGT position 10 — every real
+    V-domain FR1 includes position 10; a mislabeled structure would land
+    there only by chance."""
     if parsed.platforma_cdrs:
         return True
     for chain_id in parsed.chain_order:
@@ -287,15 +282,14 @@ def is_imgt_numbered(parsed: ParsedPdb) -> bool:
 
 
 def multi_domain_chain(parsed: ParsedPdb) -> str | None:
-    """The first chain that carries two domains, or None when every chain
-    carries one. Both symptoms name the same shape — an scFv's VH+VL on
-    one chain, or a Fab chain whose constant domain restarts at 1 — and
-    both break the `(chain, imgt)` pair every later step joins on.
+    """Return the first chain that carries two domains, or None.
 
-    Symptom one is a repeated `(res_seq, i_code)` pair, collected during
-    parsing. Symptom two is two `REMARK 99` roles naming one chain letter,
-    which also leaves `_role_of_pdb_chain` returning whichever role it
-    reaches first."""
+    An scFv (VH+VL on one chain) and a Fab constant domain restarting at 1
+    both put two domains on one chain, each numbered from 1. Either breaks
+    the (chain, imgt) pair every later step joins on.
+
+    This checks: repeated (res_seq, i_code) pairs (collected during parsing)
+    and two REMARK 99 roles naming one chain letter."""
     if parsed.multi_domain_chains:
         for chain_id in parsed.chain_order:
             if chain_id in parsed.multi_domain_chains:
@@ -329,11 +323,14 @@ def _role_of_pdb_chain(chain_id: str, chain_role_to_pdb_chain: dict[str, str]) -
 
 
 def index_residues(parsed: ParsedPdb) -> list[residue_store.Residue]:
-    """Build the `(chain, offset)` spine and project the IMGT label —
-    never a 1..N walk over a sequence: `offset` is assigned in ATOM-record
-    order, so `111`, `111A`..`111E`, `112` stay six distinct residues in
-    order, and a chain whose first ATOM record is residue `2` still gets
-    offset `0` there rather than `1`."""
+    """Build the `(chain, offset)` spine and project each residue's IMGT
+    label.
+
+    `offset` counts ATOM records in file order. It is not a 1..N walk
+    over a sequence. A chain whose first ATOM record is residue `2` still
+    gets offset `0` there. An insertion code gets its own offset too, so
+    `111`, `111A`..`111E`, `112` stay six distinct residues in that
+    order."""
     out: list[residue_store.Residue] = []
     for chain_id in parsed.chain_order:
         role = _role_of_pdb_chain(chain_id, parsed.chain_role_to_pdb_chain)
@@ -366,13 +363,11 @@ def index_residues(parsed: ParsedPdb) -> list[residue_store.Residue]:
 
 
 def index_one(pdb_path: str, out_residues: str) -> str:
-    """Index one antibody, or name why it cannot be indexed. Returns that
-    antibody's skip reason, or `""` when it passed.
+    """Index one antibody and return the skip reason, or empty string on success.
 
-    `out_residues` is written **only on success**. A skipped antibody leaves
-    no file at all, which is what lets a later reader treat absence as "an
-    earlier phase already named this one" — an empty file would make that
-    check a no-op and the antibody would be counted twice.
+    out_residues is written only on success. A missing file indicates an
+    earlier phase skipped this antibody; an empty file would break that
+    pattern (double-counting).
     """
     parsed = parse_pdb(Path(pdb_path).read_text())
     if not parsed.chain_order:
@@ -385,11 +380,11 @@ def index_one(pdb_path: str, out_residues: str) -> str:
         return "structure-multi-domain-chain"
 
     residues = index_residues(parsed)
-    # The index stays total — a constant-domain, antigen or second-arm
-    # residue is written out so exposure and AntiFold still see it. The
-    # skip fires only when nothing at all is researchable, so a file of
-    # pure constant region never reaches the scan phase as a silent empty
-    # scan.
+    # The index keeps every residue, including a constant-domain, antigen,
+    # or second-arm residue, so exposure and AntiFold still see it. The
+    # skip fires only when nothing at all is researchable. A file of pure
+    # constant region therefore never reaches the scan phase as a silent
+    # empty scan.
     if not any(r.in_scope for r in residues):
         return "no-researchable-residue"
 

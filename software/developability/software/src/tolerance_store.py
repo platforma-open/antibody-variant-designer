@@ -1,10 +1,10 @@
 """Read/write for `tolerance.tsv`, written by `read_tolerance.py`.
 
-One row per position AntiFold scored: `chain`, `posins` (the IMGT label,
-matching `residue_store.Residue.imgt`), `perplexity` (entropy in bits,
-`2^H₂(p)`, domain `[1,20]`), and the twenty amino-acid columns as
-**log-probabilities** — never the raw logits `save_flag=False` returns, so a
-later step never has to remember which base it is comparing.
+One row per position AntiFold scored. `posins` is the IMGT label, matching
+`residue_store.Residue.imgt`. `perplexity` is entropy in bits, `2^H₂(p)`, in the range `[1,20]`.
+The twenty amino-acid columns hold log-probabilities, never the raw
+logits `save_flag=False` returns. A later step therefore never has to
+remember which base it is comparing against.
 """
 
 import csv
@@ -25,9 +25,9 @@ def write_tolerance_tsv(path: str, rows: list[dict]) -> None:
 
 
 def read_tolerance_tsv(path: str) -> dict[tuple[str, str], dict]:
-    """Keyed `(chain, posins)` — the same pair `structure.index_residues`
-    assigns, so a later step looks a row up with the residue it already
-    has, no second join format to remember."""
+    """Keyed `(chain, posins)`, the same pair `structure.index_residues`
+    assigns. A later step looks a row up with the residue it already
+    holds. There is no second join format to remember."""
     lookup: dict[tuple[str, str], dict] = {}
     with Path(path).open(newline="") as fh:
         for row in csv.DictReader(fh, delimiter="\t"):

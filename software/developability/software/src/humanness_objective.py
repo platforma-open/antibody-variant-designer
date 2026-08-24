@@ -1,12 +1,4 @@
-"""The humanization objective.
-
-`position_prior` loads rather than computes: the model that produced these numbers needs torch and
-ran in an earlier step, in a different deployment unit. What crosses the boundary is a file.
-
-`score_candidate` accepts a candidate only when it raises humanness on the one chain its site
-touches, without moving a binding-supporting position or reintroducing a liability motifs.py or
-cysteine.py would flag.
-"""
+"""The humanization objective."""
 
 import csv
 from pathlib import Path
@@ -37,6 +29,9 @@ def build(prior_path: str, residues: list) -> design_objective.Objective:
     parent_by_chain: dict[str, float | None] = {}
 
     def position_prior(residues: list, triaged_list: list) -> dict:
+        """Loads the prior from `prior_path` instead of computing it. The model that produced
+        these numbers needs torch and ran in an earlier step, in a different deployment unit.
+        Only the file crosses this boundary."""
         del residues, triaged_list  # the file already names its own positions
         return load_prior(prior_path)
 
@@ -49,6 +44,9 @@ def build(prior_path: str, residues: list) -> design_objective.Objective:
     def score_candidate(
         mutated_site: list, taxonomy: list[dict], tolerance_lookup: dict
     ) -> design_objective.GoalCheck:
+        """Accepts a candidate only when it raises humanness on the one chain its site touches,
+        sits entirely inside a framework region, and does not reintroduce a liability
+        `motifs.py` or `cysteine.py` would flag."""
         del tolerance_lookup  # this objective measures humanness, not structural tolerance
         chains = {residue.chain for residue in mutated_site}
         if len(chains) != 1:
