@@ -229,9 +229,8 @@ class TestHumannessScoreRoundTrips:
 
 class TestNormalizeAndRerankScore:
     def test_a_mixed_candidates_two_terms_normalise_over_their_own_distinct_domain(self):
-        # Structural tolerance 5.0 over [1, 20] and humanness 80.0 over
-        # [0, 100] are two different fractions of two different domains,
-        # never the same fraction applied twice.
+        # Structural tolerance and humanness normalise over their own
+        # separate fixed domain, never the same fraction applied twice.
         v = _variant(structural_tolerance=5.0, humanness_score=80.0)
 
         assert variant_store._normalize(

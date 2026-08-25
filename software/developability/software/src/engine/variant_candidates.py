@@ -56,7 +56,7 @@ class Candidate:
     addressed_target: str
     changed_positions: str
     # humanness_score keeps the humanization objective's own score separate from
-    # `tolerance`, which every objective computes the same way.
+    # `tolerance`.
     humanness_score: float | None = None
 
 
@@ -192,8 +192,6 @@ def build_candidates(
             if not check.meets_goal:
                 continue
 
-            # tolerance is one field with one meaning for every objective; see its doc
-            # comment above.
             tolerance = design_objective.mean_tolerance(mutated_site, tolerance_lookup)
             humanness_score = check.score if is_humanness_objective else None
 

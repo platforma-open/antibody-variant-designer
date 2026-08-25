@@ -172,8 +172,8 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
         ]
 
         # Two distinct numbers on the same candidate: tolerance is the
-        # mean perplexity the table gives (4.0, 6.0), never the goal
-        # check's OASis identity.
+        # mean perplexity the table gives, never the goal check's OASis
+        # identity.
         assert candidate.tolerance == pytest.approx(5.0)
         assert candidate.humanness_score == pytest.approx(80.0)
 
