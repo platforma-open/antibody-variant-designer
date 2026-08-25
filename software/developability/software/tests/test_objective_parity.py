@@ -57,6 +57,21 @@ def _parent_pdb() -> str:
     return remarks + "\n" + make_pdb(residues)
 
 
+def _clean_parent_pdb() -> str:
+    """The same framework as `_parent_pdb`, with no `N[GS]` span — a parent no
+    liability triages, so the gate clears nothing and the step attempts and
+    skips it without ever reaching the objectives."""
+    remarks = "\n".join(
+        platforma_cdr_remark("H", i, "H", start, end)
+        for i, (start, end) in enumerate([(27, 38), (56, 65), (105, 117)], start=1)
+    )
+    residues = [
+        ("H", p, " ", "CYS" if p in _CONSERVED_CYS else "ALA", 20.0)
+        for p in range(1, 129)
+    ]
+    return remarks + "\n" + make_pdb(residues)
+
+
 def _tolerance_row(residue: residue_store.Residue) -> dict:
     log_probs = dict.fromkeys(tolerance_store.AMINO_ACIDS, -5.0)
     log_probs["D"], log_probs["S"], log_probs["A"] = -0.1, -0.2, -0.3
@@ -239,6 +254,54 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
             row["humannessVerdict"] == "none" and row["humannessSummary"] == "None"
             for row in humanness_rows
         )
+
+    def test_a_parent_the_gate_clears_nothing_for_still_gets_its_own_humanness_row(self, batch):
+        # The actual motivating case: a parent the liability objective clears
+        # no candidate for has no row anywhere else — no variants.tsv row,
+        # named instead in variants-skip.tsv — and that absence must not
+        # also swallow its humanness row.
+        pdb_dir_stem = "clean"
+        batch.add(pdb_dir_stem, _clean_parent_pdb())
+        definitions = batch.definitions(TAXONOMY)
+        residues_dir = batch.dir("residues")
+        triaged_dir = batch.dir("triaged")
+
+        rc = index_and_scan.main(
+            [
+                "--pdb-dir", str(batch.pdb_dir),
+                "--pdb-index", batch.index,
+                "--out-residues-dir", residues_dir,
+                "--definitions", definitions,
+                "--out-triaged-dir", triaged_dir,
+                "--out-liabilities", batch.path("liabilities.tsv"),
+                "--out-skip", batch.path("scan-skip.tsv"),
+            ]
+        )
+        assert rc == 0
+        tolerance_dir = batch.dir("tolerance")
+        _stage_tolerance(tolerance_dir, residues_dir, pdb_dir_stem)
+        self._stage_prior(tolerance_dir, pdb_dir_stem)
+        out_variants = batch.path("variants.tsv")
+        out_variants_skip = batch.path("variants-skip.tsv")
+        out_humanness = batch.path("humanness.tsv")
+        rc = build_variants.main(
+            [
+                "--triaged-dir", triaged_dir,
+                "--tolerance-dir", tolerance_dir,
+                "--residues-dir", residues_dir,
+                "--pdb-index", batch.index,
+                "--definitions", definitions,
+                "--out-variants", out_variants,
+                "--out-skip", out_variants_skip,
+                "--out-humanness", out_humanness,
+                "--run-mode", "liabilities + humanization",
+            ]
+        )
+        assert rc == 0
+
+        assert pdb_dir_stem not in {row["clonotypeKey"] for row in _rows_of(out_variants)}
+        assert pdb_dir_stem in {ck for ck, _, _ in skip_store.read_skips(out_variants_skip)}
+        assert pdb_dir_stem in {row["clonotypeKey"] for row in _rows_of(out_humanness)}
 
     def test_all_three_runs_variants_all_name_the_liability_objective(self, batch):
         definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
