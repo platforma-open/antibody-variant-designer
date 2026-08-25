@@ -149,6 +149,16 @@ class TestBuildVariantSequence:
 
         assert variant_ranking.build_variant_sequence(residues, ()) == "N"
 
+    def test_heavy_chain_precedes_light_chain_even_when_its_letter_sorts_after(self):
+        # "A" (light) sorts before "H" (heavy) alphabetically — the one input
+        # where the rendering order and the chain-letter order disagree.
+        residues = [
+            _residue("A", 0, "E", role="L"),
+            _residue("H", 0, "N", role="H"),
+        ]
+
+        assert variant_ranking.build_variant_sequence(residues, ()) == "NE"
+
     def test_heavy_chain_precedes_light_chain(self):
         residues = [
             _residue("L", 0, "E", role="L"),
