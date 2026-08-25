@@ -44,9 +44,7 @@ class Candidate:
     # The mean AntiFold perplexity over the edited positions — the entropy, in bits, of
     # AntiFold's amino-acid distribution at each position, a property of the positions rather
     # than of the substituted amino acid, unlike the per-amino-acid log-probability
-    # `_top_substitutions` ranks by. Computed by `design_objective.mean_tolerance`, the same
-    # way for every objective — never the objective's own `GoalCheck.score`, which the
-    # humanization objective uses for a different quantity (see `humanness_score` below).
+    # `_top_substitutions` ranks by. Computed by `design_objective.mean_tolerance`.
     tolerance: float
     # region, low_confidence and worst_confidence_angstroms ride forward unchanged from the
     # liability_triage.Triaged this candidate was built from; this module computes none of them.
@@ -57,9 +55,8 @@ class Candidate:
     # for the targeted liability, and the fixed-spelling rendering of the edits.
     addressed_target: str
     changed_positions: str
-    # Set to the humanization objective's own score; every other candidate's is None.
-    # `tolerance` already holds whichever objective ran. Reusing it here would put a
-    # liability perplexity in a humanness column.
+    # humanness_score keeps the humanization objective's own score separate from
+    # `tolerance`, which every objective computes the same way.
     humanness_score: float | None = None
 
 
@@ -195,8 +192,8 @@ def build_candidates(
             if not check.meets_goal:
                 continue
 
-            # structural_tolerance is one column with one meaning for every objective; see
-            # the field's own doc comment above.
+            # tolerance is one field with one meaning for every objective; see its doc
+            # comment above.
             tolerance = design_objective.mean_tolerance(mutated_site, tolerance_lookup)
             humanness_score = check.score if is_humanness_objective else None
 

@@ -30,9 +30,9 @@ _stampOrderPriority := func(columns) {
 // **This list fixes two orders at once.** Top to bottom it is the table's
 // column order, which `_stampOrderPriority` turns into each column's priority.
 // The rows that declare a `csvHeader`, read in the same order, are the vendor's
-// whole set, `humannessScore` included — `variantId` leads that set and is
-// built in `main.tpl.tengo` rather than declared here. Neither order is a
-// number a row carries; both are this one list's position.
+// whole set, `humannessScore` included. `variantId` leads that set; its spec is
+// `csvOnly`, so `main.tpl.tengo` builds the value and no table shows it. Neither
+// order is a number a row carries; both are this one list's position.
 //
 // This is the one list two readers share — `buildVariantsSettings` below and
 // `csvColumnOrder` at the end of the file — so it is a named list rather than a
@@ -576,7 +576,7 @@ csvColumnOrder := func(blockId) {
 	// The declaring rows in list order ARE the contract order — the identity
 	// rows sit between them and are stepped over, because the list orders the
 	// table and the vendor's set is only the part of it the vendor asked for.
-	// `specs.test.tengo` pins the exact thirteen headers, which is what stops the
+	// `specs.test.tengo` pins the exact header count, which is what stops the
 	// set growing when a row gains a `csvHeader` it should not have.
 	order := []
 	for d in variantColumns(blockId) {

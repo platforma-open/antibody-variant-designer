@@ -9,10 +9,6 @@ import io
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-# This file carries no run or block id column.
-# The workflow attaches run identity to these columns downstream, once this process finishes.
-# That lets two blocks over one dataset share this exec, instead of
-# computing the same variants twice.
 DEFAULT_ALPHA = 1.0
 DEFAULT_BETA = 1.0
 
@@ -22,6 +18,10 @@ DEFAULT_BETA = 1.0
 STRUCTURAL_TOLERANCE_DOMAIN = (1.0, 20.0)
 HUMANNESS_DOMAIN = (0.0, 100.0)
 
+# This file carries no run or block id column.
+# The workflow attaches run identity to these columns downstream, once this process finishes.
+# That lets two blocks over one dataset share this exec, instead of
+# computing the same variants twice.
 TSV_COLUMNS = [
     "clonotypeKey",
     "variantKey",
@@ -174,8 +174,7 @@ def _rerank_score(v: Variant, alpha: float, beta: float) -> float:
     """Returns `alpha * norm(structural tolerance) + beta * norm(humanness)`.
 
     Each term is scaled by its own fixed domain first, unclamped.
-    `alpha = beta = 1.0` then weighs the two terms equally. A variant with
-    no humanness number contributes nothing to the second term."""
+    `alpha = beta = 1.0` then weighs the two terms equally."""
     structural = _normalize(v.structural_tolerance, STRUCTURAL_TOLERANCE_DOMAIN)
     humanness = (
         0.0 if v.humanness_score is None else _normalize(v.humanness_score, HUMANNESS_DOMAIN)

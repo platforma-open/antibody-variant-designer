@@ -55,12 +55,12 @@ TestVariantColumns := func() {
 	settings := specs.buildVariantsSettings(BLOCK_ID)
 	byColumn := _byColumn(settings.columns)
 
-	// Seventeen value columns on one axis: the vendor's thirteen less `variantId`,
-	// which the vendor's CSV carries and no table does, then the four identity
+	// The value columns on one axis: the vendor's set less `variantId`, which
+	// the vendor's CSV carries and no table does, then the four identity
 	// columns that carry what the axes used to — the variant's own clonotype id,
 	// the parent binding in both spellings, and the ordinal — plus `parentRank`,
-	// a Variants-page-only view the vendor's contract never carried
-	// ([[088-decision-rank-becomes-a-global-ordinal-via-a-second-pass]]).
+	// a Variants-page-only view the vendor's contract never carried, because the
+	// page needs a rank that survives the global re-rank's second pass.
 	test.isEqual(17, len(settings.columns))
 	for c in settings.columns {
 		test.isTrue(c.column != "variantId")
@@ -138,8 +138,8 @@ TestVariantColumns := func() {
 		byColumn.worstConfidence.spec.annotations["pl7.app/structure/confidenceMetric"])
 
 	// The disclosure the humanness column carries verbatim: a reader of the
-	// column alone must not mistake a raw identity for a calibrated percentile,
-	// and the tier the identity is fixed at.
+	// column alone must not mistake a raw identity for a calibrated percentile.
+	// The description also names the tier the identity is fixed at.
 	test.isTrue(text.contains(
 		byColumn.humannessScore.spec.annotations["pl7.app/description"],
 		"NOT a calibrated OASis percentile"))
@@ -272,10 +272,9 @@ TestSynthesisCsvColumnOrder := func() {
 	// `pt.col(...).alias(...)` selection.
 	order := specs.csvColumnOrder(BLOCK_ID)
 
-	// Thirteen of the seventeen variant columns declare a `csvHeader` — the full
-	// vendor set, which now includes `humannessScore`. The four identity
-	// columns declare none, so the table can reorder around them without the
-	// vendor's set changing.
+	// The columns that declare a `csvHeader` are the full vendor set, which now
+	// includes `humannessScore`. The four identity columns declare none, so the
+	// table can reorder around them without the vendor's set changing.
 	test.isEqual(13, len(order))
 
 	headers := []
