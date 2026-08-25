@@ -71,11 +71,13 @@ _withParentClonotypeId := func(ptWf, df, parentLabels) {
  * Variants page's own `parentClonotypeKey`.
  *
  * @param liabilitiesFile: reference - the flat `liabilities.tsv` step 1 wrote
+ * @param humannessFile: reference - the flat `humanness.tsv` step 3 wrote, one
+ *                 row per parent that step attempted
  * @param parentLabels: frame | undefined - as in `_withParentClonotypeId`
  * @return reference - the same table with `parentClonotypeId` and
- *                 `parentClonotypeKey` added
+ *                 `parentClonotypeKey` added, and the humanness pair joined on
  */
-withParentIdOnLiabilities := func(liabilitiesFile, parentLabels) {
+withParentIdOnLiabilities := func(liabilitiesFile, humannessFile, parentLabels) {
 	ptWf := pt.workflow().mem("1GiB").cpu(1)
 	df := _withParentClonotypeId(
 		ptWf,
@@ -83,6 +85,16 @@ withParentIdOnLiabilities := func(liabilitiesFile, parentLabels) {
 		parentLabels)
 	df = df.withColumns(
 		pt.col("clonotypeKey").alias("parentClonotypeKey")
+	)
+	// LEFT, keyed on the liabilities table's own clonotypeKey: step 1 scanned
+	// parents step 3 never attempted, and those rows must survive with empty
+	// humanness cells rather than vanish from the page.
+	df = df.join(
+		ptWf.frame(humannessFile, { xsvType: "tsv", inferSchema: false }),
+		{ on: ["clonotypeKey"], how: "left" })
+	df = df.withColumns(
+		pt.col("humannessVerdict").fillNull(""),
+		pt.col("humannessSummary").fillNull("")
 	)
 	df.save("liabilities-with-id.tsv")
 	return ptWf.run().getFile("liabilities-with-id.tsv")

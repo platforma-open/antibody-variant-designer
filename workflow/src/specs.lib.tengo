@@ -554,6 +554,31 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 						"pl7.app/description": "Every triaged liability on this parent, comma-joined as <liability type>@<chain><IMGT position> (<verdict>), with the fixability class named when the verdict is fixability-declined. \"None\" when the parent triaged clean."
 					}
 				}
+			},
+			{
+				column: "humannessVerdict",
+				spec: {
+					name: "pl7.app/humannessVerdict",
+					valueType: "String",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Humanness Verdict",
+						"pl7.app/description": "Whether humanization found any non-human framework position on this parent at all — present or none. Empty when the run did not include the humanization objective, which is not the same as none. Read Humanness Summary for what was found and what was decided at each position.",
+						"pl7.app/isDiscreteFilter": "true"
+					}
+				}
+			},
+			{
+				column: "humannessSummary",
+				spec: {
+					name: "pl7.app/humannessSummary",
+					valueType: "String",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Humanness Summary",
+						"pl7.app/description": "Every framework position humanization considered on this parent, comma-joined as <wild type>@<chain><IMGT position> (humanised|declined) — declined means no candidate at that position cleared the humanness gate. \"None\" when every framework position already read as human. Empty when the run did not include the humanization objective."
+					}
+				}
 			}
 		]),
 		storageFormat: "Parquet"

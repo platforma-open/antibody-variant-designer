@@ -113,6 +113,7 @@ def _run(batch, extra_args=None):
             "--definitions", definitions,
             "--out-variants", out_variants,
             "--out-skip", out_skip,
+            "--out-humanness", batch.path("humanness.tsv"),
         ]
         + (extra_args or [])
     )
@@ -264,6 +265,7 @@ class TestMainRequiresTheTaxonomy:
                     "--definitions", missing,
                     "--out-variants", batch.path("variants.tsv"),
                     "--out-skip", batch.path("skip.tsv"),
+                    "--out-humanness", batch.path("humanness.tsv"),
                 ]
             )
 
@@ -302,6 +304,7 @@ class TestRunModeSelectsObjectives:
                     "--definitions", batch.definitions(TAXONOMY),
                     "--out-variants", out_variants,
                     "--out-skip", batch.path("skip.tsv"),
+                    "--out-humanness", batch.path("humanness.tsv"),
                     "--run-mode", "misspelled-mode",
                 ]
             )
@@ -337,7 +340,7 @@ class TestRunModeSelectsObjectives:
         triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
         tolerance_path = str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv"))
         residues_path = str(Path(batch.dir("residues"), f"{entry.stem}.json"))
-        _, per_objective = build_variants.process_one(
+        _, per_objective, _, _ = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
             5, 3, 1.0, 1.0, 10, 3.0, 20,
@@ -378,7 +381,7 @@ class TestRunModeSelectsObjectives:
         triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
         tolerance_path = str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv"))
         residues_path = str(Path(batch.dir("residues"), f"{entry.stem}.json"))
-        _, per_objective = build_variants.process_one(
+        _, per_objective, _, _ = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
             5, 3, 1.0, 1.0, 10, 3.0, 20,

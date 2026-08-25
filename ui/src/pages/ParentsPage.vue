@@ -27,7 +27,8 @@ const liabilitiesTableOutput = computed(() => app.model.outputs.liabilitiesTable
 // axis and puts that column first, Region second — the header set loses a
 // column and the rest change places. v6 drops the second axis and the six
 // per-liability columns for a coarse Verdict plus one joined Summary column
-// (`082-decision-the-liabilities-group-drops-to-one-axis`).
+// (`082-decision-the-liabilities-group-drops-to-one-axis`). v7 adds the
+// Humanness Verdict and Humanness Summary pair after Summary.
 //
 // It is `undefined` until a run produces a table — see `VariantsPage.vue` for
 // why the running placeholder depends on that.
@@ -35,7 +36,7 @@ const liabilitiesTableSettings = usePlDataTableSettingsV2({
   model: () => liabilitiesTableOutput.value,
   sourceId: () =>
     liabilitiesTableOutput.value.ok && liabilitiesTableOutput.value.value
-      ? "avd-liabilities-v6"
+      ? "avd-liabilities-v7"
       : undefined,
 });
 

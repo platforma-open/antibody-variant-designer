@@ -240,7 +240,10 @@ wf.body(func(args) {
 		specs.buildVariantsSettings(blockId),
 		{ splitDataAndSpec: true })
 	liabilitiesXsv := xsv.importFile(
-		specHelpers.withParentIdOnLiabilities(liabilities.output("liabilities"), parentLabels), "tsv",
+		specHelpers.withParentIdOnLiabilities(
+			liabilities.output("liabilities"),
+			variants.output("humanness"),
+			parentLabels), "tsv",
 		specs.buildParentsSettings(blockId, clonotypeAxis),
 		{ splitDataAndSpec: true })
 

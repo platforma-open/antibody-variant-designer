@@ -106,6 +106,7 @@ def _run_variants(batch, definitions, residues_dir, triaged_dir, extra_args=None
     _stage_tolerance(tolerance_dir, residues_dir, "clone-2")
     out_variants = batch.path("variants.tsv")
     out_variants_skip = batch.path("variants-skip.tsv")
+    out_humanness = batch.path("humanness.tsv")
 
     rc = build_variants.main(
         [
@@ -116,11 +117,12 @@ def _run_variants(batch, definitions, residues_dir, triaged_dir, extra_args=None
             "--definitions", definitions,
             "--out-variants", out_variants,
             "--out-skip", out_variants_skip,
+            "--out-humanness", out_humanness,
         ]
         + (extra_args or [])
     )
     assert rc == 0
-    return out_variants, out_variants_skip
+    return out_variants, out_variants_skip, out_humanness
 
 
 def _rows_of(path: str) -> list[dict]:
@@ -144,7 +146,7 @@ def _check_or_capture(produced_path: str, golden_name: str) -> None:
 class TestObjectiveSeamParity:
     def test_scan_and_variants_output_matches_the_pre_seam_golden_capture(self, batch):
         definitions, residues_dir, triaged_dir, out_liabilities, out_scan_skip = _run_scan(batch)
-        out_variants, out_variants_skip = _run_variants(
+        out_variants, out_variants_skip, _ = _run_variants(
             batch, definitions, residues_dir, triaged_dir
         )
 
@@ -164,7 +166,7 @@ class TestObjectiveSeamParity:
 
     def test_every_variant_row_names_the_liability_objective(self, batch):
         definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
-        out_variants, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
+        out_variants, _, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
 
         rows = _rows_of(out_variants)
         assert len(rows) > 0
@@ -180,7 +182,7 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
 
     def test_no_mode_flag_reproduces_every_golden_byte_for_byte(self, batch):
         definitions, residues_dir, triaged_dir, out_liabilities, out_scan_skip = _run_scan(batch)
-        out_variants, out_variants_skip = _run_variants(
+        out_variants, out_variants_skip, _ = _run_variants(
             batch, definitions, residues_dir, triaged_dir
         )
 
@@ -191,7 +193,7 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
 
     def test_liabilities_mode_reproduces_every_golden_byte_for_byte(self, batch):
         definitions, residues_dir, triaged_dir, out_liabilities, out_scan_skip = _run_scan(batch)
-        out_variants, out_variants_skip = _run_variants(
+        out_variants, out_variants_skip, _ = _run_variants(
             batch, definitions, residues_dir, triaged_dir,
             extra_args=["--run-mode", "liabilities"],
         )
@@ -205,7 +207,7 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
         definitions, residues_dir, triaged_dir, out_liabilities, out_scan_skip = _run_scan(batch)
         for stem in ("clone-1", "clone-2"):
             self._stage_prior(batch.dir("tolerance"), stem)
-        out_variants, out_variants_skip = _run_variants(
+        out_variants, out_variants_skip, out_humanness = _run_variants(
             batch, definitions, residues_dir, triaged_dir,
             extra_args=["--run-mode", "liabilities + humanization"],
         )
@@ -214,6 +216,29 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
         _check_or_capture(out_scan_skip, "scan-skip.tsv")
         _check_or_capture(out_variants, "variants.tsv")
         _check_or_capture(out_variants_skip, "variants-skip.tsv")
+        _check_or_capture(out_humanness, "humanness.tsv")
+
+    def test_a_parent_with_no_selected_target_is_still_visible_with_none_and_none(self, batch):
+        # The motivating case: neither fixture parent triages a framework
+        # liability, so the humanization objective selects nothing for
+        # either one — a parent left alone still has a row, distinct from
+        # never having been looked at (mode 1's empty cells, asserted
+        # elsewhere).
+        definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
+        for stem in ("clone-1", "clone-2"):
+            self._stage_prior(batch.dir("tolerance"), stem)
+
+        _, _, out_humanness = _run_variants(
+            batch, definitions, residues_dir, triaged_dir,
+            extra_args=["--run-mode", "liabilities + humanization"],
+        )
+
+        humanness_rows = _rows_of(out_humanness)
+        assert len(humanness_rows) == 2  # one per attempted parent
+        assert all(
+            row["humannessVerdict"] == "none" and row["humannessSummary"] == "None"
+            for row in humanness_rows
+        )
 
     def test_all_three_runs_variants_all_name_the_liability_objective(self, batch):
         definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
@@ -222,7 +247,7 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
 
         for extra_args in (None, ["--run-mode", "liabilities"],
                            ["--run-mode", "liabilities + humanization"]):
-            out_variants, _ = _run_variants(
+            out_variants, _, _ = _run_variants(
                 batch, definitions, residues_dir, triaged_dir, extra_args=extra_args
             )
             rows = _rows_of(out_variants)
@@ -249,6 +274,7 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
                     "--definitions", definitions,
                     "--out-variants", out_variants,
                     "--out-skip", batch.path("variants-skip.tsv"),
+                    "--out-humanness", batch.path("humanness.tsv"),
                     "--run-mode", "misspelled-mode",
                 ]
             )
@@ -260,10 +286,10 @@ class TestWeightedCombinationAtTheEntrypoint:
     def test_explicit_default_weights_match_omitted_weights(self, batch):
         definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
 
-        omitted, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
+        omitted, _, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
         omitted_bytes = Path(omitted).read_bytes()
 
-        explicit, _ = _run_variants(
+        explicit, _, _ = _run_variants(
             batch, definitions, residues_dir, triaged_dir,
             extra_args=["--w-struct", "1.0", "--w-obj", "1.0"],
         )
@@ -274,10 +300,10 @@ class TestWeightedCombinationAtTheEntrypoint:
         # nothing yet — moving it changes no byte of output today.
         definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
 
-        default, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
+        default, _, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
         default_bytes = Path(default).read_bytes()
 
-        raised, _ = _run_variants(
+        raised, _, _ = _run_variants(
             batch, definitions, residues_dir, triaged_dir, extra_args=["--w-obj", "5.0"]
         )
         assert Path(raised).read_bytes() == default_bytes
@@ -285,11 +311,11 @@ class TestWeightedCombinationAtTheEntrypoint:
     def test_a_zero_structural_weight_changes_the_proposed_substitutions(self, batch):
         definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
 
-        default, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
+        default, _, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
         default_bytes = Path(default).read_bytes()
         default_changed = {row["changedPositions"] for row in _rows_of(default)}
 
-        zeroed, _ = _run_variants(
+        zeroed, _, _ = _run_variants(
             batch, definitions, residues_dir, triaged_dir, extra_args=["--w-struct", "0.0"]
         )
         assert Path(zeroed).read_bytes() != default_bytes
@@ -348,6 +374,7 @@ class TestHumannessScoreAtTheRealEntrypoint:
         )
 
         out_variants = batch.path("variants.tsv")
+        out_humanness = batch.path("humanness.tsv")
         rc = build_variants.main(
             [
                 "--triaged-dir", batch.dir("triaged"),
@@ -357,17 +384,18 @@ class TestHumannessScoreAtTheRealEntrypoint:
                 "--definitions", batch.definitions([]),
                 "--out-variants", out_variants,
                 "--out-skip", batch.path("skip.tsv"),
+                "--out-humanness", out_humanness,
                 "--candidate-residues-per-position", "1",
                 "--run-mode", "liabilities + humanization",
             ]
         )
         assert rc == 0
-        return out_variants, batch.path("skip.tsv")
+        return out_variants, batch.path("skip.tsv"), out_humanness
 
     def test_a_cleared_humanization_candidate_writes_a_humanness_cell_distinct_from_tolerance(
         self, batch, monkeypatch
     ):
-        out_variants, _ = self._run_liability_and_humanization(batch, monkeypatch)
+        out_variants, _, _ = self._run_liability_and_humanization(batch, monkeypatch)
 
         rows = [row for row in _rows_of(out_variants) if row["objective"] == "humanness"]
         assert len(rows) == 1
@@ -380,7 +408,7 @@ class TestHumannessScoreAtTheRealEntrypoint:
     def test_the_liability_objectives_own_row_leaves_the_humanness_cell_empty(
         self, batch, monkeypatch
     ):
-        out_variants, _ = self._run_liability_and_humanization(batch, monkeypatch)
+        out_variants, _, _ = self._run_liability_and_humanization(batch, monkeypatch)
 
         rows = [row for row in _rows_of(out_variants) if row["objective"] == "liability"]
         assert len(rows) == 1
@@ -390,15 +418,36 @@ class TestHumannessScoreAtTheRealEntrypoint:
         # The humanization row's tolerance alone (2.0, near the domain floor)
         # would rank it last under the old, tolerance-only order; its
         # humanness term (>= 70/100) must outweigh that and put it first.
-        out_variants, _ = self._run_liability_and_humanization(batch, monkeypatch)
+        out_variants, _, _ = self._run_liability_and_humanization(batch, monkeypatch)
 
         rows = sorted(_rows_of(out_variants), key=lambda r: int(r["rank"]))
         assert rows[0]["objective"] == "humanness"
 
+    def test_the_considered_position_reads_present_and_names_its_own_verdict(
+        self, batch, monkeypatch
+    ):
+        # The motivating case for `humanness_store.py`: a parent that carries
+        # a non-human framework position names it, humanised or declined,
+        # in `humanness.tsv` — the Parents page's only source for this.
+        _, _, out_humanness = self._run_liability_and_humanization(batch, monkeypatch)
+
+        [row] = _rows_of(out_humanness)
+        assert row["humannessVerdict"] == "present"
+        assert "humanised" in row["humannessSummary"] or "declined" in row["humannessSummary"]
+
     def test_a_liability_only_run_leaves_every_humanness_cell_empty(self, batch):
         definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
 
-        out_variants, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
+        out_variants, _, out_humanness = _run_variants(
+            batch, definitions, residues_dir, triaged_dir
+        )
+
+        humanness_rows = _rows_of(out_humanness)
+        assert len(humanness_rows) == 2  # one per attempted parent, mode 1 makes no claim
+        assert all(
+            row["humannessVerdict"] == "" and row["humannessSummary"] == ""
+            for row in humanness_rows
+        )
 
         rows = _rows_of(out_variants)
         assert len(rows) > 0

@@ -63,7 +63,7 @@ self.validateInputs({
 	}
 })
 
-self.defineOutputs("variants", "skip", "skipContent")
+self.defineOutputs("variants", "humanness", "skip", "skipContent")
 
 self.body(func(inputs) {
 	return buildVariants.run({

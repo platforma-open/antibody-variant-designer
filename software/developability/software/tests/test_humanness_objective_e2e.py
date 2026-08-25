@@ -160,6 +160,7 @@ def _run(batch, extra_args=None):
         "--definitions", definitions,
         "--out-variants", out_variants,
         "--out-skip", out_skip,
+        "--out-humanness", batch.path("humanness.tsv"),
         # Asking for more than the top-ranked substitution would let a
         # second, unsteered amino acid into the candidate set too.
         "--candidate-residues-per-position", "1",

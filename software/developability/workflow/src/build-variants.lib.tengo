@@ -18,6 +18,7 @@ variantsSw := assets.importSoftware("@platforma-open/milaboratories.antibody-var
 
 VARIANTS_FILE := "variants.tsv"
 SKIP_FILE := "skip.tsv"
+HUMANNESS_FILE := "humanness.tsv"
 
 // The tag the RAM formula measures. All three staged directories carry it: an
 // iteration reads one antibody's tolerance matrix, its residues and its triaged
@@ -102,7 +103,7 @@ ARGS := {
 /**
  * Build, gate and rank the variants of every antibody in the PDB index.
  *
- * @return {variants: file, skip: file, skipContent: content}
+ * @return {variants: file, humanness: file, skip: file, skipContent: content}
  */
 run := func(args) {
 	validation.assertType(args, ARGS, "build-variants: bad args")
@@ -129,6 +130,7 @@ run := func(args) {
 		arg("--definitions").arg("definitions.json").
 		arg("--out-variants").arg(VARIANTS_FILE).
 		arg("--out-skip").arg(SKIP_FILE).
+		arg("--out-humanness").arg(HUMANNESS_FILE).
 		arg("--run-mode").arg(args.params.runMode).
 		arg("--max-edits-per-variant").arg(string(args.params.maxEditsPerVariant)).
 		arg("--candidate-residues-per-position").
@@ -139,12 +141,14 @@ run := func(args) {
 		arg("--low-tolerance-floor").arg(string(args.params.lowToleranceFloor)).
 		arg("--epistasis-rescore-top-k").arg(string(args.params.epistasisRescoreTopK)).
 		saveFile(VARIANTS_FILE).
+		saveFile(HUMANNESS_FILE).
 		saveFile(SKIP_FILE).
 		saveFileContent(SKIP_FILE).
 		run()
 
 	return {
 		variants: result.getFile(VARIANTS_FILE),
+		humanness: result.getFile(HUMANNESS_FILE),
 		skip: result.getFile(SKIP_FILE),
 		skipContent: result.getFileContent(SKIP_FILE)
 	}

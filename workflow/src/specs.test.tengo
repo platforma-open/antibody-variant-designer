@@ -178,7 +178,7 @@ TestParentsGroup := func() {
 	test.isEqual(1, len(settings.axes))
 	test.isEqual("pl7.app/vdj/scClonotypeKey", settings.axes[0].spec.name)
 
-	test.isEqual(4, len(settings.columns))
+	test.isEqual(6, len(settings.columns))
 	test.isEqual("pl7.app/liabilities/verdict", byColumn.verdict.spec.name)
 	test.isEqual("pl7.app/liabilities/summary", byColumn.summary.spec.name)
 	test.isEqual("String", byColumn.verdict.spec.valueType)
@@ -208,11 +208,32 @@ TestParentsGroup := func() {
 	test.isEqual("hidden", settings.axes[0].spec.annotations["pl7.app/table/visibility"])
 	test.isTrue(is_undefined(CLONOTYPE_AXIS.annotations["pl7.app/table/visibility"]))
 
-	// The parent leads, then its key, then Verdict, then Summary — the list order.
+	// The parent leads, then its key, then Verdict, then Summary, then the
+	// humanness pair — the list order.
 	test.isEqual("parentClonotypeId", settings.columns[0].column)
 	test.isEqual("parentClonotypeKey", settings.columns[1].column)
 	test.isEqual("verdict", settings.columns[2].column)
 	test.isEqual("summary", settings.columns[3].column)
+	test.isEqual("humannessVerdict", settings.columns[4].column)
+	test.isEqual("humannessSummary", settings.columns[5].column)
+}
+
+TestParentsHumannessPair := func() {
+	settings := specs.buildParentsSettings(BLOCK_ID, CLONOTYPE_AXIS)
+	byColumn := _byColumn(settings.columns)
+
+	// Mirrors the shipped liability pair's shape and nothing else: a
+	// discretely-filterable verdict plus a free-text summary, both scoped to
+	// this run's block id like every other column here — the three whole-set
+	// loops below already cover the block id, the value type and the
+	// label/description.
+	test.isEqual("pl7.app/humannessVerdict", byColumn.humannessVerdict.spec.name)
+	test.isEqual("String", byColumn.humannessVerdict.spec.valueType)
+	test.isEqual("true", byColumn.humannessVerdict.spec.annotations["pl7.app/isDiscreteFilter"])
+
+	test.isEqual("pl7.app/humannessSummary", byColumn.humannessSummary.spec.name)
+	test.isEqual("String", byColumn.humannessSummary.spec.valueType)
+	test.isTrue(is_undefined(byColumn.humannessSummary.spec.annotations["pl7.app/isDiscreteFilter"]))
 }
 
 TestEveryColumnCarriesTheBlockId := func() {
@@ -325,6 +346,6 @@ TestOrderPriorityFollowsListPosition := func() {
 	// one step.
 	test.isEqual("17000", variants.columns[0].spec.annotations["pl7.app/table/orderPriority"])
 	test.isEqual("1000", variants.columns[16].spec.annotations["pl7.app/table/orderPriority"])
-	test.isEqual("4000", parents.columns[0].spec.annotations["pl7.app/table/orderPriority"])
-	test.isEqual("1000", parents.columns[3].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("6000", parents.columns[0].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("1000", parents.columns[5].spec.annotations["pl7.app/table/orderPriority"])
 }

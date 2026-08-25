@@ -14,6 +14,7 @@ from pathlib import Path
 
 from engine import (
     antibody_batch,
+    humanness_store,
     liability_store,
     pdb_index_store,
     residue_store,
@@ -44,20 +45,33 @@ def process_one(
     variants_per_parent: int,
     low_tolerance_floor: float,
     epistasis_rescore_top_k: int,
-) -> tuple[str, list[tuple[str, list[variant_store.Variant]]]]:
+) -> tuple[str, list[tuple[str, list[variant_store.Variant]]], list | None, list]:
     """Gate then rank one antibody against every objective `mode` runs.
 
     Returns the skip reason, `""` on pass. Returns each objective's ranked
     variants as `(objective_name, variants)` pairs, in run order, for the
-    caller to append to the run's one `variants.tsv` under that name."""
+    caller to append to the run's one `variants.tsv` under that name.
+
+    Also returns the humanization objective's own target set and gate-cleared
+    candidates — `None` targets when `mode` never runs that objective — for the
+    caller to reduce into this parent's one `humanness.tsv` row. Neither value
+    is influenced by the liability objective's own targets or candidates."""
     tolerance_lookup = tolerance_store.read_tolerance_tsv(tolerance_path)
     residues = residue_store.read_residues(residues_path)
     triaged = liability_store.read_triaged(triaged_path)
 
     per_objective: list[tuple[str, list[variant_store.Variant]]] = []
+    humanness_targets: list | None = None
+    humanness_cleared: list = []
     emitted = 0  # the second objective numbers on from the first, never from v01
     for name, build_objective in run_mode.objectives_for(mode, prior_path):
         targets = run_mode.targets_for(name, triaged)
+        if name == run_mode.HUMANNESS:
+            # `targets` is Triaged-shaped here — the same shape `build_candidates`
+            # below needs — but `humanness_store` reduces over the framework
+            # position itself. `t.site[0]` is the span start, the same residue
+            # `liability_store.liability_key` names a triaged site by.
+            humanness_targets = [t.site[0] for t in targets]
         if not targets:
             continue
         cleared = variant_candidates.build_candidates(
@@ -72,6 +86,8 @@ def process_one(
             w_struct,
             w_obj,
         )
+        if name == run_mode.HUMANNESS:
+            humanness_cleared = cleared
         if not cleared:
             continue
 
@@ -87,7 +103,12 @@ def process_one(
         emitted += len(ranked)
         per_objective.append((name, ranked))
 
-    return ("" if emitted else NO_CANDIDATE_REASON), per_objective
+    return (
+        "" if emitted else NO_CANDIDATE_REASON,
+        per_objective,
+        humanness_targets,
+        humanness_cleared,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -110,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out-variants", required=True)
     parser.add_argument("--out-skip", required=True)
+    parser.add_argument("--out-humanness", required=True)
     # The gate reads these two flags. Nothing else does.
     parser.add_argument(
         "--max-edits-per-variant",
@@ -167,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     tolerance_dir = Path(args.tolerance_dir)
     residues_dir = Path(args.residues_dir)
     variant_store.write_variants_header(args.out_variants)
+    humanness_store.write_humanness_header(args.out_humanness)
 
     def one(entry: pdb_index_store.Entry) -> str | None:
         triaged_path = triaged_dir / f"{entry.stem}.json"
@@ -183,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.run_mode == run_mode.LIABILITIES_AND_HUMANIZATION and not prior_path.is_file():
             return None
 
-        reason, per_objective = process_one(
+        reason, per_objective, humanness_targets, humanness_cleared = process_one(
             str(triaged_path),
             str(tolerance_path),
             str(residues_path),
@@ -202,6 +225,12 @@ def main(argv: list[str] | None = None) -> int:
             variant_store.append_variants_tsv(
                 args.out_variants, entry.clonotype_key, objective_name, variants
             )
+        # One row for every parent this step attempts, pass or skip alike — the
+        # invisibility `humanness_store.py` exists to remove is a parent with no
+        # row anywhere, not a parent with an empty one.
+        humanness_store.append_humanness_tsv(
+            args.out_humanness, entry.clonotype_key, humanness_targets, humanness_cleared
+        )
         return reason
 
     rc = antibody_batch.run(pdb_index_store.read_index(args.pdb_index), one, args.out_skip)
