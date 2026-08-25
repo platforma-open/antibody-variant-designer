@@ -147,6 +147,38 @@ def _stub_rising_on_d(monkeypatch):
     monkeypatch.setattr(humanness_gate, "identity", lambda seq: float(seq.count("D")))
 
 
+def _light_framework_residue():
+    # The paired fixture's one light-chain residue — enough for
+    # `residue_store.in_scope_chains` to yield an `L` chain beside the `H`
+    # one `_framework_residue`/`_ng_site` already carry.
+    return residue_store.Residue(
+        chain="L", offset=0, imgt="1", wild_type="Q", res_name="Q",
+        b_factor=20.0, region="FR1", chain_role="L",
+    )
+
+
+def _stage_paired(batch, clonotype_key, non_human_prior_score):
+    """`_stage_mixed`'s parent with one light-chain residue added — a paired
+    antibody, for the two humanness-score columns to tell apart."""
+    entry = batch.add(clonotype_key)
+    residues = [_framework_residue(), *_ng_site(), _light_framework_residue()]
+    liability_store.write_triaged(
+        str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_triaged(_ng_site())]
+    )
+    tolerance_store.write_tolerance_tsv(
+        str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+        [*_tolerance_rows(), {"posins": "1", **_row(["D", "Q", "A"], "N", 3.0)}],
+    )
+    residue_store.write_residues(
+        str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
+    )
+    _write_prior_tsv(
+        Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"),
+        non_human_prior_score,
+    )
+    return entry
+
+
 def _stage_mixed(batch, clonotype_key, non_human_prior_score):
     """One parent carrying both a liability (the `_ng_site` deamidation
     motif, on CDR1) and a non-human framework position (`_framework_residue`,
@@ -606,6 +638,58 @@ class TestHumanizationModeEndToEnd:
             )
         assert {reason for _, reason, _ in skips} == {""}
         assert by_key["mixed"] == by_key["plain"]
+
+
+class TestParentHumannessScoresEndToEnd:
+    """`humanness.tsv`'s two new score columns, across the run modes and antibody shapes
+    TODO-19's Outcome names."""
+
+    def test_a_paired_parent_scores_both_chains_from_the_gate(self, batch, monkeypatch):
+        # A stub distinguishable by chain: the fixture's H sequence is three
+        # residues, its L sequence one, so a landing on the wrong column
+        # would be a visible number mismatch, not a silent one.
+        monkeypatch.setattr(humanness_gate, "identity", lambda seq: float(len(seq)))
+        _stage_paired(batch, "clone-1", non_human_prior_score=0.01)
+
+        _, _, humanness_rows = _run_mixed(batch, ["--run-mode", "humanization"])
+
+        [row] = humanness_rows
+        assert row["heavyHumannessScore"] == "3.0"
+        assert row["lightHumannessScore"] == "1.0"
+
+    def test_a_single_chain_parent_leaves_the_light_column_empty(self, batch, monkeypatch):
+        _stub_rising_on_d(monkeypatch)
+        _stage_mixed(batch, "clone-1", non_human_prior_score=0.01)
+
+        _, _, humanness_rows = _run_mixed(batch, ["--run-mode", "humanization"])
+
+        [row] = humanness_rows
+        assert row["heavyHumannessScore"] != ""
+        assert row["lightHumannessScore"] == ""
+
+    def test_liabilities_mode_over_the_same_input_leaves_both_columns_empty(self, batch):
+        _stage_mixed(batch, "clone-1", non_human_prior_score=0.01)
+
+        _, _, humanness_rows = _run_mixed(batch, ["--run-mode", "liabilities"])
+
+        [row] = humanness_rows
+        assert row["heavyHumannessScore"] == ""
+        assert row["lightHumannessScore"] == ""
+
+    def test_a_parent_whose_candidates_were_all_gate_discarded_still_gets_its_scores(
+        self, batch, monkeypatch
+    ):
+        # Every candidate ties the parent's own score rather than raising
+        # it, so the gate's strict-rise rule discards them all — the row's
+        # own scores must not depend on any candidate surviving.
+        monkeypatch.setattr(humanness_gate, "identity", lambda seq: 5.0)
+        _stage_mixed(batch, "clone-1", non_human_prior_score=0.01)
+
+        _, written, humanness_rows = _run_mixed(batch, ["--run-mode", "humanization"])
+
+        assert written == []
+        [row] = humanness_rows
+        assert row["heavyHumannessScore"] == "5.0"
 
 
 class TestReRankWeightsReachTheGlobalRewrite:

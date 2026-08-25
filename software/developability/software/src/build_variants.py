@@ -14,6 +14,7 @@ from pathlib import Path
 
 from engine import (
     antibody_batch,
+    humanness_gate,
     humanness_objective,
     humanness_store,
     liability_store,
@@ -44,6 +45,7 @@ class ParentDesignResult:
     per_objective: list[tuple[str, list[variant_store.Variant]]]
     humanness_targets: list[residue_store.Residue] | None
     humanness_cleared: list[variant_candidates.Candidate]
+    humanness_parent_scores: dict[str, float | None]
 
 
 def process_one(
@@ -81,6 +83,7 @@ def process_one(
     per_objective: list[tuple[str, list[variant_store.Variant]]] = []
     humanness_targets: list | None = None
     humanness_cleared: list = []
+    humanness_parent_scores: dict[str, float | None] = {}
     emitted = 0  # the second objective numbers on from the first, never from v01
     for name, build_objective in run_mode.objectives_for(mode, prior_path, non_human_prior_cutoff):
         objective = build_objective(residues)
@@ -90,6 +93,13 @@ def process_one(
             # reduces over the framework position itself, and a humanization target can carry
             # more than one.
             humanness_targets = [residue for target in targets for residue in target.site]
+            # The parent's own baseline, one score per in-scope chain, through the same gate
+            # a candidate is judged by — independent of whether the objective selected a
+            # target on that chain, so a parent with nothing to humanize still gets a score.
+            humanness_parent_scores = {
+                chain.chain_role: humanness_gate.identity(chain.sequence)
+                for chain in residue_store.in_scope_chains(residues)
+            }
         if not targets:
             continue
         cleared = variant_candidates.build_candidates(
@@ -133,6 +143,7 @@ def process_one(
         per_objective=per_objective,
         humanness_targets=humanness_targets,
         humanness_cleared=humanness_cleared,
+        humanness_parent_scores=humanness_parent_scores,
     )
 
 
@@ -268,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
             entry.clonotype_key,
             result.humanness_targets,
             result.humanness_cleared,
+            result.humanness_parent_scores,
         )
         return result.skip_reason
 

@@ -94,7 +94,9 @@ withParentIdOnLiabilities := func(liabilitiesFile, humannessFile, parentLabels) 
 		{ on: ["clonotypeKey"], how: "left" })
 	df = df.withColumns(
 		pt.col("humannessVerdict").fillNull(""),
-		pt.col("humannessSummary").fillNull("")
+		pt.col("humannessSummary").fillNull(""),
+		pt.col("heavyHumannessScore").fillNull(""),
+		pt.col("lightHumannessScore").fillNull("")
 	)
 	df.save("liabilities-with-id.tsv")
 	return ptWf.run().getFile("liabilities-with-id.tsv")

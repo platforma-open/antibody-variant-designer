@@ -579,6 +579,32 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 						"pl7.app/description": "Every framework position humanization considered on this parent, comma-joined as <wild type>@<chain><IMGT position> (humanised|declined) — declined means no candidate at that position cleared the humanness gate. \"None\" when every framework position already read as human. Empty when the run did not include the humanization objective."
 					}
 				}
+			},
+			{
+				column: "heavyHumannessScore",
+				spec: {
+					name: "pl7.app/humannessScore",
+					valueType: "Double",
+					domain: { "pl7.app/vdj/chain": "IGHeavy" },
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Heavy humanness",
+						"pl7.app/description": "This parent's own heavy chain scored on the humanness scale, before any edit — the baseline each of its variants had to beat. Raw identity at one fixed tier, not a calibrated percentile, so it is not comparable with a published figure. Empty when the run did not include the humanization objective."
+					}
+				}
+			},
+			{
+				column: "lightHumannessScore",
+				spec: {
+					name: "pl7.app/humannessScore",
+					valueType: "Double",
+					domain: { "pl7.app/vdj/chain": "IGLight" },
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Light humanness",
+						"pl7.app/description": "This parent's own light chain scored on the humanness scale, before any edit. Raw identity at one fixed tier, not a calibrated percentile, so it is not comparable with a published figure. Empty for a single-chain antibody and when the run did not include the humanization objective."
+					}
+				}
 			}
 		]),
 		storageFormat: "Parquet"

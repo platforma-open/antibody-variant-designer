@@ -1,5 +1,6 @@
 """Reduces one parent's considered framework positions to a coarse verdict and one joined
-summary line, and appends its row to the run's one humanness file.
+summary line, and appends its row to the run's one humanness file — alongside the parent's own
+per-chain baseline score, measured once regardless of what the reduction finds.
 
 Mirrors `liability_store.py`'s verdict/summary pair: same two literals for "nothing found",
 same comma-joined summary shape, same append-per-parent file. The one addition is a third
@@ -17,6 +18,8 @@ TSV_COLUMNS = [
     "clonotypeKey",
     "humannessVerdict",
     "humannessSummary",
+    "heavyHumannessScore",
+    "lightHumannessScore",
 ]
 
 AMINO_SEP = ", "
@@ -70,8 +73,14 @@ def append_humanness_tsv(
     clonotype_key: str,
     targets: list[residue_store.Residue] | None,
     cleared: list[variant_candidates.Candidate],
+    humanness_parent_scores: dict[str, float | None],
 ) -> None:
     """Appends this parent's one row, reducing through summarize_humanness.
+
+    humanness_parent_scores is the parent's own baseline, keyed by chain role ("H"/"L") — empty
+    when the objective did not run for this parent, missing a role for a single-chain antibody,
+    and `None` for a role the gate could not score. Each case leaves that role's column empty,
+    the same three-state reading the verdict and summary columns already carry.
 
     Appends rather than returning a row to collect, for the reason `liability_store.py`'s
     `append_liabilities_tsv` gives: one file holds the whole dataset and the pipeline
@@ -79,6 +88,14 @@ def append_humanness_tsv(
     parent_summary = summarize_humanness(targets, cleared)
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-    writer.writerow([_tsv_value(clonotype_key), parent_summary.verdict, parent_summary.summary])
+    writer.writerow(
+        [
+            _tsv_value(clonotype_key),
+            parent_summary.verdict,
+            parent_summary.summary,
+            _tsv_value(humanness_parent_scores.get("H")),
+            _tsv_value(humanness_parent_scores.get("L")),
+        ]
+    )
     with Path(path).open("a") as fh:
         fh.write(buf.getvalue())
