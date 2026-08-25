@@ -577,7 +577,7 @@ csvColumnOrder := func(blockId) {
 	// The declaring rows in list order ARE the contract order — the identity
 	// rows sit between them and are stepped over, because the list orders the
 	// table and the vendor's set is only the part of it the vendor asked for.
-	// `specs.test.tengo` pins the exact header count, which is what stops the
+	// `specs.test.tengo` pins the exact thirteen headers, which is what stops the
 	// set growing when a row gains a `csvHeader` it should not have.
 	order := []
 	for d in variantColumns(blockId) {

@@ -351,8 +351,8 @@ class TestRunModeSelectsObjectives:
         self, batch, monkeypatch
     ):
         # The same stub, but its score is distinguishable from every fold
-        # tolerance in the fixture (5.0) — a landing on the wrong field
-        # would be a visible number match, not a silent one.
+        # tolerance in the fixture — a landing on the wrong field would be
+        # a visible number match, not a silent one.
         entry = _stage(batch, "clone-1")
         stub_objective = design_objective.Objective(
             select_target_positions=lambda residues, taxonomy: [],
@@ -388,8 +388,7 @@ class TestRunModeSelectsObjectives:
         assert all(v.humanness_score is None for v in by_name[run_mode.LIABILITY])
         assert all(v.humanness_score == pytest.approx(80.0) for v in by_name[run_mode.HUMANNESS])
         # And the tolerance the stub's own score never reaches: this fixture's
-        # two positions carry perplexities 5.0 and 2.0, mean 3.5, on every
-        # variant — never the stub's 80.0.
+        # two-position mean, never the stub's score.
         assert all(
             v.structural_tolerance == pytest.approx(3.5)
             for variants in by_name.values()
