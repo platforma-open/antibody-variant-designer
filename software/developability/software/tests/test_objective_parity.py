@@ -59,8 +59,9 @@ def _parent_pdb() -> str:
 
 def _clean_parent_pdb() -> str:
     """The same framework as `_parent_pdb`, with no `N[GS]` span — a parent no
-    liability triages, so the gate clears nothing and the step attempts and
-    skips it without ever reaching the objectives."""
+    liability triages, so the gate clears nothing and the step names it a
+    skip in `variants.tsv` while the humanization objective still runs and
+    selects zero targets."""
     remarks = "\n".join(
         platforma_cdr_remark("H", i, "H", start, end)
         for i, (start, end) in enumerate([(27, 38), (56, 65), (105, 117)], start=1)
