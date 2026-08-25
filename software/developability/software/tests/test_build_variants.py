@@ -14,6 +14,7 @@ from engine import (
     run_mode,
     skip_store,
     tolerance_store,
+    variant_candidates,
     variant_store,
 )
 
@@ -340,15 +341,17 @@ class TestRunModeSelectsObjectives:
         triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
         tolerance_path = str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv"))
         residues_path = str(Path(batch.dir("residues"), f"{entry.stem}.json"))
-        _, per_objective, _, _ = build_variants.process_one(
+        result = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
             5, 3, 1.0, 1.0, 10, 3.0, 20,
         )
 
-        keys = [v.parent_rank for _, variants in per_objective for v in variants]
+        keys = [v.parent_rank for _, variants in result.per_objective for v in variants]
         assert len(keys) == len(set(keys))
-        assert [name for name, _ in per_objective] == [run_mode.LIABILITY, run_mode.HUMANNESS]
+        assert [name for name, _ in result.per_objective] == [
+            run_mode.LIABILITY, run_mode.HUMANNESS,
+        ]
 
     def test_the_humanization_objectives_score_lands_on_its_candidate_as_humanness(
         self, batch, monkeypatch
@@ -381,13 +384,13 @@ class TestRunModeSelectsObjectives:
         triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
         tolerance_path = str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv"))
         residues_path = str(Path(batch.dir("residues"), f"{entry.stem}.json"))
-        _, per_objective, _, _ = build_variants.process_one(
+        result = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
             5, 3, 1.0, 1.0, 10, 3.0, 20,
         )
 
-        by_name = dict(per_objective)
+        by_name = dict(result.per_objective)
         assert all(v.humanness_score is None for v in by_name[run_mode.LIABILITY])
         assert all(v.humanness_score == pytest.approx(80.0) for v in by_name[run_mode.HUMANNESS])
         # And the tolerance the stub's own score never reaches: this fixture's
@@ -397,6 +400,66 @@ class TestRunModeSelectsObjectives:
             for variants in by_name.values()
             for v in variants
         )
+
+    def test_the_design_result_names_its_two_lists(self, batch, monkeypatch):
+        entry = _stage(batch, "clone-1", with_prior=True)
+        stub_objective = design_objective.Objective(
+            select_target_positions=lambda residues, taxonomy: [],
+            position_prior=None,
+            score_candidate=lambda mutated_site, taxonomy, tolerance_lookup: (
+                design_objective.GoalCheck(meets_goal=True, score=80.0)
+            ),
+        )
+        fixed_site = _ng_site()[:1]
+        fixed_triaged = _triaged(fixed_site)
+        monkeypatch.setattr(
+            build_variants.run_mode,
+            "objectives_for",
+            lambda mode, prior_path: [
+                (run_mode.LIABILITY, lambda _residues: stub_objective),
+                (run_mode.HUMANNESS, lambda _residues: stub_objective),
+            ],
+        )
+        monkeypatch.setattr(
+            build_variants.run_mode,
+            "targets_for",
+            lambda name, triaged_list: (
+                [fixed_triaged] if name == run_mode.HUMANNESS else triaged_list
+            ),
+        )
+
+        triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
+        tolerance_path = str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv"))
+        residues_path = str(Path(batch.dir("residues"), f"{entry.stem}.json"))
+        result = build_variants.process_one(
+            triaged_path, tolerance_path, residues_path, TAXONOMY,
+            "liabilities + humanization", "unused-prior-path",
+            5, 3, 1.0, 1.0, 10, 3.0, 20,
+        )
+
+        # `humanness_targets` is the objective's own selected framework
+        # positions, distinct from `humanness_cleared`'s gate survivors —
+        # neither list's contents leak into the other's field.
+        assert result.humanness_targets == fixed_site
+        assert all(isinstance(c, variant_candidates.Candidate) for c in result.humanness_cleared)
+
+    def test_a_mode_that_never_runs_humanization_leaves_the_targets_absent(self, batch):
+        entry = _stage(batch, "clone-1")
+
+        triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
+        tolerance_path = str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv"))
+        residues_path = str(Path(batch.dir("residues"), f"{entry.stem}.json"))
+        result = build_variants.process_one(
+            triaged_path, tolerance_path, residues_path, TAXONOMY,
+            "liabilities", "unused-prior-path",
+            5, 3, 1.0, 1.0, 10, 3.0, 20,
+        )
+
+        # Mode 1 never runs the humanization objective at all — its targets
+        # stay `None`, distinct from the empty list an objective that ran
+        # and selected nothing would leave.
+        assert result.humanness_targets is None
+        assert result.humanness_cleared == []
 
 
 class TestReRankWeightsReachTheGlobalRewrite:

@@ -67,24 +67,6 @@ def _qualifying_entries(taxonomy: list[dict]) -> list[dict]:
     ]
 
 
-def _by_chain(residues: list[residue_store.Residue]) -> dict:
-    """Only in-scope residues: a residue whose chain carries a role and
-    which itself carries an IMGT region.
-
-    Dropping the rest before the sequence is joined keeps a constant
-    domain, a second Fab arm, and an antigen out of the scan. It also
-    stops a motif from matching across a V-domain/linker or a
-    V-domain/C-domain junction, where no such motif exists."""
-    chains: dict = {}
-    for residue in residues:
-        if not residue.in_scope:
-            continue
-        chains.setdefault(residue.chain, []).append(residue)
-    for chain_residues in chains.values():
-        chain_residues.sort(key=lambda r: r.offset)
-    return chains
-
-
 def detect_all(
     residues: list[residue_store.Residue], taxonomy: list[dict]
 ) -> list[DetectedMotif]:
@@ -92,16 +74,19 @@ def detect_all(
     entry.
 
     This is total by construction: nothing here reads exposure or
-    confidence before deciding whether to keep a match."""
+    confidence before deciding whether to keep a match. Matching against
+    one chain's own sequence, never a cross-chain join, keeps a
+    V-domain/linker or V-domain/C-domain junction from spelling a motif
+    that does not exist in either domain."""
     hits: list[DetectedMotif] = []
     entries = _qualifying_entries(taxonomy)
-    for chain_residues in _by_chain(residues).values():
-        sequence = "".join(r.wild_type for r in chain_residues)
+    for chain in residue_store.in_scope_chains(residues):
+        sequence = chain.sequence
         for entry in entries:
             pattern = re.compile(entry["motif"])
             relevant_index = CHEMICALLY_RELEVANT_INDEX.get(entry["id"], 0)
             for match in pattern.finditer(sequence):
-                site = chain_residues[match.start() : match.end()]
+                site = list(chain.residues[match.start() : match.end()])
                 hits.append(
                     DetectedMotif(
                         definition_id=entry["id"],

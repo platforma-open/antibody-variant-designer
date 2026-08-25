@@ -80,11 +80,11 @@ def build_variant_sequence(
     Each position takes its edit's to value when one exists at (chain, offset),
     otherwise its wild-type."""
     edit_by_key = {(e.chain, e.offset): e.to for e in edits}
-    in_scope = sorted(
-        (r for r in residues if r.in_scope),
-        key=lambda r: (r.chain_role, r.chain, r.offset),
+    return "".join(
+        edit_by_key.get((r.chain, r.offset), r.wild_type)
+        for chain in residue_store.in_scope_chains(residues)
+        for r in chain.residues
     )
-    return "".join(edit_by_key.get((r.chain, r.offset), r.wild_type) for r in in_scope)
 
 
 def rank_variants(

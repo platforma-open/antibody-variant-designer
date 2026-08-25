@@ -9,7 +9,7 @@ stay separate modules — only the exec is merged.
 
 import argparse
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from engine import (
@@ -31,6 +31,18 @@ NO_CANDIDATE_REASON = "no-candidate-cleared-motif"
 PRIOR_SUFFIX = ".prior.tsv"
 
 
+@dataclass(frozen=True)
+class ParentDesignResult:
+    """One parent's whole design outcome: the skip reason, each objective's ranked variants,
+    and the humanization objective's own target set and gate-cleared candidates — reached by
+    field so the two lists can never be read as each other's contents."""
+
+    skip_reason: str
+    per_objective: list[tuple[str, list[variant_store.Variant]]]
+    humanness_targets: list[residue_store.Residue] | None
+    humanness_cleared: list[variant_candidates.Candidate]
+
+
 def process_one(
     triaged_path: str,
     tolerance_path: str,
@@ -45,17 +57,17 @@ def process_one(
     variants_per_parent: int,
     low_tolerance_floor: float,
     epistasis_rescore_top_k: int,
-) -> tuple[str, list[tuple[str, list[variant_store.Variant]]], list | None, list]:
+) -> ParentDesignResult:
     """Gate then rank one antibody against every objective `mode` runs.
 
-    Returns the skip reason, `""` on pass. Returns each objective's ranked
-    variants as `(objective_name, variants)` pairs, in run order, for the
-    caller to append to the run's one `variants.tsv` under that name.
+    The result's skip reason is `""` on pass. Its ranked variants come as
+    `(objective_name, variants)` pairs, in run order, for the caller to append to the run's
+    one `variants.tsv` under that name.
 
-    Also returns the humanization objective's own target set and gate-cleared
-    candidates — `None` targets when `mode` never runs that objective — for the
-    caller to reduce into this parent's one `humanness.tsv` row. Neither value
-    is influenced by the liability objective's own targets or candidates."""
+    Its humanness fields are the humanization objective's own target set and gate-cleared
+    candidates — `None` targets when `mode` never runs that objective — for the caller to
+    reduce into this parent's one `humanness.tsv` row. Neither is influenced by the liability
+    objective's own targets or candidates."""
     tolerance_lookup = tolerance_store.read_tolerance_tsv(tolerance_path)
     residues = residue_store.read_residues(residues_path)
     triaged = liability_store.read_triaged(triaged_path)
@@ -103,11 +115,11 @@ def process_one(
         emitted += len(ranked)
         per_objective.append((name, ranked))
 
-    return (
-        "" if emitted else NO_CANDIDATE_REASON,
-        per_objective,
-        humanness_targets,
-        humanness_cleared,
+    return ParentDesignResult(
+        skip_reason="" if emitted else NO_CANDIDATE_REASON,
+        per_objective=per_objective,
+        humanness_targets=humanness_targets,
+        humanness_cleared=humanness_cleared,
     )
 
 
@@ -206,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.run_mode == run_mode.LIABILITIES_AND_HUMANIZATION and not prior_path.is_file():
             return None
 
-        reason, per_objective, humanness_targets, humanness_cleared = process_one(
+        result = process_one(
             str(triaged_path),
             str(tolerance_path),
             str(residues_path),
@@ -221,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
             args.low_tolerance_floor,
             args.epistasis_rescore_top_k,
         )
-        for objective_name, variants in per_objective:
+        for objective_name, variants in result.per_objective:
             variant_store.append_variants_tsv(
                 args.out_variants, entry.clonotype_key, objective_name, variants
             )
@@ -229,9 +241,12 @@ def main(argv: list[str] | None = None) -> int:
         # invisibility `humanness_store.py` exists to remove is a parent with no
         # row anywhere, not a parent with an empty one.
         humanness_store.append_humanness_tsv(
-            args.out_humanness, entry.clonotype_key, humanness_targets, humanness_cleared
+            args.out_humanness,
+            entry.clonotype_key,
+            result.humanness_targets,
+            result.humanness_cleared,
         )
-        return reason
+        return result.skip_reason
 
     rc = antibody_batch.run(pdb_index_store.read_index(args.pdb_index), one, args.out_skip)
     # This runs after the loop, not inside it, once every antibody's

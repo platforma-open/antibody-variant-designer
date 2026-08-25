@@ -14,7 +14,7 @@ import json
 import math
 from pathlib import Path
 
-from engine import tolerance_store
+from engine import residue_store, tolerance_store
 
 # AntiFold's order, so the two rows combine elementwise without remapping.
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
@@ -30,13 +30,6 @@ POSITION_ID_OFFSET = 2
 def _checkpoint_dir(weights_root: str, chain_role: str) -> str:
     """Sapiens ships one checkpoint per chain class: `vh` for heavy, `vl` for kappa/lambda."""
     return str(Path(weights_root) / ("vh" if chain_role == "H" else "vl"))
-
-
-def _in_scope_positions(residues: list) -> list:
-    """Every in-scope residue, CDRs included. `region` already carries the
-    scope rule's own verdict, so this reads `in_scope` rather than
-    re-deriving it."""
-    return [r for r in residues if r.in_scope]
 
 
 def _is_framework(residue) -> bool:
@@ -86,6 +79,32 @@ def _predict_scores(sequence: str, chain_role: str, checkpoint_dir: str, tokeniz
     )
 
 
+def _score_chain(
+    chain: residue_store.InScopeChain,
+    checkpoint_dir: str,
+    tokenizer_dir: str,
+) -> dict[residue_store.ResidueKey, dict[str, float]]:
+    """Scores `chain`'s whole in-scope sequence in one pass and returns each residue's
+    twenty normalised values keyed by its join key, never by its position — no integer
+    index into the model's returned frame leaves this function."""
+    bound = _max_scored_residues(checkpoint_dir)
+    if len(chain.sequence) > bound:
+        # Never truncate: a short prior looks complete. One named skip
+        # beats a silently incomplete artifact.
+        raise ValueError(
+            f"chain {chain.chain} has {len(chain.sequence)} in-scope residues; "
+            f"the checkpoint at {checkpoint_dir} scores at most {bound}"
+        )
+
+    frame = _predict_scores(chain.sequence, chain.chain_role, checkpoint_dir, tokenizer_dir)
+    scored = {}
+    for position, residue in enumerate(chain.residues):
+        raw = [float(frame[aa][position]) for aa in AMINO_ACIDS]
+        normalised = _log_softmax(raw)
+        scored[residue.join_key] = dict(zip(AMINO_ACIDS, normalised, strict=True))
+    return scored
+
+
 def build_prior_rows(residues: list, weights_root: str) -> list[dict]:
     """One dict per framework position: `{"chain", "imgt", <aa>: log-prob, ...}`.
 
@@ -93,43 +112,17 @@ def build_prior_rows(residues: list, weights_root: str) -> list[dict]:
     every in-scope residue of that chain — CDRs included, since the
     checkpoint's position embeddings are absolute and a chimera with the
     CDRs cut out would score every framework residue behind one at the
-    wrong index. The framework filter is applied to the rows read back, not
-    to the sequence sent, so `position` keeps counting every residue in the
-    sequence even at an offset the loop does not emit a row for.
+    wrong index. The framework filter is applied to the rows read back, via
+    each residue's join key, never to the sequence sent.
     """
     tokenizer_dir = str(Path(weights_root) / "tokenizer")
-    by_chain: dict[str, list] = {}
-    for residue in _in_scope_positions(residues):
-        by_chain.setdefault(residue.chain, []).append(residue)
-
     rows: list[dict] = []
-    for chain, chain_residues in sorted(by_chain.items()):
-        ordered = sorted(chain_residues, key=lambda r: r.offset)
-        sequence = "".join(r.wild_type for r in ordered)
-        checkpoint_dir = _checkpoint_dir(weights_root, chain_residues[0].chain_role)
-
-        bound = _max_scored_residues(checkpoint_dir)
-        if len(sequence) > bound:
-            # Never truncate: a short prior looks complete. One named skip
-            # beats a silently incomplete artifact.
-            raise ValueError(
-                f"chain {chain} has {len(sequence)} in-scope residues; "
-                f"the checkpoint at {checkpoint_dir} scores at most {bound}"
-            )
-
-        frame = _predict_scores(
-            sequence,
-            chain_residues[0].chain_role,
-            checkpoint_dir,
-            tokenizer_dir,
-        )
-        for position, residue in enumerate(ordered):
-            if not _is_framework(residue):
-                continue
-            raw = [float(frame[aa][position]) for aa in AMINO_ACIDS]
-            normalised = _log_softmax(raw)
-            row = {"chain": chain, "imgt": residue.imgt}
-            row.update(dict(zip(AMINO_ACIDS, normalised, strict=True)))
+    for chain in residue_store.in_scope_chains(residues):
+        checkpoint_dir = _checkpoint_dir(weights_root, chain.chain_role)
+        scored = _score_chain(chain, checkpoint_dir, tokenizer_dir)
+        for residue in chain.select(_is_framework).residues:
+            row = {"chain": chain.chain, "imgt": residue.imgt}
+            row.update(scored[residue.join_key])
             rows.append(row)
     return rows
 

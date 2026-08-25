@@ -35,19 +35,6 @@ class DetectedCysteine:
     site: list[residue_store.Residue]
 
 
-def _by_chain_and_region(
-    residues: list[residue_store.Residue],
-) -> dict[tuple, list[residue_store.Residue]]:
-    groups: dict[tuple, list[residue_store.Residue]] = {}
-    for residue in residues:
-        if not residue.in_scope:
-            continue
-        groups.setdefault((residue.chain, residue.region), []).append(residue)
-    for group in groups.values():
-        group.sort(key=lambda r: r.offset)
-    return groups
-
-
 def detect_all(
     residues: list[residue_store.Residue], taxonomy: list[dict]
 ) -> list[DetectedCysteine]:
@@ -59,13 +46,11 @@ def detect_all(
     missing_def = by_id.get("missing_cysteines")
     extra_def = by_id.get("extra_cysteines")
 
-    groups = _by_chain_and_region(residues)
-    chains = {chain for chain, _region in groups}
-
     hits: list[DetectedCysteine] = []
-    for chain in chains:
+    for chain in residue_store.in_scope_chains(residues):
+        by_region = chain.by_region()
         for region, expected_positions in EXPECTED_CYS_POSITIONS.items():
-            region_residues = groups.get((chain, region), [])
+            region_residues = by_region[region].residues if region in by_region else ()
             n = len(region_residues)
             if n == 0:
                 continue

@@ -58,31 +58,51 @@ class TestPickChains:
     def test_h_and_l_roles_give_paired_mode(self):
         residues = [_residue("H", 0, role="H"), _residue("L", 0, role="L")]
 
-        h_chain, l_chain, nanobody_mode = read_tolerance.pick_chains(residues)
+        chains = read_tolerance.pick_chains(residues)
 
-        assert (h_chain, l_chain, nanobody_mode) == ("H", "L", False)
+        assert (chains.heavy, chains.light, chains.nanobody) == ("H", "L", False)
 
     def test_h_role_alone_gives_nanobody_mode(self):
         residues = [_residue("H", 0, role="H"), _residue("X", 0, role=None)]
 
-        h_chain, l_chain, nanobody_mode = read_tolerance.pick_chains(residues)
+        chains = read_tolerance.pick_chains(residues)
 
-        assert (h_chain, l_chain, nanobody_mode) == ("H", None, True)
+        assert (chains.heavy, chains.light, chains.nanobody) == ("H", None, True)
 
     def test_first_h_role_residue_names_the_chain(self):
         # A second-arm or antigen chain never carries a role, so it must
         # never be picked ahead of the one role-bearing chain.
         residues = [_residue("A", 0, role=None), _residue("H", 0, role="H")]
 
-        h_chain, _, _ = read_tolerance.pick_chains(residues)
+        chains = read_tolerance.pick_chains(residues)
 
-        assert h_chain == "H"
+        assert chains.heavy == "H"
 
     def test_no_h_role_at_all_raises(self):
         residues = [_residue("A", 0, role=None)]
 
         with pytest.raises(ValueError, match="H role"):
             read_tolerance.pick_chains(residues)
+
+
+class TestRoleChains:
+    def test_role_chains_name_the_heavy_and_the_light_chain(self):
+        residues = [_residue("L", 0, role="L"), _residue("H", 0, role="H")]
+
+        chains = read_tolerance.pick_chains(residues)
+
+        assert chains.heavy == "H"
+        assert chains.light == "L"
+
+    def test_a_nanobody_has_no_light_chain_and_says_so(self):
+        nanobody = read_tolerance.pick_chains([_residue("H", 0, role="H")])
+        paired = read_tolerance.pick_chains(
+            [_residue("H", 0, role="H"), _residue("L", 0, role="L")]
+        )
+
+        assert nanobody.light is None
+        assert nanobody.nanobody is True
+        assert paired.nanobody is False
 
 
 class TestLogSoftmax:
@@ -143,7 +163,7 @@ class TestPdbsFrame:
     def test_a_nanobody_still_gets_an_lchain_column(self):
         pd = pytest.importorskip("pandas")
 
-        df = read_tolerance._pdbs_frame("clone-1", "H", None)
+        df = read_tolerance._pdbs_frame("clone-1", read_tolerance.RoleChains(heavy="H", light=None))
 
         assert set(df.columns) == {"pdb", "Hchain", "Lchain"}
         assert pd.isna(df.loc[0, "Lchain"])
@@ -151,7 +171,9 @@ class TestPdbsFrame:
     def test_a_paired_antibody_carries_both_chain_letters(self):
         pytest.importorskip("pandas")
 
-        df = read_tolerance._pdbs_frame("clone-1", "H", "L")
+        df = read_tolerance._pdbs_frame(
+            "clone-1", read_tolerance.RoleChains(heavy="H", light="L")
+        )
 
         assert (df.loc[0, "Hchain"], df.loc[0, "Lchain"]) == ("H", "L")
 
@@ -276,11 +298,8 @@ class TestMainWiresTheJoinAndWritesTheTsv:
         entry = _stage(batch, "clone-1")
         captured = {}
 
-        def _fake_run_model(model, pdb_path, h_chain, l_chain, nanobody_mode):
-            captured.update(
-                model=model, pdb_path=pdb_path, h_chain=h_chain,
-                l_chain=l_chain, nanobody_mode=nanobody_mode,
-            )
+        def _fake_run_model(model, pdb_path, chains):
+            captured.update(model=model, pdb_path=pdb_path, chains=chains)
             return [_logits_row("H", "1", perplexity=4.2)]
 
         monkeypatch.setattr(read_tolerance, "load_model", lambda _w: "loaded-model")
@@ -289,9 +308,9 @@ class TestMainWiresTheJoinAndWritesTheTsv:
         skips, out_dir = _run(batch, _weights(batch))
 
         assert skips == [("clone-1", "", "")]
-        assert captured["h_chain"] == "H"
-        assert captured["l_chain"] is None
-        assert captured["nanobody_mode"] is True
+        assert captured["chains"].heavy == "H"
+        assert captured["chains"].light is None
+        assert captured["chains"].nanobody is True
 
         rows = list(
             csv.DictReader(

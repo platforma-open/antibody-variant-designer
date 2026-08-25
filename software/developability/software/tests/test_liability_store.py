@@ -76,38 +76,40 @@ def _rows_of(path):
 
 class TestSummarizeLiabilities:
     def test_clean_parent_is_none_and_none(self):
-        assert liability_store.summarize_liabilities([]) == ("none", "None")
+        assert liability_store.summarize_liabilities([]) == liability_store.ParentSummary(
+            verdict="none", summary="None"
+        )
 
     def test_any_triaged_liability_makes_the_verdict_present(self):
         buried = _triaged([_residue("H", 0, imgt="107")], verdict="buried", rsasa=0.01)
 
-        verdict, _ = liability_store.summarize_liabilities([buried])
+        result = liability_store.summarize_liabilities([buried])
 
-        assert verdict == "present"
+        assert result.verdict == "present"
 
     def test_summary_joins_every_liability_with_its_verdict(self):
         exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
         buried = _triaged([_residue("H", 1, imgt="108")], verdict="buried", rsasa=0.01)
 
-        _, summary = liability_store.summarize_liabilities([exposed, buried])
+        result = liability_store.summarize_liabilities([exposed, buried])
 
-        assert summary == "deamidation@H107 (exposed), deamidation@H108 (buried)"
+        assert result.summary == "deamidation@H107 (exposed), deamidation@H108 (buried)"
 
     def test_declined_entry_names_its_fixability_class(self):
         declined = _triaged(
             [_residue("H", 2, imgt="109")], verdict="fixability-declined", rsasa=0.9
         )
 
-        _, summary = liability_store.summarize_liabilities([declined])
+        result = liability_store.summarize_liabilities([declined])
 
-        assert summary == "deamidation@H109 (fixability-declined: fixable)"
+        assert result.summary == "deamidation@H109 (fixability-declined: fixable)"
 
     def test_exposed_entry_names_no_fixability_class(self):
         exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
 
-        _, summary = liability_store.summarize_liabilities([exposed])
+        result = liability_store.summarize_liabilities([exposed])
 
-        assert summary == "deamidation@H107 (exposed)"
+        assert result.summary == "deamidation@H107 (exposed)"
 
 
 class TestLiabilitiesTsv:
@@ -136,6 +138,20 @@ class TestLiabilitiesTsv:
         assert row["summary"] == (
             "deamidation@H107 (exposed), deamidation@H109 (fixability-declined: fixable)"
         )
+
+    def test_a_parent_summary_reaches_the_tsv_in_column_order(self, tmp_path):
+        exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
+        buried = _triaged([_residue("H", 1, imgt="108")], verdict="buried", rsasa=0.01)
+        path = tmp_path / "liabilities.tsv"
+
+        liability_store.write_liabilities_header(str(path))
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, buried])
+
+        [_, data_line] = path.read_text().splitlines()
+        [clonotype_key, verdict, summary] = next(csv.reader(io.StringIO(data_line), delimiter="\t"))
+        assert clonotype_key == "clone-1"
+        assert verdict == "present"
+        assert summary == "deamidation@H107 (exposed), deamidation@H108 (buried)"
 
     def test_header_alone_is_a_valid_empty_file(self, tmp_path):
         path = tmp_path / "liabilities.tsv"

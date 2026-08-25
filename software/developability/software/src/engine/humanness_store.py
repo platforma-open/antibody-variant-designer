@@ -11,6 +11,8 @@ import csv
 import io
 from pathlib import Path
 
+from engine import liability_store, residue_store, variant_candidates
+
 TSV_COLUMNS = [
     "clonotypeKey",
     "humannessVerdict",
@@ -24,10 +26,6 @@ def _tsv_value(value) -> str:
     return "" if value is None else str(value)
 
 
-def _position_key(residue) -> tuple[str, str]:
-    return (residue.chain, residue.imgt)
-
-
 def write_humanness_header(path: str) -> None:
     """Starts the run's one dataset-wide file with the header row alone.
 
@@ -36,7 +34,10 @@ def write_humanness_header(path: str) -> None:
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
 
 
-def summarize_humanness(targets, cleared) -> tuple[str, str]:
+def summarize_humanness(
+    targets: list[residue_store.Residue] | None,
+    cleared: list[variant_candidates.Candidate],
+) -> liability_store.ParentSummary:
     """Build coarse verdict and summary for a parent's considered framework positions.
 
     targets is the humanization objective's selected positions for this parent, in its own
@@ -51,28 +52,33 @@ def summarize_humanness(targets, cleared) -> tuple[str, str]:
     otherwise. The per-parent variant cap runs after the gate, so a candidate the cap later
     dropped still counts here — this reduction never sees the cap's decision."""
     if targets is None:
-        return "", ""
+        return liability_store.ParentSummary(verdict="", summary="")
     if not targets:
-        return "none", "None"
+        return liability_store.ParentSummary(verdict="none", summary="None")
 
-    edited = {_position_key(edit) for candidate in cleared for edit in candidate.edits}
+    edited = {(edit.chain, edit.imgt) for candidate in cleared for edit in candidate.edits}
     entries = [
         f"{target.wild_type}@{target.chain}{target.imgt} "
-        f"({'humanised' if _position_key(target) in edited else 'declined'})"
+        f"({'humanised' if target.join_key in edited else 'declined'})"
         for target in targets
     ]
-    return "present", AMINO_SEP.join(entries)
+    return liability_store.ParentSummary(verdict="present", summary=AMINO_SEP.join(entries))
 
 
-def append_humanness_tsv(path: str, clonotype_key: str, targets, cleared) -> None:
+def append_humanness_tsv(
+    path: str,
+    clonotype_key: str,
+    targets: list[residue_store.Residue] | None,
+    cleared: list[variant_candidates.Candidate],
+) -> None:
     """Appends this parent's one row, reducing through summarize_humanness.
 
     Appends rather than returning a row to collect, for the reason `liability_store.py`'s
     `append_liabilities_tsv` gives: one file holds the whole dataset and the pipeline
     streams one antibody at a time."""
-    verdict, summary = summarize_humanness(targets, cleared)
+    parent_summary = summarize_humanness(targets, cleared)
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-    writer.writerow([_tsv_value(clonotype_key), verdict, summary])
+    writer.writerow([_tsv_value(clonotype_key), parent_summary.verdict, parent_summary.summary])
     with Path(path).open("a") as fh:
         fh.write(buf.getvalue())

@@ -37,6 +37,7 @@ import math
 import socket
 import sys
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import sapiens_prior
@@ -47,16 +48,25 @@ _VENDOR_DIR = str(Path(__file__).parent / "vendor" / "AntiFold")
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
 
 
-def pick_chains(
-    residues: list[residue_store.Residue],
-) -> tuple[str, str | None, bool]:
-    """The physical PDB chain letters carrying the `H` and `L` roles, and
-    whether this antibody is a nanobody — decided here, from the parsed
-    chain count, because one run may mix VHH and paired antibodies and
-    Tengo has no residue index of its own to decide it from.
+@dataclass(frozen=True)
+class RoleChains:
+    """The physical PDB chain letters carrying the `H` and `L` roles for one antibody.
 
-    Returns `(h_chain, l_chain, nanobody_mode)`; `l_chain` is `None` and
-    `nanobody_mode` is `True` when no residue carries the `L` role."""
+    `nanobody` is derived from `light`, never stored or passed beside it — a caller cannot
+    hand this record a light chain letter and a `nanobody=True` flag that disagree."""
+
+    heavy: str
+    light: str | None
+
+    @property
+    def nanobody(self) -> bool:
+        return self.light is None
+
+
+def pick_chains(residues: list[residue_store.Residue]) -> RoleChains:
+    """The physical PDB chain letters carrying the `H` and `L` roles — decided here, from the
+    parsed chain count, because one run may mix VHH and paired antibodies and Tengo has no
+    residue index of its own to decide it from."""
     h_chain: str | None = None
     l_chain: str | None = None
     for residue in residues:
@@ -68,7 +78,7 @@ def pick_chains(
         raise ValueError(
             "no residue carries the H role — residue_index.py should have skipped this antibody"
         )
-    return h_chain, l_chain, l_chain is None
+    return RoleChains(heavy=h_chain, light=l_chain)
 
 
 def _log_softmax(values: list[float]) -> list[float]:
@@ -155,7 +165,7 @@ def load_model(weights_path: str):
         return model.eval()
 
 
-def _pdbs_frame(pdb_stem: str, h_chain: str, l_chain: str | None):
+def _pdbs_frame(pdb_stem: str, chains: RoleChains):
     """AntiFold's one-row `pdb, Hchain, Lchain` frame for a single antibody.
 
     `Lchain` is always a column, `None` for a nanobody. AntiFold's own
@@ -166,12 +176,10 @@ def _pdbs_frame(pdb_stem: str, h_chain: str, l_chain: str | None):
     `_run_model` so this shape stays checkable without torch installed."""
     import pandas as pd
 
-    return pd.DataFrame([{"pdb": pdb_stem, "Hchain": h_chain, "Lchain": l_chain}])
+    return pd.DataFrame([{"pdb": pdb_stem, "Hchain": chains.heavy, "Lchain": chains.light}])
 
 
-def _run_model(
-    model, pdb_path: str, h_chain: str, l_chain: str | None, nanobody_mode: bool
-) -> list[dict]:
+def _run_model(model, pdb_path: str, chains: RoleChains) -> list[dict]:
     """The only function that touches torch or the vendored AntiFold
     package. Builds AntiFold's one-row frame for this single antibody and
     reads its `df_logits` back into plain dicts, so every function above
@@ -185,7 +193,7 @@ def _run_model(
 
     with _block_network():
         pdb = Path(pdb_path)
-        pdbs_df = _pdbs_frame(pdb.stem, h_chain, l_chain)
+        pdbs_df = _pdbs_frame(pdb.stem, chains)
 
         # `custom_chain_mode` and `nanobody_mode` are two independent flags on
         # AntiFold's own call, but its H/L coordinate loader looks up BOTH
@@ -201,8 +209,8 @@ def _run_model(
             model,
             pdbs_df,
             str(pdb.parent),
-            nanobody_mode=nanobody_mode,
-            custom_chain_mode=nanobody_mode,
+            nanobody_mode=chains.nanobody,
+            custom_chain_mode=chains.nanobody,
             save_flag=False,
         )
 
@@ -230,9 +238,9 @@ def process_one(
     count — one batch may legally mix VHH and paired structures, so it can
     never be a run-level flag."""
     residues = residue_store.read_residues(residues_path)
-    h_chain, l_chain, nanobody_mode = pick_chains(residues)
+    chains = pick_chains(residues)
 
-    logits_rows = _run_model(model, pdb_path, h_chain, l_chain, nanobody_mode)
+    logits_rows = _run_model(model, pdb_path, chains)
     rows = build_tolerance_rows(residues, logits_rows)
 
     tolerance_store.write_tolerance_tsv(out_tolerance, rows)

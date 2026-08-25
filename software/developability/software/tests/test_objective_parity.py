@@ -188,6 +188,20 @@ class TestObjectiveSeamParity:
         assert len(rows) > 0
         assert {row["objective"] for row in rows} == {"liability"}
 
+    def test_the_parents_columns_hold_the_verdict_and_the_summary_the_right_way_round(
+        self, batch
+    ):
+        # A transposed `ParentSummary` writes a comma-joined liability line
+        # into the verdict column and the closed verdict word into the
+        # summary column — this fails that swap rather than rendering it.
+        _, _, _, out_liabilities, _ = _run_scan(batch)
+
+        rows = _rows_of(out_liabilities)
+        assert len(rows) > 0
+        for row in rows:
+            assert row["verdict"] in ("none", "present")
+            assert row["summary"] == "None" or "@" in row["summary"]
+
 
 class TestRunModeReproducesTheGoldenCaptureByteForByte:
     """The row's safety property: no run mode moves a single byte of what

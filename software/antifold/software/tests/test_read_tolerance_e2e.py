@@ -17,7 +17,9 @@ coordinate-loading and forward-pass plumbing accepts the shape `_run_model`
 builds — never the predicted values.
 """
 
+import csv
 import importlib.util
+import io
 import math
 import statistics
 import sys
@@ -252,6 +254,108 @@ class TestRealEntrypointWithTheHumanPrior:
             assert len(prior_path.read_text().splitlines()) - 1 == 8
 
 
+class TestThePriorKeysAndValuesSurviveTheReshape:
+    def test_the_prior_keys_and_values_survive_the_reshape(
+        self, isolated_antifold_module, nanobody_pdb, antifold_weights_path,
+        sapiens_weights_root, tmp_path,
+    ):
+        pytest.importorskip("sapiens")
+        pdb_dir, residues_dir, triaged_dir = (
+            tmp_path / "pdbs", tmp_path / "residues", tmp_path / "triaged"
+        )
+        for one_dir in (pdb_dir, residues_dir, triaged_dir):
+            one_dir.mkdir()
+        (pdb_dir / "parent-1.pdb").write_text(nanobody_pdb.read_text())
+        residues = [
+            residue_store.Residue(
+                chain="H", offset=i, imgt=str(i + 1), wild_type="A", res_name="ALA",
+                b_factor=20.0, region="CDR1" if i in (3, 4) else "FR1", chain_role="H",
+            )
+            for i in range(10)
+        ]
+        residue_store.write_residues(str(residues_dir / "parent-1.json"), residues)
+        liability_store.write_triaged(
+            str(triaged_dir / "parent-1.json"),
+            [
+                liability_triage.Triaged(
+                    definition_id="deamidation_ng", liability_type="deamidation",
+                    risk_level="High", fixability="fixable", site=residues[:1],
+                    verdict="exposed", low_confidence=False, confidence_angstroms=3.0, rsasa=0.5,
+                )
+            ],
+        )
+        index_path = tmp_path / "pdb_index.tsv"
+        entry = pdb_index_store.Entry(clonotype_key="parent-1", filename="parent-1.pdb")
+        pdb_index_store.write_index(str(index_path), [entry])
+        out_dir = tmp_path / "tolerance"
+
+        rc = isolated_antifold_module.main(
+            [
+                "--pdb-dir", str(pdb_dir),
+                "--residues-dir", str(residues_dir),
+                "--triaged-dir", str(triaged_dir),
+                "--pdb-index", str(index_path),
+                "--weights", antifold_weights_path,
+                "--sapiens-weights", sapiens_weights_root,
+                "--out-tolerance-dir", str(out_dir),
+                "--out-skip", str(tmp_path / "skip.tsv"),
+            ]
+        )
+        assert rc == 0
+
+        prior_path = out_dir / f"parent-1{sapiens_prior.PRIOR_SUFFIX}"
+        via_entrypoint = {
+            (row["chain"], row["imgt"]): row
+            for row in csv.DictReader(io.StringIO(prior_path.read_text()), delimiter="\t")
+        }
+        direct = {
+            (row["chain"], row["imgt"]): row
+            for row in sapiens_prior.build_prior_rows(residues, sapiens_weights_root)
+        }
+
+        assert set(via_entrypoint) == set(direct)
+        for key, row in direct.items():
+            for aa in sapiens_prior.AMINO_ACIDS:
+                assert float(via_entrypoint[key][aa]) == pytest.approx(row[aa])
+
+    def test_a_light_chain_lettered_before_its_heavy_reorders_rows_but_not_values(
+        self, sapiens_weights_root
+    ):
+        pytest.importorskip("sapiens")
+        # "A" (light) sorts before "H" (heavy) alphabetically — the one input
+        # where the rendering order and the chain-letter order disagree.
+        heavy = [
+            residue_store.Residue(
+                chain="H", offset=offset, imgt=str(offset + 1), wild_type=wild_type,
+                res_name="ALA", b_factor=20.0, region=_region_at(offset), chain_role="H",
+            )
+            for offset, wild_type in enumerate(_TRASTUZUMAB_VH)
+        ]
+        light = [
+            residue_store.Residue(
+                chain="A", offset=0, imgt="1", wild_type="A", res_name="ALA",
+                b_factor=20.0, region="FR1", chain_role="L",
+            )
+        ]
+
+        lettered_light_first = light + heavy
+        rows = sapiens_prior.build_prior_rows(lettered_light_first, sapiens_weights_root)
+
+        # Heavy chain's rows lead the light chain's, though "A" sorts before
+        # "H" — the rendering order, not the chain letters.
+        chains_in_order = [row["chain"] for row in rows]
+        assert chains_in_order.index("H") < chains_in_order.index("A")
+
+        # The key set and every key's twenty values are unchanged by which
+        # order the chains arrive in the input list.
+        heavy_first = heavy + light
+        by_key = {(row["chain"], row["imgt"]): row for row in rows}
+        for row in sapiens_prior.build_prior_rows(heavy_first, sapiens_weights_root):
+            key = (row["chain"], row["imgt"])
+            for aa in sapiens_prior.AMINO_ACIDS:
+                assert row[aa] == pytest.approx(by_key[key][aa])
+
+
 class TestNanobodyReachesTheForwardPass:
     """Regression tests for three stacked fixes: a nanobody row used to fail
     before the model ever ran — first on AntiFold's CSV column-presence
@@ -265,7 +369,9 @@ class TestNanobodyReachesTheForwardPass:
         self, isolated_antifold_module, nanobody_pdb, untrained_model
     ):
         rows = isolated_antifold_module._run_model(
-            untrained_model, str(nanobody_pdb), h_chain="H", l_chain=None, nanobody_mode=True
+            untrained_model,
+            str(nanobody_pdb),
+            isolated_antifold_module.RoleChains(heavy="H", light=None),
         )
 
         assert len(rows) == 10  # the ten residues staged above
@@ -284,7 +390,9 @@ class TestNanobodyReachesTheForwardPass:
         monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
 
         rows = isolated_antifold_module._run_model(
-            untrained_model, str(nanobody_pdb), h_chain="H", l_chain=None, nanobody_mode=True
+            untrained_model,
+            str(nanobody_pdb),
+            isolated_antifold_module.RoleChains(heavy="H", light=None),
         )
 
         assert len(rows) == 10

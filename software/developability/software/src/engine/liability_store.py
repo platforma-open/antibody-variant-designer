@@ -10,6 +10,7 @@ read the index a second time.
 import csv
 import io
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from engine import liability_triage, residue_store
@@ -76,7 +77,17 @@ def write_liabilities_header(path: str) -> None:
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
 
 
-def summarize_liabilities(triaged_list: list[liability_triage.Triaged]) -> tuple[str, str]:
+@dataclass(frozen=True)
+class ParentSummary:
+    """One parent's coarse verdict and its joined summary line, for one objective — the two
+    adjacent Parents-page columns, carried as one value so a caller cannot write them in the
+    wrong order. Both the liability and the humanness reductions return this."""
+
+    verdict: str
+    summary: str
+
+
+def summarize_liabilities(triaged_list: list[liability_triage.Triaged]) -> ParentSummary:
     """Build coarse verdict ("present" or "none") and summary line for a parent's triaged
     liabilities.
 
@@ -85,7 +96,7 @@ def summarize_liabilities(triaged_list: list[liability_triage.Triaged]) -> tuple
     decline reason survives after the per-liability columns are dropped.
     """
     if not triaged_list:
-        return "none", "None"
+        return ParentSummary(verdict="none", summary="None")
     parts = []
     for t in triaged_list:
         entry = f"{liability_key(t)} ({t.verdict}"
@@ -93,7 +104,7 @@ def summarize_liabilities(triaged_list: list[liability_triage.Triaged]) -> tuple
             entry += f": {t.fixability}"
         entry += ")"
         parts.append(entry)
-    return "present", ", ".join(parts)
+    return ParentSummary(verdict="present", summary=", ".join(parts))
 
 
 def append_liabilities_tsv(
@@ -104,9 +115,9 @@ def append_liabilities_tsv(
     The summary includes buried and fixability-declined sites — the Parents page has no
     other source for them. This function appends (not returns) because one file holds the
     whole dataset and the pipeline streams one antibody at a time."""
-    verdict, summary = summarize_liabilities(triaged_list)
+    parent_summary = summarize_liabilities(triaged_list)
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-    writer.writerow([_tsv_value(clonotype_key), verdict, summary])
+    writer.writerow([_tsv_value(clonotype_key), parent_summary.verdict, parent_summary.summary])
     with Path(path).open("a") as fh:
         fh.write(buf.getvalue())
