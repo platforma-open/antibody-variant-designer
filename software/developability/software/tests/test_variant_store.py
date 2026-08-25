@@ -17,6 +17,7 @@ def _variant(
     low_confidence_warning=False,
     changed_positions="H:N107D, H:G108S",
     structural_tolerance=2.0,
+    humanness_score=None,
 ):
     # `parent_rank` defaults to `rank` — the shape every caller sees before
     # `rewrite_global_rank` ever runs, when the two are still identical.
@@ -28,6 +29,7 @@ def _variant(
         changed_positions=changed_positions,
         variant_sequence="DSALA",
         structural_tolerance=structural_tolerance,
+        humanness_score=humanness_score,
         worst_confidence_angstroms=worst_confidence_angstroms,
         binding_risk="Medium",
         low_confidence_warning=low_confidence_warning,
@@ -183,7 +185,9 @@ class TestObjectiveIsPerRow:
             [_variant(rank=1, structural_tolerance=9.0, changed_positions="H:N108D")],
         )
 
-        variant_store.rewrite_global_rank(str(path))
+        variant_store.rewrite_global_rank(
+            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+        )
 
         written = variant_store.read_variants_tsv(str(path))
         assert {(objective, v.changed_positions) for _, _, objective, v in written} == {
@@ -209,7 +213,9 @@ class TestRewriteGlobalRank:
             [_variant(rank=1, structural_tolerance=12.0, changed_positions="H:N109D")],
         )
 
-        variant_store.rewrite_global_rank(str(path))
+        variant_store.rewrite_global_rank(
+            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+        )
 
         written = variant_store.read_variants_tsv(str(path))
         assert [(ck, v.rank) for ck, _, _, v in written] == [
@@ -232,7 +238,9 @@ class TestRewriteGlobalRank:
             str(path), "clone-2", "liability", [_variant(rank=1, structural_tolerance=5.0)]
         )
 
-        variant_store.rewrite_global_rank(str(path))
+        variant_store.rewrite_global_rank(
+            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+        )
 
         # Both parents' one survivor was locally rank 1, so both still
         # render `v01` — only the now-global `rank` column tells them apart.
@@ -247,7 +255,9 @@ class TestRewriteGlobalRank:
         variant_store.append_variants_tsv(str(path), "clone-2", "liability", [tied])
         variant_store.append_variants_tsv(str(path), "clone-1", "liability", [tied])
 
-        variant_store.rewrite_global_rank(str(path))
+        variant_store.rewrite_global_rank(
+            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+        )
 
         written = variant_store.read_variants_tsv(str(path))
         assert [(ck, v.rank) for ck, _, _, v in written] == [("clone-1", 1), ("clone-2", 2)]
@@ -256,6 +266,8 @@ class TestRewriteGlobalRank:
         path = tmp_path / "variants.tsv"
         variant_store.write_variants_header(str(path))
 
-        variant_store.rewrite_global_rank(str(path))
+        variant_store.rewrite_global_rank(
+            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+        )
 
         assert variant_store.read_variants_tsv(str(path)) == []

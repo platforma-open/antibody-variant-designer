@@ -56,6 +56,10 @@ class Candidate:
     # for the targeted liability, and the fixed-spelling rendering of the edits.
     addressed_target: str
     changed_positions: str
+    # Set to the humanization objective's own score; every other candidate's is None.
+    # `tolerance` already holds whichever objective ran. Reusing it here would put a
+    # liability perplexity in a humanness column.
+    humanness_score: float | None = None
 
 
 def _combined_scores(
@@ -138,6 +142,7 @@ def build_candidates(
     residues: list,
     taxonomy: list[dict],
     objective: design_objective.Objective,
+    is_humanness_objective: bool,
     max_edits_per_variant: int,
     candidate_residues_per_position: int,
     w_struct: float,
@@ -148,6 +153,9 @@ def build_candidates(
 
     A site longer than `max_edits_per_variant`, or holding a position with no admissible
     substitution, is skipped before the objective runs.
+
+    `is_humanness_objective` comes from `run_mode.objectives_for`'s `(name, builder)` pair.
+    `objective` carries no name. `is_humanness_objective` is that name's only trace here.
 
     `score_candidate` sees only the candidate's site, never the residue index or the PDB."""
     taxonomy_by_id = {d["id"]: d for d in taxonomy}
@@ -186,6 +194,11 @@ def build_candidates(
             if not check.meets_goal:
                 continue
 
+            # The goal check's score orders the candidate; what it means is the objective's business.
+            # For the liability objective it is a mean perplexity. Reporting a perplexity as
+            # humanness would put a fold number in a humanness column.
+            humanness_score = check.score if is_humanness_objective else None
+
             edits = tuple(
                 Edit(
                     chain=residue.chain,
@@ -206,6 +219,7 @@ def build_candidates(
                     worst_confidence_angstroms=triaged.confidence_angstroms,
                     addressed_target=addressed_target,
                     changed_positions=_changed_positions(edits),
+                    humanness_score=humanness_score,
                 )
             )
     return candidates

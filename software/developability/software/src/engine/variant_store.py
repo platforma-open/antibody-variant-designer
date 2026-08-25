@@ -13,6 +13,15 @@ from pathlib import Path
 # The workflow attaches run identity to these columns downstream, once this process finishes.
 # That lets two blocks over one dataset share this exec, instead of
 # computing the same variants twice.
+DEFAULT_ALPHA = 1.0
+DEFAULT_BETA = 1.0
+
+# The fixed domain each re-rank term normalises over before weighting. A
+# per-run min/max would make one variant's rank depend on which other
+# variants happen to share its file.
+STRUCTURAL_TOLERANCE_DOMAIN = (1.0, 20.0)
+HUMANNESS_DOMAIN = (0.0, 100.0)
+
 TSV_COLUMNS = [
     "clonotypeKey",
     "variantKey",
@@ -24,6 +33,7 @@ TSV_COLUMNS = [
     "changedPositions",
     "variantSequence",
     "structuralTolerance",
+    "humannessScore",
     "worstConfidence",
     "bindingRisk",
     "lowConfidenceWarning",
@@ -40,6 +50,7 @@ class Variant:
     changed_positions: str
     variant_sequence: str
     structural_tolerance: float
+    humanness_score: float | None
     worst_confidence_angstroms: float | None
     binding_risk: str  # "Low" | "Medium" | "High"
     low_confidence_warning: bool
@@ -93,6 +104,7 @@ def _row(clonotype_key: str, variant_key_str: str, objective: str, v: Variant) -
         v.changed_positions,
         v.variant_sequence,
         v.structural_tolerance,
+        _tsv_value(v.humanness_score),
         _tsv_value(v.worst_confidence_angstroms),
         v.binding_risk,
         _low_confidence_warning_str(v),
@@ -138,6 +150,9 @@ def read_variants_tsv(path: str) -> list[tuple[str, str, str, Variant]]:
                         changed_positions=row["changedPositions"],
                         variant_sequence=row["variantSequence"],
                         structural_tolerance=float(row["structuralTolerance"]),
+                        humanness_score=(
+                            float(row["humannessScore"]) if row["humannessScore"] else None
+                        ),
                         worst_confidence_angstroms=(
                             float(row["worstConfidence"]) if row["worstConfidence"] else None
                         ),
@@ -150,22 +165,38 @@ def read_variants_tsv(path: str) -> list[tuple[str, str, str, Variant]]:
     return variants
 
 
-def rewrite_global_rank(path: str) -> None:
+def _normalize(value: float, domain: tuple[float, float]) -> float:
+    lo, hi = domain
+    return (value - lo) / (hi - lo)
+
+
+def _rerank_score(v: Variant, alpha: float, beta: float) -> float:
+    """Returns `alpha * norm(structural tolerance) + beta * norm(humanness)`.
+
+    Each term is rescaled to `[0, 1]` over its own fixed domain first.
+    `alpha = beta = 1.0` then weighs the two terms equally. A variant with
+    no humanness number contributes nothing to the second term."""
+    structural = _normalize(v.structural_tolerance, STRUCTURAL_TOLERANCE_DOMAIN)
+    humanness = 0.0 if v.humanness_score is None else _normalize(v.humanness_score, HUMANNESS_DOMAIN)
+    return alpha * structural + beta * humanness
+
+
+def rewrite_global_rank(path: str, alpha: float, beta: float) -> None:
     """Overwrites rank in path as one dataset-wide ordinal, 1..N.
 
-    Reads all surviving variants, sorts by structural tolerance (descending)
-    then changed_positions, breaking ties by clonotypeKey and variantKey for
-    determinism.
+    Reads all surviving variants, sorts by the normalised, weighted re-rank
+    score (descending) then changed_positions, breaking ties by clonotypeKey
+    and variantKey for determinism.
 
-    variantKey and parent_rank stay unchanged. Call this once after the batch
-    loop finishes. No single parent's iteration holds the other parents' data.
-    This function holds only the run's surviving variants in memory, never the
-    per-antibody working state of the loop."""
+    variantKey and parent_rank stay unchanged. The batch loop streams each
+    antibody's rows without accumulating them, never holding the whole run at
+    once. This function instead reads the already-written survivors back,
+    once the loop's own per-antibody working state is gone."""
     rows = read_variants_tsv(path)
     if not rows:
         return
     rows.sort(
-        key=lambda row: (-row[3].structural_tolerance, row[3].changed_positions, row[0], row[1])
+        key=lambda row: (-_rerank_score(row[3], alpha, beta), row[3].changed_positions, row[0], row[1])
     )
 
     buf = io.StringIO()

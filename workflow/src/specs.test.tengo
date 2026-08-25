@@ -54,13 +54,13 @@ TestVariantColumns := func() {
 	settings := specs.buildVariantsSettings(BLOCK_ID)
 	byColumn := _byColumn(settings.columns)
 
-	// Sixteen value columns on one axis: the vendor's twelve less `variantId`,
+	// Seventeen value columns on one axis: the vendor's thirteen less `variantId`,
 	// which the vendor's CSV carries and no table does, then the four identity
 	// columns that carry what the axes used to — the variant's own clonotype id,
 	// the parent binding in both spellings, and the ordinal — plus `parentRank`,
 	// a Variants-page-only view the vendor's contract never carried
 	// ([[088-decision-rank-becomes-a-global-ordinal-via-a-second-pass]]).
-	test.isEqual(16, len(settings.columns))
+	test.isEqual(17, len(settings.columns))
 	for c in settings.columns {
 		test.isTrue(c.column != "variantId")
 	}
@@ -259,11 +259,11 @@ TestSynthesisCsvColumnOrder := func() {
 	// `pt.col(...).alias(...)` selection.
 	order := specs.csvColumnOrder(BLOCK_ID)
 
-	// Twelve of the sixteen variant columns declare a `csvHeader` — the full
-	// vendor set, which does not include `humannessScore`. The four identity
+	// Thirteen of the seventeen variant columns declare a `csvHeader` — the full
+	// vendor set, which now includes `humannessScore`. The four identity
 	// columns declare none, so the table can reorder around them without the
 	// vendor's set changing.
-	test.isEqual(12, len(order))
+	test.isEqual(13, len(order))
 
 	headers := []
 	columns := []
@@ -273,8 +273,8 @@ TestSynthesisCsvColumnOrder := func() {
 	}
 	test.isEqual([
 		"variantId", "rank", "variantSequence", "chain", "changedPositions",
-		"objective", "addressedTarget", "structuralTolerance", "worstConfidence",
-		"bindingRisk", "lowConfidenceWarning", "status"
+		"objective", "addressedTarget", "structuralTolerance", "humannessScore",
+		"worstConfidence", "bindingRisk", "lowConfidenceWarning", "status"
 	], headers)
 	// Every header here equals its flat column name — no CSV spelling drifts
 	// from the TSV column `variant_store.py` writes.
@@ -311,8 +311,8 @@ TestOrderPriorityFollowsListPosition := func() {
 
 	// The first column of each group takes one step per column, the last takes
 	// one step.
-	test.isEqual("16000", variants.columns[0].spec.annotations["pl7.app/table/orderPriority"])
-	test.isEqual("1000", variants.columns[15].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("17000", variants.columns[0].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("1000", variants.columns[16].spec.annotations["pl7.app/table/orderPriority"])
 	test.isEqual("4000", parents.columns[0].spec.annotations["pl7.app/table/orderPriority"])
 	test.isEqual("1000", parents.columns[3].spec.annotations["pl7.app/table/orderPriority"])
 }

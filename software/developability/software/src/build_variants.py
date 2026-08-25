@@ -66,6 +66,7 @@ def process_one(
             residues,
             taxonomy,
             build_objective(residues),
+            name == run_mode.HUMANNESS,
             max_edits_per_variant,
             candidate_residues_per_position,
             w_struct,
@@ -144,6 +145,9 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=variant_ranking.DEFAULT_EPISTASIS_RESCORE_TOP_K,
     )
+    # The global re-rank reads these two flags. Nothing else does.
+    parser.add_argument("--alpha", type=float, default=variant_store.DEFAULT_ALPHA)
+    parser.add_argument("--beta", type=float, default=variant_store.DEFAULT_BETA)
     parser.add_argument(
         "--run-mode",
         dest="run_mode",
@@ -205,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     # working state is already released. Only the small survivor set
     # remains to renumber. `rewrite_global_rank` turns each parent's own
     # local rank into one ordinal across the whole run.
-    variant_store.rewrite_global_rank(args.out_variants)
+    variant_store.rewrite_global_rank(args.out_variants, args.alpha, args.beta)
     return rc
 
 

@@ -31,7 +31,7 @@ _stampOrderPriority := func(columns) {
 // column order, which `_stampOrderPriority` turns into each column's priority.
 // The rows that declare a `csvHeader`, read in the same order, are the vendor's
 // whole set — `variantId` leads it and is built in `main.tpl.tengo`, and
-// `humannessScore` is not among them. So no row carries a position number of
+// `humannessScore` is among them. So no row carries a position number of
 // either kind.
 //
 // This is the one list two readers share — `buildVariantsSettings` below and
@@ -263,6 +263,23 @@ variantColumns := func(blockId) {
 					"pl7.app/description": "AntiFold's fold-tolerance score at the edited position(s) — higher means the model finds the substitution more compatible with the fold. This is what the binding-risk band and the low-tolerance floor are computed from. Higher is better.",
 					"pl7.app/format": ".2f",
 					"pl7.app/structure/toleranceMetric": "antifoldPerplexityBits"
+				}
+			}
+		},
+		{
+			column: "humannessScore",
+			csvHeader: "humannessScore",
+			spec: {
+				name: "pl7.app/humannessScore",
+				valueType: "Double",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Humanness score",
+					"pl7.app/description": "OASis identity (human-oas): fraction of overlapping 9-mer peptides found in human OAS antibody repertoires, x100 (range 0-100; higher = more human). NOTE: this is a raw OASis IDENTITY at a fixed tier, NOT a calibrated OASis percentile — it is not directly comparable to a calibrated percentile published elsewhere. The tier is fixed at peptides present in more than 10% of human OAS subjects.",
+					"pl7.app/format": ".2f",
+					"pl7.app/isScore": "true",
+					"pl7.app/score/rankingOrder": "decreasing",
+					"pl7.app/score/method": "OASis identity (human-oas, fixed tier)"
 				}
 			}
 		},
@@ -559,7 +576,7 @@ csvColumnOrder := func(blockId) {
 	// The declaring rows in list order ARE the contract order — the identity
 	// rows sit between them and are stepped over, because the list orders the
 	// table and the vendor's set is only the part of it the vendor asked for.
-	// `specs.test.tengo` pins the exact twelve headers, which is what stops the
+	// `specs.test.tengo` pins the exact thirteen headers, which is what stops the
 	// set growing when a row gains a `csvHeader` it should not have.
 	order := []
 	for d in variantColumns(blockId) {

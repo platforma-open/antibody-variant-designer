@@ -139,6 +139,7 @@ def rank_variants(
                 worst_confidence_angstroms=candidate.worst_confidence_angstroms,
                 binding_risk=band,
                 low_confidence_warning=candidate.low_confidence,
+                humanness_score=candidate.humanness_score,
                 status=STATUS,
             )
         )

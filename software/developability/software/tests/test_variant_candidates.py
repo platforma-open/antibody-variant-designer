@@ -83,6 +83,7 @@ class TestBuildCandidatesRescanGate:
         candidates_out = variant_candidates.build_candidates(
             [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
+            is_humanness_objective=False,
             max_edits_per_variant=5, candidate_residues_per_position=3,
             w_struct=1.0, w_obj=1.0,
         )
@@ -96,6 +97,7 @@ class TestBuildCandidatesRescanGate:
         candidates_out = variant_candidates.build_candidates(
             [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
+            is_humanness_objective=False,
             max_edits_per_variant=5, candidate_residues_per_position=3,
             w_struct=1.0, w_obj=1.0,
         )
@@ -109,6 +111,7 @@ class TestBuildCandidatesRescanGate:
             for c in variant_candidates.build_candidates(
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
+                is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
                 w_struct=1.0, w_obj=1.0,
             )
@@ -123,6 +126,7 @@ class TestBuildCandidatesRescanGate:
             for c in variant_candidates.build_candidates(
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
+                is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
                 w_struct=1.0, w_obj=1.0,
             )
@@ -141,6 +145,7 @@ class TestBuildCandidatesRescanGate:
                 [_triaged(_ng_site(), low_confidence=True, confidence_angstroms=7.5)],
                 _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
+                is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
                 w_struct=1.0, w_obj=1.0,
             )
@@ -157,6 +162,7 @@ class TestBuildCandidatesRescanGate:
             for c in variant_candidates.build_candidates(
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
+                is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
                 w_struct=1.0, w_obj=1.0,
             )
@@ -171,6 +177,7 @@ class TestBuildCandidatesRescanGate:
             for c in variant_candidates.build_candidates(
                 [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
+                is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
                 w_struct=1.0, w_obj=1.0,
             )
@@ -296,6 +303,7 @@ class TestBuildCandidatesEditBudget:
         candidates_out = variant_candidates.build_candidates(
             [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
+            is_humanness_objective=False,
             max_edits_per_variant=1, candidate_residues_per_position=3,
             w_struct=1.0, w_obj=1.0,
         )
@@ -308,6 +316,7 @@ class TestBuildCandidatesEditBudget:
         candidates_out = variant_candidates.build_candidates(
             [_triaged(_ng_site())], lookup, _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
+            is_humanness_objective=False,
             max_edits_per_variant=5, candidate_residues_per_position=3,
             w_struct=1.0, w_obj=1.0,
         )
@@ -342,6 +351,7 @@ class TestBuildCandidatesRiskLevelOrder:
         candidates_out = variant_candidates.build_candidates(
             [low, high, medium], lookup, [], TAXONOMY,
             objective=_OBJECTIVE,
+            is_humanness_objective=False,
             max_edits_per_variant=5, candidate_residues_per_position=1,
             w_struct=1.0, w_obj=1.0,
         )
