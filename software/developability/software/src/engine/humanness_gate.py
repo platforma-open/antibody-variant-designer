@@ -51,13 +51,16 @@ def chain_sequence(
     Each residue is replaced by its entry in `substituted` when one shares its
     `(chain, offset)`; otherwise its own wild type stands.
 
-    This reproduces the grouping a liability scan uses to match its motifs. It measures the
-    same sequence a scan would see.
+    Reads the chain from `residue_store.in_scope_chains`, the one minter, so this measures
+    the same sequence a scan would see without keeping a second derivation of it.
 
     Pass an empty `substituted` for a sequence with no edits applied."""
     replacement = {(r.chain, r.offset): r.wild_type for r in substituted}
-    chain_residues = sorted(
-        (r for r in residues if r.in_scope and r.chain == chain),
-        key=lambda r: r.offset,
+    in_scope_chain = next(
+        (c for c in residue_store.in_scope_chains(residues) if c.chain == chain), None
     )
-    return "".join(replacement.get((r.chain, r.offset), r.wild_type) for r in chain_residues)
+    if in_scope_chain is None:
+        return ""
+    return "".join(
+        replacement.get((r.chain, r.offset), r.wild_type) for r in in_scope_chain.residues
+    )
