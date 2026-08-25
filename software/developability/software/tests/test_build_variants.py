@@ -1,6 +1,8 @@
 """Unit tests for `build_variants.py` — the fused gate-then-rank entrypoint, and
 the dataset-wide `variants.tsv` it writes."""
 
+import csv
+import math
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,7 @@ import pytest
 import build_variants
 from engine import (
     design_objective,
+    humanness_gate,
     liability_store,
     liability_triage,
     residue_store,
@@ -64,6 +67,18 @@ def _triaged(site):
     )
 
 
+def _target_from_triaged(triaged):
+    """The same conversion `run_mode._as_design_target` does — used here to stand a stub
+    `targets_for` in for the real one without reaching into that private helper."""
+    return design_objective.DesignTarget(
+        site=tuple(triaged.site),
+        definition_id=triaged.definition_id,
+        region=triaged.site[0].region,
+        is_low_confidence=triaged.low_confidence,
+        confidence_angstroms=triaged.confidence_angstroms,
+    )
+
+
 def _row(ranked, wild_type, perplexity):
     log_probs = dict.fromkeys(AMINO_ACIDS, -5.0)
     for rank, aa in enumerate(ranked):
@@ -97,6 +112,61 @@ def _stage(batch, clonotype_key, with_prior=False):
         Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}").write_text(
             "chain\timgt\n"
         )
+    return entry
+
+
+def _framework_residue():
+    # Wild type "N", chosen so a substitution to the tolerance table's
+    # top-ranked "D" is content the parent chain otherwise never carries —
+    # `_stub_rising_on_d` below reads a "D" count off the assembled sequence.
+    return residue_store.Residue(
+        chain="H", offset=0, imgt="1", wild_type="N", res_name="N",
+        b_factor=20.0, region="FR1", chain_role="H",
+    )
+
+
+def _write_prior_tsv(path, wild_type_probability):
+    """One position's prior row, in the log-probability scale
+    `sapiens_prior._log_softmax` writes: every amino acid scores `log(0.9)` except the
+    wild type `N`, which scores `log(wild_type_probability)` — the one cell every
+    selection case in this class turns the cutoff against."""
+    scores = dict.fromkeys(AMINO_ACIDS, math.log(0.9))
+    scores["N"] = math.log(wild_type_probability)
+    with Path(path).open("w", newline="") as fh:
+        writer = csv.writer(fh, delimiter="\t", lineterminator="\n")
+        writer.writerow(["chain", "imgt", *AMINO_ACIDS])
+        writer.writerow(["H", "1", *(scores[aa] for aa in AMINO_ACIDS)])
+
+
+def _stub_rising_on_d(monkeypatch):
+    """Stands in for the real OASis measurement: a sequence's score is how
+    many "D"s it holds. The fixture's parent chain carries none, so a
+    candidate substituting the framework "N" to the tolerance table's
+    top-ranked "D" always raises the score — deterministic, no `promb`
+    install or reference database needed."""
+    monkeypatch.setattr(humanness_gate, "identity", lambda seq: float(seq.count("D")))
+
+
+def _stage_mixed(batch, clonotype_key, non_human_prior_score):
+    """One parent carrying both a liability (the `_ng_site` deamidation
+    motif, on CDR1) and a non-human framework position (`_framework_residue`,
+    on FR1) — the fixture `TestHumanizationModeEndToEnd` runs against."""
+    entry = batch.add(clonotype_key)
+    residues = [_framework_residue(), *_ng_site()]
+    liability_store.write_triaged(
+        str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_triaged(_ng_site())]
+    )
+    tolerance_store.write_tolerance_tsv(
+        str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+        [*_tolerance_rows(), {"posins": "1", **_row(["D", "Q", "A"], "N", 3.0)}],
+    )
+    residue_store.write_residues(
+        str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
+    )
+    _write_prior_tsv(
+        Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"),
+        non_human_prior_score,
+    )
     return entry
 
 
@@ -327,7 +397,7 @@ class TestRunModeSelectsObjectives:
         monkeypatch.setattr(
             build_variants.run_mode,
             "objectives_for",
-            lambda mode, prior_path: [
+            lambda mode, prior_path, non_human_prior_cutoff: [
                 (run_mode.LIABILITY, lambda _residues: stub_objective),
                 (run_mode.HUMANNESS, lambda _residues: stub_objective),
             ],
@@ -335,7 +405,9 @@ class TestRunModeSelectsObjectives:
         monkeypatch.setattr(
             build_variants.run_mode,
             "targets_for",
-            lambda name, triaged_list: triaged_list,
+            lambda name, mode, triaged_list, objective, residues: [
+                _target_from_triaged(t) for t in triaged_list
+            ],
         )
 
         triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
@@ -344,7 +416,7 @@ class TestRunModeSelectsObjectives:
         result = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
-            5, 3, 1.0, 1.0, 10, 3.0, 20,
+            5, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
 
         keys = [v.parent_rank for _, variants in result.per_objective for v in variants]
@@ -370,7 +442,7 @@ class TestRunModeSelectsObjectives:
         monkeypatch.setattr(
             build_variants.run_mode,
             "objectives_for",
-            lambda mode, prior_path: [
+            lambda mode, prior_path, non_human_prior_cutoff: [
                 (run_mode.LIABILITY, lambda _residues: stub_objective),
                 (run_mode.HUMANNESS, lambda _residues: stub_objective),
             ],
@@ -378,7 +450,9 @@ class TestRunModeSelectsObjectives:
         monkeypatch.setattr(
             build_variants.run_mode,
             "targets_for",
-            lambda name, triaged_list: triaged_list,
+            lambda name, mode, triaged_list, objective, residues: [
+                _target_from_triaged(t) for t in triaged_list
+            ],
         )
 
         triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
@@ -387,7 +461,7 @@ class TestRunModeSelectsObjectives:
         result = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
-            5, 3, 1.0, 1.0, 10, 3.0, 20,
+            5, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
 
         by_name = dict(result.per_objective)
@@ -411,11 +485,11 @@ class TestRunModeSelectsObjectives:
             ),
         )
         fixed_site = _ng_site()[:1]
-        fixed_triaged = _triaged(fixed_site)
+        fixed_target = _target_from_triaged(_triaged(fixed_site))
         monkeypatch.setattr(
             build_variants.run_mode,
             "objectives_for",
-            lambda mode, prior_path: [
+            lambda mode, prior_path, non_human_prior_cutoff: [
                 (run_mode.LIABILITY, lambda _residues: stub_objective),
                 (run_mode.HUMANNESS, lambda _residues: stub_objective),
             ],
@@ -423,8 +497,9 @@ class TestRunModeSelectsObjectives:
         monkeypatch.setattr(
             build_variants.run_mode,
             "targets_for",
-            lambda name, triaged_list: (
-                [fixed_triaged] if name == run_mode.HUMANNESS else triaged_list
+            lambda name, mode, triaged_list, objective, residues: (
+                [fixed_target] if name == run_mode.HUMANNESS
+                else [_target_from_triaged(t) for t in triaged_list]
             ),
         )
 
@@ -434,13 +509,13 @@ class TestRunModeSelectsObjectives:
         result = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
-            5, 3, 1.0, 1.0, 10, 3.0, 20,
+            5, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
 
         # `humanness_targets` is the objective's own selected framework
         # positions, distinct from `humanness_cleared`'s gate survivors —
         # neither list's contents leak into the other's field.
-        assert result.humanness_targets == fixed_site
+        assert result.humanness_targets == list(fixed_target.site)
         assert all(isinstance(c, variant_candidates.Candidate) for c in result.humanness_cleared)
 
     def test_a_mode_that_never_runs_humanization_leaves_the_targets_absent(self, batch):
@@ -452,7 +527,7 @@ class TestRunModeSelectsObjectives:
         result = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities", "unused-prior-path",
-            5, 3, 1.0, 1.0, 10, 3.0, 20,
+            5, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
 
         # Mode 1 never runs the humanization objective at all — its targets
@@ -460,6 +535,77 @@ class TestRunModeSelectsObjectives:
         # and selected nothing would leave.
         assert result.humanness_targets is None
         assert result.humanness_cleared == []
+
+
+def _run_mixed(batch, extra_args=None):
+    out_humanness = batch.path("humanness.tsv")
+    skips, written = _run(batch, extra_args)
+    with Path(out_humanness).open(newline="") as fh:
+        humanness_rows = list(csv.DictReader(fh, delimiter="\t"))
+    return skips, written, humanness_rows
+
+
+class TestHumanizationModeEndToEnd:
+    """`--run-mode humanization` over one parent carrying both a liability and a
+    non-human framework position — Outcome's motivating case, and R16/R12's own targets."""
+
+    def test_variants_hold_only_humanness_rows_each_with_a_humanness_score(self, batch,
+                                                                             monkeypatch):
+        _stub_rising_on_d(monkeypatch)
+        _stage_mixed(batch, "clone-1", non_human_prior_score=0.01)
+
+        _, written, _ = _run_mixed(batch, ["--run-mode", "humanization"])
+
+        assert len(written) > 0
+        assert {obj for _, _, obj, _ in written} == {"humanness"}
+        assert all(v.humanness_score is not None for _, _, _, v in written)
+
+    def test_the_humanness_row_reads_present_and_names_the_selected_position(self, batch,
+                                                                                monkeypatch):
+        _stub_rising_on_d(monkeypatch)
+        _stage_mixed(batch, "clone-1", non_human_prior_score=0.01)
+
+        _, _, humanness_rows = _run_mixed(batch, ["--run-mode", "humanization"])
+
+        [row] = humanness_rows
+        assert row["humannessVerdict"] == "present"
+        assert row["humannessSummary"] == "N@H1 (humanised)"
+
+    def test_a_zero_cutoff_selects_nothing_and_names_the_no_target_skip_reason(self, batch):
+        # The wild type's own prior score (0.01) is never below a 0.0 cutoff,
+        # whatever it is — R5's strict comparison leaves nothing selected.
+        _stage_mixed(batch, "clone-1", non_human_prior_score=0.01)
+
+        skips, written, humanness_rows = _run_mixed(
+            batch, ["--run-mode", "humanization", "--non-human-prior-cutoff", "0.0"]
+        )
+
+        assert skips == [("clone-1", "no-nonhuman-framework-position", "")]
+        assert written == []
+        [row] = humanness_rows
+        assert row["humannessVerdict"] == "none"
+
+    def test_liabilities_mode_over_the_same_fixture_is_unaffected_by_the_extra_residue(
+        self, batch
+    ):
+        # R17: the run mode changes what the design step acts on, never what
+        # the scan detects. The framework residue `_stage_mixed` adds is
+        # never a liability target, so a liabilities-mode run reads the same
+        # for that parent as it does for the plain `_stage` fixture that
+        # carries no such residue at all — both staged in the one batch, so
+        # one `_run` call reports both.
+        _stage_mixed(batch, "mixed", non_human_prior_score=0.01)
+        _stage(batch, "plain")
+
+        skips, written = _run(batch, ["--run-mode", "liabilities"])
+
+        by_key = {"mixed": [], "plain": []}
+        for clonotype_key, _, objective, variant in written:
+            by_key[clonotype_key].append(
+                (objective, variant.structural_tolerance, variant.changed_positions)
+            )
+        assert {reason for _, reason, _ in skips} == {""}
+        assert by_key["mixed"] == by_key["plain"]
 
 
 class TestReRankWeightsReachTheGlobalRewrite:

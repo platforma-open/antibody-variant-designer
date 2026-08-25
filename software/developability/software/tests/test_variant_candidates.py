@@ -7,7 +7,6 @@ import pytest
 from engine import (
     design_objective,
     liability_objective,
-    liability_triage,
     residue_store,
     tolerance_store,
     variant_candidates,
@@ -45,17 +44,32 @@ def _ng_site():
     return [_residue("H", 6, "N", imgt="107"), _residue("H", 7, "G", imgt="108")]
 
 
-def _triaged(site, definition_id="deamidation_ng", low_confidence=False, confidence_angstroms=3.0):
-    return liability_triage.Triaged(
+def _wide_site():
+    return [
+        _residue("H", 10, "N", imgt="150"),
+        _residue("H", 11, "N", imgt="151"),
+        _residue("H", 12, "N", imgt="152"),
+    ]
+
+
+def _liability_target(site, definition_id="deamidation_ng", low_confidence=False,
+                       confidence_angstroms=3.0):
+    return design_objective.DesignTarget(
+        site=tuple(site),
         definition_id=definition_id,
-        liability_type="deamidation",
-        risk_level="High",
-        fixability="fixable",
-        site=site,
-        verdict="exposed",
-        low_confidence=low_confidence,
+        region=site[0].region,
+        is_low_confidence=low_confidence,
         confidence_angstroms=confidence_angstroms,
-        rsasa=0.5,
+    )
+
+
+def _humanization_target(site):
+    return design_objective.DesignTarget(
+        site=tuple(site),
+        definition_id=None,
+        region=site[0].region,
+        is_low_confidence=False,
+        confidence_angstroms=None,
     )
 
 
@@ -79,6 +93,14 @@ def _ng_tolerance_lookup():
     }
 
 
+def _wide_tolerance_lookup():
+    return {
+        ("H", "150"): _row(["D", "Q", "A"], wild_type="N"),
+        ("H", "151"): _row(["E", "Q", "A"], wild_type="N"),
+        ("H", "152"): _row(["F", "Q", "A"], wild_type="N"),
+    }
+
+
 def _humanness_objective(identity):
     """A stub whose goal check reports `identity` as its score — an OASis
     identity, not a perplexity, so a test can tell the two numbers apart
@@ -95,7 +117,7 @@ def _humanness_objective(identity):
 class TestBuildCandidatesRescanGate:
     def test_a_combination_that_clears_the_target_and_creates_nothing_survives(self):
         candidates_out = variant_candidates.build_candidates(
-            [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+            [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             is_humanness_objective=False,
             max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -109,7 +131,7 @@ class TestBuildCandidatesRescanGate:
         # D then P spells `fragmentation_dp`'s own motif — clearing the
         # NG target this way must not survive the re-scan.
         candidates_out = variant_candidates.build_candidates(
-            [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+            [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             is_humanness_objective=False,
             max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -123,7 +145,7 @@ class TestBuildCandidatesRescanGate:
         [candidate] = [
             c
             for c in variant_candidates.build_candidates(
-                [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -138,7 +160,7 @@ class TestBuildCandidatesRescanGate:
         [candidate] = [
             c
             for c in variant_candidates.build_candidates(
-                [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -162,7 +184,7 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
         [candidate] = [
             c
             for c in variant_candidates.build_candidates(
-                [_triaged(_ng_site())], lookup, _ng_site(), TAXONOMY,
+                [_liability_target(_ng_site())], lookup, _ng_site(), TAXONOMY,
                 objective=_humanness_objective(identity=80.0),
                 is_humanness_objective=True,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -181,7 +203,7 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
         [candidate] = [
             c
             for c in variant_candidates.build_candidates(
-                [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -195,11 +217,11 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
         assert candidate.tolerance == pytest.approx(3.5)
         assert candidate.humanness_score is None
 
-    def test_region_low_confidence_and_worst_confidence_carry_forward_from_triage(self):
+    def test_region_low_confidence_and_worst_confidence_carry_forward_from_the_target(self):
         [candidate] = [
             c
             for c in variant_candidates.build_candidates(
-                [_triaged(_ng_site(), low_confidence=True, confidence_angstroms=7.5)],
+                [_liability_target(_ng_site(), low_confidence=True, confidence_angstroms=7.5)],
                 _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 is_humanness_objective=False,
@@ -217,7 +239,7 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
         [candidate] = [
             c
             for c in variant_candidates.build_candidates(
-                [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -232,7 +254,7 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
         [candidate] = [
             c
             for c in variant_candidates.build_candidates(
-                [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
                 is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -242,6 +264,64 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
         ]
 
         assert candidate.addressed_target == "Deamidation (N[GS]) @ CDR1 H:107"
+
+
+class TestBuildCandidatesHumanizationTarget:
+    """A target with no `definition_id`: one whole-set candidate, uncapped — R7, R8, R9."""
+
+    def test_one_candidate_carries_one_edit_per_selected_position_whatever_max_edits(self):
+        site = _wide_site()
+        candidates_out = variant_candidates.build_candidates(
+            [_humanization_target(site)], _wide_tolerance_lookup(), site, TAXONOMY,
+            objective=_humanness_objective(identity=80.0),
+            is_humanness_objective=True,
+            max_edits_per_variant=1, candidate_residues_per_position=3,
+            w_struct=1.0, w_obj=1.0,
+        )
+
+        assert len(candidates_out) == 1
+        assert len(candidates_out[0].edits) == 3
+
+    def test_the_candidate_substitutes_each_position_to_its_own_top_scoring_residue(self):
+        site = _wide_site()
+        [candidate] = variant_candidates.build_candidates(
+            [_humanization_target(site)], _wide_tolerance_lookup(), site, TAXONOMY,
+            objective=_humanness_objective(identity=80.0),
+            is_humanness_objective=True,
+            max_edits_per_variant=5, candidate_residues_per_position=3,
+            w_struct=1.0, w_obj=1.0,
+        )
+
+        # Never a product: exactly one combo, the top-ranked residue at
+        # each of the three positions.
+        assert tuple(e.to for e in candidate.edits) == ("D", "E", "F")
+
+    def test_the_addressed_target_names_the_fixed_label_and_the_chain(self):
+        site = _wide_site()
+        [candidate] = variant_candidates.build_candidates(
+            [_humanization_target(site)], _wide_tolerance_lookup(), site, TAXONOMY,
+            objective=_humanness_objective(identity=80.0),
+            is_humanness_objective=True,
+            max_edits_per_variant=5, candidate_residues_per_position=3,
+            w_struct=1.0, w_obj=1.0,
+        )
+
+        assert candidate.target_definition_id is None
+        assert candidate.addressed_target == "Humanization @ H"
+
+    def test_a_position_with_no_admissible_substitution_skips_the_whole_target(self):
+        site = _wide_site()
+        lookup = {("H", "150"): _wide_tolerance_lookup()[("H", "150")]}  # "151", "152" absent
+
+        candidates_out = variant_candidates.build_candidates(
+            [_humanization_target(site)], lookup, site, TAXONOMY,
+            objective=_humanness_objective(identity=80.0),
+            is_humanness_objective=True,
+            max_edits_per_variant=5, candidate_residues_per_position=3,
+            w_struct=1.0, w_obj=1.0,
+        )
+
+        assert candidates_out == []
 
 
 class TestTopSubstitutionsRanksByLogProbability:
@@ -358,7 +438,7 @@ class TestCombinedScoresWeighting:
 class TestBuildCandidatesEditBudget:
     def test_a_site_longer_than_the_edit_budget_produces_no_candidate(self):
         candidates_out = variant_candidates.build_candidates(
-            [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+            [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             is_humanness_objective=False,
             max_edits_per_variant=1, candidate_residues_per_position=3,
@@ -371,7 +451,7 @@ class TestBuildCandidatesEditBudget:
         lookup = {("H", "107"): _ng_tolerance_lookup()[("H", "107")]}  # "108" absent
 
         candidates_out = variant_candidates.build_candidates(
-            [_triaged(_ng_site())], lookup, _ng_site(), TAXONOMY,
+            [_liability_target(_ng_site())], lookup, _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
             is_humanness_objective=False,
             max_edits_per_variant=5, candidate_residues_per_position=3,
@@ -379,40 +459,3 @@ class TestBuildCandidatesEditBudget:
         )
 
         assert candidates_out == []
-
-
-class TestBuildCandidatesRiskLevelOrder:
-    def test_triaged_liabilities_in_low_high_medium_order_are_built_high_medium_low(self):
-        # Three isolated, non-interacting single-residue liabilities, one per
-        # risk level, submitted in an order that matches none of the three
-        # possible sorted orders — only `_risk_level_order` explains the
-        # output order.
-        low = _triaged(
-            [_residue("H", 20, "N", imgt="200")], definition_id="low_risk_lib",
-        )
-        low.risk_level = "Low"
-        high = _triaged(
-            [_residue("H", 21, "M", imgt="201")], definition_id="high_risk_lib",
-        )
-        high.risk_level = "High"
-        medium = _triaged(
-            [_residue("H", 22, "P", imgt="202")], definition_id="medium_risk_lib",
-        )
-        medium.risk_level = "Medium"
-        lookup = {
-            ("H", "200"): _row(["A"], wild_type="N"),
-            ("H", "201"): _row(["A"], wild_type="M"),
-            ("H", "202"): _row(["A"], wild_type="P"),
-        }
-
-        candidates_out = variant_candidates.build_candidates(
-            [low, high, medium], lookup, [], TAXONOMY,
-            objective=_OBJECTIVE,
-            is_humanness_objective=False,
-            max_edits_per_variant=5, candidate_residues_per_position=1,
-            w_struct=1.0, w_obj=1.0,
-        )
-
-        assert [c.target_definition_id for c in candidates_out] == [
-            "high_risk_lib", "medium_risk_lib", "low_risk_lib",
-        ]

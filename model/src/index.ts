@@ -22,11 +22,12 @@ import type { BlockArgs, BlockData, RunMode, SkipReason, SkippedClonotype } from
 
 export type { BlockArgs, BlockData, PlRef, RunMode, SkipReason, SkippedClonotype } from "./types";
 
-const DEFAULT_RUN_MODE: RunMode = "liabilities";
-
-const dataModel = new DataModelBuilder().from<BlockData>("v1").init(() => ({
-  dataset: undefined,
-  runMode: DEFAULT_RUN_MODE,
+/** Every scalar `BlockData` field's default value, in one place: `.init()`
+ *  seeds a new project from it, `.args()` falls back to it for a project
+ *  persisted before a field existed, and the settings panel shows it in the
+ *  field the operator has not touched. */
+export const BLOCK_DATA_DEFAULTS = {
+  runMode: "liabilities" as RunMode,
   rsasaBuriedCutoff: 0.075,
   actOnFixability: ["fixable", "easily_fixable"],
   maxEditsPerVariant: 5,
@@ -36,8 +37,14 @@ const dataModel = new DataModelBuilder().from<BlockData>("v1").init(() => ({
   candidateResiduesPerPosition: 3,
   wStruct: 1.0,
   wObj: 1.0,
+  nonHumanPriorCutoff: 0.05,
   lowToleranceFloor: 3,
   epistasisRescoreTopK: 20,
+} satisfies Partial<BlockData>;
+
+const dataModel = new DataModelBuilder().from<BlockData>("v1").init(() => ({
+  dataset: undefined,
+  ...BLOCK_DATA_DEFAULTS,
   variantsTableState: createPlDataTableStateV2(),
   liabilitiesTableState: createPlDataTableStateV2(),
 }));
@@ -156,10 +163,11 @@ export const platforma = BlockModelV3.create(dataModel)
     return {
       primaryRef: data.dataset.primary,
       subsetRef: data.dataset.primary.filter,
-      // `.init()` seeds this only for a project created after this lands; a
-      // project that already ran carries persisted `BlockData` without the
-      // field.
-      runMode: data.runMode ?? DEFAULT_RUN_MODE,
+      // `.init()` seeds a field only for a project created after that field
+      // lands, so a project that already ran carries persisted `BlockData`
+      // without it. The workflow's schema rejects an absent key, so every
+      // field added after v1 falls back here.
+      runMode: data.runMode ?? BLOCK_DATA_DEFAULTS.runMode,
       rsasaBuriedCutoff: data.rsasaBuriedCutoff,
       // A set, and the args are the run's content key: the workflow hands this
       // list to step 1's exec, and the backend canonicalizes a JSON resource's
@@ -174,8 +182,9 @@ export const platforma = BlockModelV3.create(dataModel)
       cdrConfThresh: data.cdrConfThresh,
       variantsPerParent: data.variantsPerParent,
       candidateResiduesPerPosition: data.candidateResiduesPerPosition,
-      wStruct: data.wStruct,
-      wObj: data.wObj,
+      wStruct: data.wStruct ?? BLOCK_DATA_DEFAULTS.wStruct,
+      wObj: data.wObj ?? BLOCK_DATA_DEFAULTS.wObj,
+      nonHumanPriorCutoff: data.nonHumanPriorCutoff ?? BLOCK_DATA_DEFAULTS.nonHumanPriorCutoff,
       lowToleranceFloor: data.lowToleranceFloor,
       epistasisRescoreTopK: data.epistasisRescoreTopK,
       indexAndScanCpu: data.indexAndScanCpu,

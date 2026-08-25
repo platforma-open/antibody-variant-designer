@@ -50,6 +50,7 @@ self.validateInputs({
 		candidateResiduesPerPosition: "number",
 		wStruct: "number",
 		wObj: "number",
+		nonHumanPriorCutoff: "number",
 		variantsPerParent: "number",
 		lowToleranceFloor: "number",
 		epistasisRescoreTopK: "number"

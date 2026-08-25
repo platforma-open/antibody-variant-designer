@@ -14,6 +14,7 @@ from pathlib import Path
 
 from engine import (
     antibody_batch,
+    humanness_objective,
     humanness_store,
     liability_store,
     pdb_index_store,
@@ -27,6 +28,8 @@ from engine import (
 )
 
 NO_CANDIDATE_REASON = "no-candidate-cleared-motif"
+
+NO_TARGET_REASON = "no-nonhuman-framework-position"
 
 PRIOR_SUFFIX = ".prior.tsv"
 
@@ -54,20 +57,23 @@ def process_one(
     candidate_residues_per_position: int,
     w_struct: float,
     w_obj: float,
+    non_human_prior_cutoff: float,
     variants_per_parent: int,
     low_tolerance_floor: float,
     epistasis_rescore_top_k: int,
 ) -> ParentDesignResult:
     """Gate then rank one antibody against every objective `mode` runs.
 
-    The result's skip reason is `""` on pass. Its ranked variants come as
-    `(objective_name, variants)` pairs, in run order, for the caller to append to the run's
-    one `variants.tsv` under that name.
+    The result's skip reason is `""` on pass, `NO_TARGET_REASON` when the humanization
+    objective ran and selected nothing and nothing else emitted a variant either, and
+    `NO_CANDIDATE_REASON` otherwise. Its ranked variants come as `(objective_name, variants)`
+    pairs, in run order, for the caller to append to the run's one `variants.tsv` under that
+    name.
 
-    Its humanness fields are the humanization objective's own target set and gate-cleared
-    candidates — `None` targets when `mode` never runs that objective — for the caller to
-    reduce into this parent's one `humanness.tsv` row. Neither is influenced by the liability
-    objective's own targets or candidates."""
+    Its humanness fields are the humanization objective's own selected residues and
+    gate-cleared candidates — `None` targets when `mode` never runs that objective — for the
+    caller to reduce into this parent's one `humanness.tsv` row. Neither is influenced by the
+    liability objective's own targets or candidates."""
     tolerance_lookup = tolerance_store.read_tolerance_tsv(tolerance_path)
     residues = residue_store.read_residues(residues_path)
     triaged = liability_store.read_triaged(triaged_path)
@@ -76,14 +82,14 @@ def process_one(
     humanness_targets: list | None = None
     humanness_cleared: list = []
     emitted = 0  # the second objective numbers on from the first, never from v01
-    for name, build_objective in run_mode.objectives_for(mode, prior_path):
-        targets = run_mode.targets_for(name, triaged)
+    for name, build_objective in run_mode.objectives_for(mode, prior_path, non_human_prior_cutoff):
+        objective = build_objective(residues)
+        targets = run_mode.targets_for(name, mode, triaged, objective, residues)
         if name == run_mode.HUMANNESS:
-            # `targets` is Triaged-shaped here — the same shape `build_candidates`
-            # below needs — but `humanness_store` reduces over the framework
-            # position itself. `t.site[0]` is the span start, the same residue
-            # `liability_store.liability_key` names a triaged site by.
-            humanness_targets = [t.site[0] for t in targets]
+            # Every selected residue of every target, not one per target — `humanness_store`
+            # reduces over the framework position itself, and a humanization target can carry
+            # more than one.
+            humanness_targets = [residue for target in targets for residue in target.site]
         if not targets:
             continue
         cleared = variant_candidates.build_candidates(
@@ -91,7 +97,7 @@ def process_one(
             tolerance_lookup,
             residues,
             taxonomy,
-            build_objective(residues),
+            objective,
             name == run_mode.HUMANNESS,
             max_edits_per_variant,
             candidate_residues_per_position,
@@ -115,8 +121,15 @@ def process_one(
         emitted += len(ranked)
         per_objective.append((name, ranked))
 
+    ran_humanness_and_selected_nothing = humanness_targets is not None and not humanness_targets
+    skip_reason = ""
+    if emitted == 0:
+        skip_reason = (
+            NO_TARGET_REASON if ran_humanness_and_selected_nothing else NO_CANDIDATE_REASON
+        )
+
     return ParentDesignResult(
-        skip_reason="" if emitted else NO_CANDIDATE_REASON,
+        skip_reason=skip_reason,
         per_objective=per_objective,
         humanness_targets=humanness_targets,
         humanness_cleared=humanness_cleared,
@@ -167,6 +180,12 @@ def main(argv: list[str] | None = None) -> int:
         default=variant_candidates.DEFAULT_W_OBJ,
         help="weight on the objective's position-prior term of the per-residue score",
     )
+    parser.add_argument(
+        "--non-human-prior-cutoff",
+        type=float,
+        default=humanness_objective.DEFAULT_NON_HUMAN_PRIOR_CUTOFF,
+        help="a framework position is humanized when the prior scores its wild type below this",
+    )
     # Ranking reads these three flags. Nothing else does.
     parser.add_argument(
         "--variants-per-parent", type=int, default=variant_ranking.DEFAULT_VARIANTS_PER_PARENT
@@ -215,7 +234,10 @@ def main(argv: list[str] | None = None) -> int:
             triaged_path.is_file() and tolerance_path.is_file() and residues_path.is_file()
         ):
             return None
-        if args.run_mode == run_mode.LIABILITIES_AND_HUMANIZATION and not prior_path.is_file():
+        runs_humanness = args.run_mode in (
+            run_mode.HUMANIZATION, run_mode.LIABILITIES_AND_HUMANIZATION,
+        )
+        if runs_humanness and not prior_path.is_file():
             return None
 
         result = process_one(
@@ -229,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
             args.candidate_residues_per_position,
             args.w_struct,
             args.w_obj,
+            args.non_human_prior_cutoff,
             args.variants_per_parent,
             args.low_tolerance_floor,
             args.epistasis_rescore_top_k,

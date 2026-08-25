@@ -6,9 +6,9 @@ import type { DatasetSelection, PlDataTableStateV2 } from "@platforma-sdk/model"
  *  a `PlRef` type. */
 export type PlRef = NonNullable<DatasetSelection["primary"]>["column"];
 
-/** Which objectives a run designs against: liability removal alone, or
+/** Which objectives a run designs against: liability removal alone, humanization alone, or
  *  liability removal together with humanization. */
-export type RunMode = "liabilities" | "liabilities + humanization";
+export type RunMode = "liabilities" | "humanization" | "liabilities + humanization";
 
 /** Unified user-editable state persisted by the model. */
 export type BlockData = {
@@ -25,6 +25,7 @@ export type BlockData = {
   candidateResiduesPerPosition: number;
   wStruct: number;
   wObj: number;
+  nonHumanPriorCutoff: number;
   lowToleranceFloor: number;
   epistasisRescoreTopK: number;
   /** Results-table sort / filter / column state, one per page. */
@@ -61,6 +62,7 @@ export type BlockArgs = {
   candidateResiduesPerPosition: number;
   wStruct: number;
   wObj: number;
+  nonHumanPriorCutoff: number;
   lowToleranceFloor: number;
   epistasisRescoreTopK: number;
   indexAndScanCpu?: number;

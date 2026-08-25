@@ -118,6 +118,7 @@ _buildVariants := func(pdbIndex, triaged, tolerance, residues, definitions, args
 			candidateResiduesPerPosition: args.candidateResiduesPerPosition,
 			wStruct: args.wStruct,
 			wObj: args.wObj,
+			nonHumanPriorCutoff: args.nonHumanPriorCutoff,
 			variantsPerParent: args.variantsPerParent,
 			lowToleranceFloor: args.lowToleranceFloor,
 			epistasisRescoreTopK: args.epistasisRescoreTopK

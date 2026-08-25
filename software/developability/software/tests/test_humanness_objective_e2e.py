@@ -10,6 +10,7 @@ from pathlib import Path
 
 import build_variants
 from engine import (
+    design_objective,
     humanness_objective,
     liability_store,
     liability_triage,
@@ -126,23 +127,44 @@ def _stage(batch, clonotype_key, offset, favored_aa):
     return entry
 
 
+def _as_design_target(triaged):
+    return design_objective.DesignTarget(
+        site=tuple(triaged.site),
+        definition_id=triaged.definition_id,
+        region=triaged.site[0].region,
+        is_low_confidence=triaged.low_confidence,
+        confidence_angstroms=triaged.confidence_angstroms,
+    )
+
+
 def _run_humanness_only(batch, monkeypatch, extra_args=None):
     """Runs `main` with `run_mode` patched to select the real humanness
-    objective alone, over every triaged site — a stand-in for the target
-    selection this row does not yet give the humanness objective. Not
-    reachable through `--run-mode` in this row: mode 2 mixes it with the
-    liability objective, and the liability objective trivially clears every
-    edit against this fixture's empty taxonomy, which would otherwise mask
-    the humanness gate this test exists to prove."""
+    objective alone, over the site `_stage` already triaged — bypassing the
+    objective's own selection (steered by a real prior, not this fixture's
+    near-empty one) so this class stays about `score_candidate`'s real
+    metric alone. Not reachable through `--run-mode` in this row: mode 2
+    mixes it with the liability objective, and the liability objective
+    trivially clears every edit against this fixture's empty taxonomy,
+    which would otherwise mask the humanness gate this test exists to
+    prove."""
     monkeypatch.setattr(
         build_variants.run_mode,
         "objectives_for",
-        lambda mode, prior_path: [
-            (run_mode.HUMANNESS, lambda residues: humanness_objective.build(prior_path, residues))
+        lambda mode, prior_path, non_human_prior_cutoff: [
+            (
+                run_mode.HUMANNESS,
+                lambda residues: humanness_objective.build(
+                    prior_path, residues, non_human_prior_cutoff
+                ),
+            )
         ],
     )
     monkeypatch.setattr(
-        build_variants.run_mode, "targets_for", lambda name, triaged_list: triaged_list
+        build_variants.run_mode,
+        "targets_for",
+        lambda name, mode, triaged_list, objective, residues: [
+            _as_design_target(t) for t in triaged_list
+        ],
     )
     return _run(batch, extra_args)
 

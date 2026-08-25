@@ -18,6 +18,23 @@ class GoalCheck:
 
 
 @dataclass(frozen=True)
+class DesignTarget:
+    """One objective's unit of work for one antibody: the residues a single candidate
+    substitutes together.
+
+    `definition_id` names the scanned liability the target addresses, and is `None` when the
+    target addresses none — a humanization target has no taxonomy entry to point at. Every
+    other field rides forward onto the candidate built here, and the generator computes none
+    of them."""
+
+    site: tuple
+    definition_id: str | None
+    region: str | None
+    is_low_confidence: bool
+    confidence_angstroms: float | None
+
+
+@dataclass(frozen=True)
 class Objective:
     select_target_positions: Callable[[list, list[dict]], list]
     position_prior: Callable[[list, list], dict[tuple[str, str], dict[str, float]]] | None

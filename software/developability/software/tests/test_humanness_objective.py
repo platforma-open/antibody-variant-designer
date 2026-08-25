@@ -15,7 +15,13 @@ import pytest
 import read_tolerance
 import sapiens_prior
 
-from engine import humanness_gate, humanness_objective, liability_motifs, residue_store
+from engine import (
+    design_objective,
+    humanness_gate,
+    humanness_objective,
+    liability_motifs,
+    residue_store,
+)
 
 REGIONS = ["FR1", "CDR1", "FR2", "CDR2", "FR3", "CDR3", "FR4"]
 
@@ -423,6 +429,10 @@ class TestNetworkGuardWrapsThePriorCall:
 # that names no real file is enough to build the objective under test.
 _UNUSED_PRIOR_PATH = "/unused/prior.tsv"
 
+# Every `TestScoreCandidateGoalCheck` case is about the goal check, never about
+# selection, so the cutoff value passed to `build()` never matters there.
+_UNUSED_CUTOFF = 0.05
+
 
 def _gate_residue(chain, offset, region, wild_type, chain_role):
     return residue_store.Residue(
@@ -472,7 +482,7 @@ class TestScoreCandidateGoalCheck:
         mutated_site = _edited(residues, "H", 0, "Q")
         scores = {"ACDE": 70.0, "QCDE": 80.0}
         monkeypatch.setattr(humanness_gate, "identity", lambda seq: scores[seq])
-        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF)
 
         result = objective.score_candidate(mutated_site, [], {})
 
@@ -485,7 +495,7 @@ class TestScoreCandidateGoalCheck:
         mutated_site = _edited(residues, "H", 0, "Q")
         scores = {"ACDE": 70.0, "QCDE": 70.0}
         monkeypatch.setattr(humanness_gate, "identity", lambda seq: scores[seq])
-        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF)
 
         result = objective.score_candidate(mutated_site, [], {})
 
@@ -496,7 +506,7 @@ class TestScoreCandidateGoalCheck:
         mutated_site = _edited(residues, "H", 0, "Q")
         scores = {"ACDE": 70.0, "QCDE": 60.0}
         monkeypatch.setattr(humanness_gate, "identity", lambda seq: scores[seq])
-        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF)
 
         result = objective.score_candidate(mutated_site, [], {})
 
@@ -508,7 +518,7 @@ class TestScoreCandidateGoalCheck:
         calls = []
         monkeypatch.setattr(humanness_gate, "identity", lambda seq: calls.append(seq) or 999.0)
         monkeypatch.setattr(liability_motifs, "detect_all", lambda *_a, **_k: [object()])
-        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF)
 
         result = objective.score_candidate(mutated_site, [], {})
 
@@ -522,7 +532,7 @@ class TestScoreCandidateGoalCheck:
         residues = _gate_residues()
         calls = []
         monkeypatch.setattr(humanness_gate, "identity", lambda seq: calls.append(seq) or 999.0)
-        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF)
 
         cdr_site = _edited(residues, "H", 1, "X")
         cdr_result = objective.score_candidate(cdr_site, [], {})
@@ -548,7 +558,7 @@ class TestScoreCandidateGoalCheck:
             return {"ACDE": 70.0, "QCDE": 80.0}[seq]
 
         monkeypatch.setattr(humanness_gate, "identity", fake_identity)
-        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF)
 
         objective.score_candidate(mutated_site, [], {})
 
@@ -567,7 +577,7 @@ class TestScoreCandidateGoalCheck:
             return None if len(seq) < humanness_gate.MIN_WINDOW else 99.0
 
         monkeypatch.setattr(humanness_gate, "identity", fake_identity)
-        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF)
 
         result = objective.score_candidate(mutated_site, [], {})
 
@@ -579,7 +589,7 @@ class TestScoreCandidateGoalCheck:
         mutated_site = _edited(residues, "H", 0, "Q") + _edited(residues, "L", 0, "K")
         calls = []
         monkeypatch.setattr(humanness_gate, "identity", lambda seq: calls.append(seq) or 999.0)
-        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues)
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF)
 
         result = objective.score_candidate(mutated_site, [], {})
 
@@ -587,3 +597,97 @@ class TestScoreCandidateGoalCheck:
         assert result.score == 0.0
         # Never measured against an arbitrary one of the two chains.
         assert calls == []
+
+
+def _selection_residue(chain, offset, region, wild_type, chain_role="H"):
+    return residue_store.Residue(
+        chain=chain,
+        offset=offset,
+        imgt=str(offset + 1),
+        wild_type=wild_type,
+        res_name=wild_type,
+        b_factor=20.0,
+        region=region,
+        chain_role=chain_role,
+    )
+
+
+class TestSelectNonHumanPositions:
+    """`humanness_objective.select_non_human_positions` — which framework positions become
+    this run's humanization targets, at a given cutoff."""
+
+    def test_a_framework_position_below_the_cutoff_is_selected(self):
+        residue = _selection_residue("H", 0, "FR1", "A")
+        prior = {("H", "1"): {"A": math.log(0.04)}}
+
+        targets = humanness_objective.select_non_human_positions([residue], prior, 0.05)
+
+        assert [t.site for t in targets] == [(residue,)]
+
+    def test_a_framework_position_at_exactly_the_cutoff_is_not_selected(self):
+        residue = _selection_residue("H", 0, "FR1", "A")
+        prior = {("H", "1"): {"A": math.log(0.05)}}
+
+        targets = humanness_objective.select_non_human_positions([residue], prior, 0.05)
+
+        assert targets == []
+
+    def test_a_cdr_position_below_the_cutoff_is_not_selected(self):
+        residue = _selection_residue("H", 0, "CDR1", "A")
+        prior = {("H", "1"): {"A": math.log(0.04)}}
+
+        targets = humanness_objective.select_non_human_positions([residue], prior, 0.05)
+
+        assert targets == []
+
+    def test_a_position_absent_from_the_prior_is_not_selected(self):
+        residue = _selection_residue("H", 0, "FR1", "A")
+        prior = {}  # nothing scored this position
+
+        targets = humanness_objective.select_non_human_positions([residue], prior, 0.05)
+
+        assert targets == []
+
+    def test_a_wild_type_absent_from_the_prior_row_is_not_selected(self):
+        # A modified/unknown residue collapses to `X` in the residue index (see
+        # `residue_index.py`), and `sapiens_prior.PRIOR_COLUMNS` carries only the twenty
+        # standard amino acids, so no column scores it.
+        residue = _selection_residue("H", 0, "FR1", "X")
+        prior = {("H", "1"): {"A": math.log(0.01)}}
+
+        targets = humanness_objective.select_non_human_positions([residue], prior, 0.05)
+
+        assert targets == []
+
+    def test_two_chains_each_holding_a_non_human_position_yield_two_targets(self):
+        h_residue = _selection_residue("H", 0, "FR1", "A", chain_role="H")
+        l_residue = _selection_residue("L", 0, "FR1", "A", chain_role="L")
+        prior = {("H", "1"): {"A": math.log(0.01)}, ("L", "1"): {"A": math.log(0.01)}}
+
+        targets = humanness_objective.select_non_human_positions(
+            [h_residue, l_residue], prior, 0.05
+        )
+
+        assert len(targets) == 2
+        assert {t.site[0].chain for t in targets} == {"H", "L"}
+
+    def test_every_framework_position_at_or_above_the_cutoff_yields_no_target(self):
+        residues = [
+            _selection_residue("H", 0, "FR1", "A"),
+            _selection_residue("H", 1, "FR2", "C"),
+        ]
+        prior = {("H", "1"): {"A": math.log(0.05)}, ("H", "2"): {"C": math.log(0.9)}}
+
+        targets = humanness_objective.select_non_human_positions(residues, prior, 0.05)
+
+        assert targets == []
+
+    def test_a_target_carries_no_definition_id_and_the_positions_own_region(self):
+        residue = _selection_residue("H", 0, "FR1", "A")
+        prior = {("H", "1"): {"A": math.log(0.001)}}
+
+        [target] = humanness_objective.select_non_human_positions([residue], prior, 0.05)
+
+        assert isinstance(target, design_objective.DesignTarget)
+        assert target.definition_id is None
+        assert target.region == "FR1"

@@ -90,6 +90,7 @@ ARGS := {
 		candidateResiduesPerPosition: "number",
 		wStruct: "number",
 		wObj: "number",
+		nonHumanPriorCutoff: "number",
 		variantsPerParent: "number",
 		lowToleranceFloor: "number",
 		epistasisRescoreTopK: "number"
@@ -137,6 +138,7 @@ run := func(args) {
 		arg(string(args.params.candidateResiduesPerPosition)).
 		arg("--w-struct").arg(string(args.params.wStruct)).
 		arg("--w-obj").arg(string(args.params.wObj)).
+		arg("--non-human-prior-cutoff").arg(string(args.params.nonHumanPriorCutoff)).
 		arg("--variants-per-parent").arg(string(args.params.variantsPerParent)).
 		arg("--low-tolerance-floor").arg(string(args.params.lowToleranceFloor)).
 		arg("--epistasis-rescore-top-k").arg(string(args.params.epistasisRescoreTopK)).

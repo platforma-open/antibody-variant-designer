@@ -17,6 +17,7 @@ import pytest
 import build_variants
 import index_and_scan
 from engine import (
+    design_objective,
     liability_store,
     liability_triage,
     residue_store,
@@ -443,12 +444,23 @@ class TestHumannessScoreAtTheRealEntrypoint:
         Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}").write_text(
             "chain\timgt\n"
         )
-        # This objective has no target selection of its own yet
-        # (`run_mode.targets_for`): stand in for it exactly as the humanness
+        # Stand in for `run_mode.targets_for` exactly as the humanness
         # objective's own e2e suite does, so both objectives target the one
-        # triaged site.
+        # triaged site rather than the humanness objective's own selection
+        # over this fixture's near-empty prior.
         monkeypatch.setattr(
-            build_variants.run_mode, "targets_for", lambda name, triaged_list: triaged_list
+            build_variants.run_mode,
+            "targets_for",
+            lambda name, mode, triaged_list, objective, residues: [
+                design_objective.DesignTarget(
+                    site=tuple(t.site),
+                    definition_id=t.definition_id,
+                    region=t.site[0].region,
+                    is_low_confidence=t.low_confidence,
+                    confidence_angstroms=t.confidence_angstroms,
+                )
+                for t in triaged_list
+            ],
         )
 
         out_variants = batch.path("variants.tsv")

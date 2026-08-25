@@ -12,7 +12,9 @@ import {
   PlSlideModal,
   PlTooltip,
 } from "@platforma-sdk/ui-vue";
-import { ref } from "vue";
+import { computed, ref } from "vue";
+import { BLOCK_DATA_DEFAULTS } from "@platforma-open/milaboratories.antibody-variant-designer.model";
+import type { BlockData } from "@platforma-open/milaboratories.antibody-variant-designer.model";
 import { useApp } from "../app";
 
 // Settings, not any one page's — every page renders this same button and
@@ -53,18 +55,70 @@ const FIXABILITY_OPTIONS = [
   },
 ] as const;
 
+// The combined mode's option contract has no per-option `disabled` key
+// (`ListOptionBase` carries only `label`, `description` and `value`), so a
+// click landing on it would render as an ordinary pick with no visible
+// refusal. `RUN_MODE_OPTIONS` below folds the reason into the label itself
+// so the option reads as unselectable at a glance, and `runModeModel`'s
+// setter below is what actually refuses the pick.
+const RUN_MODE_COMBINED = "liabilities + humanization";
+
 const RUN_MODE_OPTIONS = [
   { value: "liabilities", label: "Liabilities" },
-  { value: "liabilities + humanization", label: "Liabilities + humanization" },
+  { value: "humanization", label: "Humanization" },
+  {
+    value: RUN_MODE_COMBINED,
+    label: "Liabilities + humanization (arrives in a later version)",
+  },
 ] as const;
 
+type DefaultedField = keyof typeof BLOCK_DATA_DEFAULTS;
+
+// A project created before a field existed carries no value for it, and the
+// control it binds renders empty while the run uses the model's default. The
+// getter shows that default; nothing reaches persisted state until the
+// operator edits the field.
+function defaulted<K extends DefaultedField>(field: K) {
+  return computed({
+    get: () => (app.model.data[field] ?? BLOCK_DATA_DEFAULTS[field]) as BlockData[K],
+    set: (value: BlockData[K]) => {
+      app.model.data[field] = value;
+    },
+  });
+}
+
+const rsasaBuriedCutoff = defaulted("rsasaBuriedCutoff");
+const frConfThresh = defaulted("frConfThresh");
+const cdrConfThresh = defaulted("cdrConfThresh");
+const maxEditsPerVariant = defaulted("maxEditsPerVariant");
+const candidateResiduesPerPosition = defaulted("candidateResiduesPerPosition");
+const wStruct = defaulted("wStruct");
+const wObj = defaulted("wObj");
+const nonHumanPriorCutoff = defaulted("nonHumanPriorCutoff");
+const variantsPerParent = defaulted("variantsPerParent");
+const lowToleranceFloor = defaulted("lowToleranceFloor");
+const epistasisRescoreTopK = defaulted("epistasisRescoreTopK");
+
+// A project already saved on the combined mode keeps running it unchanged
+// (R15) — the getter passes that value through untouched. The setter is
+// the one place that refuses a *new* pick of it.
+const runModeModel = computed({
+  get: () => app.model.data.runMode ?? BLOCK_DATA_DEFAULTS.runMode,
+  set: (value: typeof app.model.data.runMode) => {
+    if (value === RUN_MODE_COMBINED) return;
+    app.model.data.runMode = value;
+  },
+});
+
+const actOnFixability = defaulted("actOnFixability");
+
 function isFixabilityChecked(value: string): boolean {
-  return app.model.data.actOnFixability.includes(value);
+  return actOnFixability.value.includes(value);
 }
 
 function toggleFixability(value: string) {
-  const current = app.model.data.actOnFixability;
-  app.model.data.actOnFixability = current.includes(value)
+  const current = actOnFixability.value;
+  actOnFixability.value = current.includes(value)
     ? current.filter((v) => v !== value)
     : [...current, value];
 }
@@ -93,17 +147,13 @@ function toggleFixability(value: string) {
     </PlAlert>
 
     <PlAccordionSection label="Objectives">
-      <PlDropdown
-        v-model="app.model.data.runMode"
-        label="Design against"
-        :options="RUN_MODE_OPTIONS"
-      >
+      <PlDropdown v-model="runModeModel" label="Design against" :options="RUN_MODE_OPTIONS">
         <template #tooltip>
           Which developability objectives this run designs against. Liabilities repairs detected
           liability motifs, the default and the only behaviour before this option existed.
-          Liabilities + humanization additionally proposes framework substitutions that make the
-          antibody read as more human, over positions the liability objective never touches.
-          Default: Liabilities.
+          Humanization instead proposes framework substitutions that make the antibody read as more
+          human, over positions the liability objective never touches. Liabilities + humanization
+          would run both together; it arrives in a later version. Default: Liabilities.
         </template>
       </PlDropdown>
     </PlAccordionSection>
@@ -111,7 +161,7 @@ function toggleFixability(value: string) {
     <PlAccordionSection label="Exposure and confidence">
       <div class="field-grid">
         <PlNumberField
-          v-model="app.model.data.rsasaBuriedCutoff"
+          v-model="rsasaBuriedCutoff"
           label="Buried rSASA cutoff"
           :minValue="0"
           :maxValue="1"
@@ -124,7 +174,7 @@ function toggleFixability(value: string) {
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.frConfThresh"
+          v-model="frConfThresh"
           label="Framework confidence threshold (Å)"
           :minValue="1"
           :maxValue="10"
@@ -137,7 +187,7 @@ function toggleFixability(value: string) {
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.cdrConfThresh"
+          v-model="cdrConfThresh"
           label="CDR confidence threshold (Å)"
           :minValue="1"
           :maxValue="12"
@@ -180,7 +230,7 @@ function toggleFixability(value: string) {
     <PlAccordionSection label="Candidate generation">
       <div class="field-grid">
         <PlNumberField
-          v-model="app.model.data.maxEditsPerVariant"
+          v-model="maxEditsPerVariant"
           label="Max edits per variant"
           :minValue="1"
           :maxValue="20"
@@ -192,7 +242,7 @@ function toggleFixability(value: string) {
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.candidateResiduesPerPosition"
+          v-model="candidateResiduesPerPosition"
           label="Candidate residues per position"
           :minValue="1"
           :maxValue="19"
@@ -205,7 +255,7 @@ function toggleFixability(value: string) {
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.wStruct"
+          v-model="wStruct"
           label="Fold tolerance weight"
           :minValue="0"
           :maxValue="5"
@@ -218,7 +268,7 @@ function toggleFixability(value: string) {
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.wObj"
+          v-model="wObj"
           label="Objective prior weight"
           :minValue="0"
           :maxValue="5"
@@ -229,13 +279,26 @@ function toggleFixability(value: string) {
             ignores it; higher favours the residues the objective prefers. Default 1.
           </template>
         </PlNumberField>
+        <PlNumberField
+          v-model="nonHumanPriorCutoff"
+          label="Non-human prior cutoff"
+          :minValue="0"
+          :maxValue="1"
+          :step="0.01"
+        >
+          <template #tooltip>
+            In humanization mode, a framework position is edited when the residue the antibody
+            carries there is this rare among human antibodies at that position. Higher humanizes
+            more positions; lower humanizes fewer. Default 0.05.
+          </template>
+        </PlNumberField>
       </div>
     </PlAccordionSection>
 
     <PlAccordionSection label="Ranking">
       <div class="field-grid">
         <PlNumberField
-          v-model="app.model.data.variantsPerParent"
+          v-model="variantsPerParent"
           label="Variants per parent"
           :minValue="1"
           :maxValue="50"
@@ -247,7 +310,7 @@ function toggleFixability(value: string) {
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.lowToleranceFloor"
+          v-model="lowToleranceFloor"
           label="Low tolerance floor"
           :minValue="1"
           :maxValue="20"
@@ -259,7 +322,7 @@ function toggleFixability(value: string) {
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.epistasisRescoreTopK"
+          v-model="epistasisRescoreTopK"
           label="Epistasis re-score top-K"
           :minValue="1"
           :maxValue="100"
