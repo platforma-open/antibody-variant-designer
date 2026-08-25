@@ -194,9 +194,10 @@ def build_candidates(
             if not check.meets_goal:
                 continue
 
-            # The goal check's score orders the candidate; what it means is the objective's business.
-            # For the liability objective it is a mean perplexity. Reporting a perplexity as
-            # humanness would put a fold number in a humanness column.
+            # The goal check's score orders the candidate; what it means is the
+            # objective's business. For the liability objective it is a mean
+            # perplexity. Reporting a perplexity as humanness would put a fold
+            # number in a humanness column.
             humanness_score = check.score if is_humanness_objective else None
 
             edits = tuple(

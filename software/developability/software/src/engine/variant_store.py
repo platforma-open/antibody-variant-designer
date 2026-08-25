@@ -177,7 +177,9 @@ def _rerank_score(v: Variant, alpha: float, beta: float) -> float:
     `alpha = beta = 1.0` then weighs the two terms equally. A variant with
     no humanness number contributes nothing to the second term."""
     structural = _normalize(v.structural_tolerance, STRUCTURAL_TOLERANCE_DOMAIN)
-    humanness = 0.0 if v.humanness_score is None else _normalize(v.humanness_score, HUMANNESS_DOMAIN)
+    humanness = (
+        0.0 if v.humanness_score is None else _normalize(v.humanness_score, HUMANNESS_DOMAIN)
+    )
     return alpha * structural + beta * humanness
 
 
@@ -196,7 +198,12 @@ def rewrite_global_rank(path: str, alpha: float, beta: float) -> None:
     if not rows:
         return
     rows.sort(
-        key=lambda row: (-_rerank_score(row[3], alpha, beta), row[3].changed_positions, row[0], row[1])
+        key=lambda row: (
+            -_rerank_score(row[3], alpha, beta),
+            row[3].changed_positions,
+            row[0],
+            row[1],
+        )
     )
 
     buf = io.StringIO()
