@@ -53,10 +53,11 @@ const variantsTableOutput = computed(() => app.model.outputs.variantsTable);
 //
 // v7 adds `parentRank`: a new column changes the header set AG-Grid would
 // otherwise cache stale (`088-decision-rank-becomes-a-global-ordinal-via-a-second-pass`).
+// v8 adds `humannessScore`, the same header-set change.
 const variantsTableSettings = usePlDataTableSettingsV2({
   model: () => variantsTableOutput.value,
   sourceId: () =>
-    variantsTableOutput.value.ok && variantsTableOutput.value.value ? "avd-variants-v7" : undefined,
+    variantsTableOutput.value.ok && variantsTableOutput.value.value ? "avd-variants-v8" : undefined,
 });
 
 // The row-detail view's own value columns (`VARIANT_VALUE_COLUMNS`) are read
