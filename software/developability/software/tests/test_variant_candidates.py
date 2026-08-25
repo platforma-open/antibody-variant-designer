@@ -5,6 +5,7 @@ lives in `build_variants.py`, tested in `test_build_variants.py`."""
 import pytest
 
 from engine import (
+    design_objective,
     liability_objective,
     liability_triage,
     residue_store,
@@ -78,6 +79,19 @@ def _ng_tolerance_lookup():
     }
 
 
+def _humanness_objective(identity):
+    """A stub whose goal check reports `identity` as its score — an OASis
+    identity, not a perplexity, so a test can tell the two numbers apart
+    at the same call site a real humanization objective would use."""
+    return design_objective.Objective(
+        select_target_positions=lambda residues, taxonomy: [],
+        position_prior=None,
+        score_candidate=lambda mutated_site, taxonomy, tolerance_lookup: (
+            design_objective.GoalCheck(meets_goal=True, score=identity)
+        ),
+    )
+
+
 class TestBuildCandidatesRescanGate:
     def test_a_combination_that_clears_the_target_and_creates_nothing_survives(self):
         candidates_out = variant_candidates.build_candidates(
@@ -137,6 +151,49 @@ class TestBuildCandidatesRescanGate:
         # candidate's tolerance is their mean, not either position's own
         # perplexity, and not their min or their sum.
         assert candidate.tolerance == pytest.approx(3.5)
+
+
+class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
+    def test_tolerance_comes_from_the_table_humanness_comes_from_the_goal_check(self):
+        lookup = {
+            ("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=4.0),
+            ("H", "108"): _row(["P", "S", "A"], wild_type="G", perplexity=6.0),
+        }
+        [candidate] = [
+            c
+            for c in variant_candidates.build_candidates(
+                [_triaged(_ng_site())], lookup, _ng_site(), TAXONOMY,
+                objective=_humanness_objective(identity=80.0),
+                is_humanness_objective=True,
+                max_edits_per_variant=5, candidate_residues_per_position=3,
+                w_struct=1.0, w_obj=1.0,
+            )
+            if tuple(e.to for e in c.edits) == ("D", "S")
+        ]
+
+        # Two distinct numbers on the same candidate: tolerance is the
+        # mean perplexity the table gives (4.0, 6.0), never the goal
+        # check's OASis identity.
+        assert candidate.tolerance == pytest.approx(5.0)
+        assert candidate.humanness_score == pytest.approx(80.0)
+
+    def test_a_liability_candidates_tolerance_is_unaffected_by_the_extraction(self):
+        [candidate] = [
+            c
+            for c in variant_candidates.build_candidates(
+                [_triaged(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
+                objective=_OBJECTIVE,
+                is_humanness_objective=False,
+                max_edits_per_variant=5, candidate_residues_per_position=3,
+                w_struct=1.0, w_obj=1.0,
+            )
+            if tuple(e.to for e in c.edits) == ("D", "S")
+        ]
+
+        # Sharing the mean-perplexity computation with the humanization
+        # path changes no liability candidate's value.
+        assert candidate.tolerance == pytest.approx(3.5)
+        assert candidate.humanness_score is None
 
     def test_region_low_confidence_and_worst_confidence_carry_forward_from_triage(self):
         [candidate] = [

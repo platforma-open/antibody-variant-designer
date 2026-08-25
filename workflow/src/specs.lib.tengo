@@ -30,9 +30,9 @@ _stampOrderPriority := func(columns) {
 // **This list fixes two orders at once.** Top to bottom it is the table's
 // column order, which `_stampOrderPriority` turns into each column's priority.
 // The rows that declare a `csvHeader`, read in the same order, are the vendor's
-// whole set — `variantId` leads it and is built in `main.tpl.tengo`, and
-// `humannessScore` is among them. So no row carries a position number of
-// either kind.
+// whole set, `humannessScore` included — `variantId` leads that set and is
+// built in `main.tpl.tengo` rather than declared here. Neither order is a
+// number a row carries; both are this one list's position.
 //
 // This is the one list two readers share — `buildVariantsSettings` below and
 // `csvColumnOrder` at the end of the file — so it is a named list rather than a

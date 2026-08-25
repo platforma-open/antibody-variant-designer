@@ -16,7 +16,14 @@ import pytest
 
 import build_variants
 import index_and_scan
-from engine import residue_store, skip_store, tolerance_store, variant_store
+from engine import (
+    liability_store,
+    liability_triage,
+    residue_store,
+    skip_store,
+    tolerance_store,
+    variant_store,
+)
 from pdb_fixtures import make_pdb, platforma_cdr_remark
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -287,3 +294,112 @@ class TestWeightedCombinationAtTheEntrypoint:
         )
         assert Path(zeroed).read_bytes() != default_bytes
         assert {row["changedPositions"] for row in _rows_of(zeroed)} != default_changed
+
+
+class TestHumannessScoreAtTheRealEntrypoint:
+    """Reuses the real-`promb`, real-tolerance-table fixture already proven
+    in `test_humanness_objective_e2e.py` — a rise case whose identity moves
+    far enough from any fold perplexity that a row where the two cells were
+    mistakenly equal is impossible to miss by eye."""
+
+    def _run_liability_and_humanization(self, batch, monkeypatch):
+        from test_humanness_objective_e2e import (
+            _RISE_AA,
+            _RISE_OFFSET,
+            _heavy_chain_residues,
+            _steered_tolerance_row,
+        )
+
+        entry = batch.add("rises")
+        residues = _heavy_chain_residues()
+        site_residue = next(r for r in residues if r.offset == _RISE_OFFSET)
+        liability_store.write_triaged(
+            str(Path(batch.dir("triaged"), f"{entry.stem}.json")),
+            [
+                liability_triage.Triaged(
+                    definition_id="framework_liability",
+                    liability_type="framework",
+                    risk_level="High",
+                    fixability="fixable",
+                    site=[site_residue],
+                    verdict="exposed",
+                    low_confidence=False,
+                    confidence_angstroms=3.0,
+                    rsasa=0.5,
+                )
+            ],
+        )
+        tolerance_store.write_tolerance_tsv(
+            str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+            [_steered_tolerance_row(site_residue, _RISE_AA)],
+        )
+        residue_store.write_residues(
+            str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
+        )
+        Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}").write_text(
+            "chain\timgt\n"
+        )
+        # This objective has no target selection of its own yet
+        # (`run_mode.targets_for`): stand in for it exactly as the humanness
+        # objective's own e2e suite does, so both objectives target the one
+        # triaged site.
+        monkeypatch.setattr(
+            build_variants.run_mode, "targets_for", lambda name, triaged_list: triaged_list
+        )
+
+        out_variants = batch.path("variants.tsv")
+        rc = build_variants.main(
+            [
+                "--triaged-dir", batch.dir("triaged"),
+                "--tolerance-dir", batch.dir("tolerance"),
+                "--residues-dir", batch.dir("residues"),
+                "--pdb-index", batch.index,
+                "--definitions", batch.definitions([]),
+                "--out-variants", out_variants,
+                "--out-skip", batch.path("skip.tsv"),
+                "--candidate-residues-per-position", "1",
+                "--run-mode", "liabilities + humanization",
+            ]
+        )
+        assert rc == 0
+        return out_variants, batch.path("skip.tsv")
+
+    def test_a_cleared_humanization_candidate_writes_a_humanness_cell_distinct_from_tolerance(
+        self, batch, monkeypatch
+    ):
+        out_variants, _ = self._run_liability_and_humanization(batch, monkeypatch)
+
+        rows = [row for row in _rows_of(out_variants) if row["objective"] == "humanness"]
+        assert len(rows) == 1
+        humanness = float(rows[0]["humannessScore"])
+        tolerance = float(rows[0]["structuralTolerance"])
+        assert humanness >= 70.0
+        assert tolerance <= 10.0
+        assert humanness != tolerance
+
+    def test_the_liability_objectives_own_row_leaves_the_humanness_cell_empty(
+        self, batch, monkeypatch
+    ):
+        out_variants, _ = self._run_liability_and_humanization(batch, monkeypatch)
+
+        rows = [row for row in _rows_of(out_variants) if row["objective"] == "liability"]
+        assert len(rows) == 1
+        assert rows[0]["humannessScore"] == ""
+
+    def test_rank_orders_by_the_normalised_blend_not_by_tolerance_alone(self, batch, monkeypatch):
+        # The humanization row's tolerance alone (2.0, near the domain floor)
+        # would rank it last under the old, tolerance-only order; its
+        # humanness term (>= 70/100) must outweigh that and put it first.
+        out_variants, _ = self._run_liability_and_humanization(batch, monkeypatch)
+
+        rows = sorted(_rows_of(out_variants), key=lambda r: int(r["rank"]))
+        assert rows[0]["objective"] == "humanness"
+
+    def test_a_liability_only_run_leaves_every_humanness_cell_empty(self, batch):
+        definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
+
+        out_variants, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
+
+        rows = _rows_of(out_variants)
+        assert len(rows) > 0
+        assert all(row["humannessScore"] == "" for row in rows)

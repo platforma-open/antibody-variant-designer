@@ -41,11 +41,12 @@ class Candidate:
 
     target_definition_id: str
     edits: tuple[Edit, ...]
-    # The objective's score_candidate result. For the liability-removal objective, the mean
-    # AntiFold perplexity over the edited positions — the entropy, in bits, of AntiFold's
-    # amino-acid distribution at each position, a property of the positions rather than of the
-    # substituted amino acid, unlike the per-amino-acid log-probability `_top_substitutions`
-    # ranks by.
+    # The mean AntiFold perplexity over the edited positions — the entropy, in bits, of
+    # AntiFold's amino-acid distribution at each position, a property of the positions rather
+    # than of the substituted amino acid, unlike the per-amino-acid log-probability
+    # `_top_substitutions` ranks by. Computed by `design_objective.mean_tolerance`, the same
+    # way for every objective — never the objective's own `GoalCheck.score`, which the
+    # humanization objective uses for a different quantity (see `humanness_score` below).
     tolerance: float
     # region, low_confidence and worst_confidence_angstroms ride forward unchanged from the
     # liability_triage.Triaged this candidate was built from; this module computes none of them.
@@ -155,7 +156,7 @@ def build_candidates(
     substitution, is skipped before the objective runs.
 
     `is_humanness_objective` comes from `run_mode.objectives_for`'s `(name, builder)` pair.
-    `objective` carries no name. `is_humanness_objective` is that name's only trace here.
+    `objective` carries no name.
 
     `score_candidate` sees only the candidate's site, never the residue index or the PDB."""
     taxonomy_by_id = {d["id"]: d for d in taxonomy}
@@ -194,10 +195,9 @@ def build_candidates(
             if not check.meets_goal:
                 continue
 
-            # The goal check's score orders the candidate; what it means is the
-            # objective's business. For the liability objective it is a mean
-            # perplexity. Reporting a perplexity as humanness would put a fold
-            # number in a humanness column.
+            # structural_tolerance is one column with one meaning for every objective; see
+            # the field's own doc comment above.
+            tolerance = design_objective.mean_tolerance(mutated_site, tolerance_lookup)
             humanness_score = check.score if is_humanness_objective else None
 
             edits = tuple(
@@ -214,7 +214,7 @@ def build_candidates(
                 Candidate(
                     target_definition_id=triaged.definition_id,
                     edits=edits,
-                    tolerance=check.score,
+                    tolerance=tolerance,
                     region=site[0].region,
                     low_confidence=triaged.low_confidence,
                     worst_confidence_angstroms=triaged.confidence_angstroms,

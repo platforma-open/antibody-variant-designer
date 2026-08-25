@@ -346,3 +346,80 @@ class TestRunModeSelectsObjectives:
         keys = [v.parent_rank for _, variants in per_objective for v in variants]
         assert len(keys) == len(set(keys))
         assert [name for name, _ in per_objective] == [run_mode.LIABILITY, run_mode.HUMANNESS]
+
+    def test_the_humanization_objectives_score_lands_on_its_candidate_as_humanness(
+        self, batch, monkeypatch
+    ):
+        # The same stub, but its score is distinguishable from every fold
+        # tolerance in the fixture (5.0) — a landing on the wrong field
+        # would be a visible number match, not a silent one.
+        entry = _stage(batch, "clone-1")
+        stub_objective = design_objective.Objective(
+            select_target_positions=lambda residues, taxonomy: [],
+            position_prior=None,
+            score_candidate=lambda mutated_site, taxonomy, tolerance_lookup: (
+                design_objective.GoalCheck(meets_goal=True, score=80.0)
+            ),
+        )
+        monkeypatch.setattr(
+            build_variants.run_mode,
+            "objectives_for",
+            lambda mode, prior_path: [
+                (run_mode.LIABILITY, lambda _residues: stub_objective),
+                (run_mode.HUMANNESS, lambda _residues: stub_objective),
+            ],
+        )
+        monkeypatch.setattr(
+            build_variants.run_mode,
+            "targets_for",
+            lambda name, triaged_list: triaged_list,
+        )
+
+        triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
+        tolerance_path = str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv"))
+        residues_path = str(Path(batch.dir("residues"), f"{entry.stem}.json"))
+        _, per_objective = build_variants.process_one(
+            triaged_path, tolerance_path, residues_path, TAXONOMY,
+            "liabilities + humanization", "unused-prior-path",
+            5, 3, 1.0, 1.0, 10, 3.0, 20,
+        )
+
+        by_name = dict(per_objective)
+        assert all(v.humanness_score is None for v in by_name[run_mode.LIABILITY])
+        assert all(v.humanness_score == pytest.approx(80.0) for v in by_name[run_mode.HUMANNESS])
+        # And the tolerance the stub's own score never reaches: this fixture's
+        # two positions carry perplexities 5.0 and 2.0, mean 3.5, on every
+        # variant — never the stub's 80.0.
+        assert all(
+            v.structural_tolerance == pytest.approx(3.5)
+            for variants in by_name.values()
+            for v in variants
+        )
+
+
+class TestReRankWeightsReachTheGlobalRewrite:
+    def test_alpha_and_beta_flags_reach_rewrite_global_rank(self, batch, monkeypatch):
+        _stage(batch, "clone-1")
+        calls = []
+        monkeypatch.setattr(
+            variant_store,
+            "rewrite_global_rank",
+            lambda path, alpha, beta: calls.append((alpha, beta)),
+        )
+
+        _run(batch, ["--alpha", "2.5", "--beta", "0.5"])
+
+        assert calls == [(2.5, 0.5)]
+
+    def test_the_weights_default_to_the_module_defaults(self, batch, monkeypatch):
+        _stage(batch, "clone-1")
+        calls = []
+        monkeypatch.setattr(
+            variant_store,
+            "rewrite_global_rank",
+            lambda path, alpha, beta: calls.append((alpha, beta)),
+        )
+
+        _run(batch)
+
+        assert calls == [(variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA)]

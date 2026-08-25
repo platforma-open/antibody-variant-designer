@@ -173,7 +173,7 @@ def _normalize(value: float, domain: tuple[float, float]) -> float:
 def _rerank_score(v: Variant, alpha: float, beta: float) -> float:
     """Returns `alpha * norm(structural tolerance) + beta * norm(humanness)`.
 
-    Each term is rescaled to `[0, 1]` over its own fixed domain first.
+    Each term is scaled by its own fixed domain first, unclamped.
     `alpha = beta = 1.0` then weighs the two terms equally. A variant with
     no humanness number contributes nothing to the second term."""
     structural = _normalize(v.structural_tolerance, STRUCTURAL_TOLERANCE_DOMAIN)

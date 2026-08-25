@@ -6,6 +6,7 @@
 // the CSV's full vendor header set.
 
 test := import("@platforma-sdk/workflow-tengo:test")
+text := import("text")
 specs := import(":specs")
 
 BLOCK_ID := "block-under-test"
@@ -135,6 +136,18 @@ TestVariantColumns := func() {
 		byColumn.structuralTolerance.spec.annotations["pl7.app/structure/toleranceMetric"])
 	test.isEqual("predictedErrorAngstroms",
 		byColumn.worstConfidence.spec.annotations["pl7.app/structure/confidenceMetric"])
+
+	// The disclosure the humanness column carries verbatim: a reader of the
+	// column alone must not mistake a raw identity for a calibrated percentile,
+	// and the tier the identity is fixed at.
+	test.isTrue(text.contains(
+		byColumn.humannessScore.spec.annotations["pl7.app/description"],
+		"NOT a calibrated OASis percentile"))
+	test.isTrue(text.contains(
+		byColumn.humannessScore.spec.annotations["pl7.app/description"],
+		"more than 10% of human OAS subjects"))
+	test.isEqual("OASis identity (human-oas, fixed tier)",
+		byColumn.humannessScore.spec.annotations["pl7.app/score/method"])
 
 	// Hidden is not absent: both stay in the data and in the CSV.
 	test.isEqual("hidden", byColumn.variantSequence.spec.annotations["pl7.app/table/visibility"])

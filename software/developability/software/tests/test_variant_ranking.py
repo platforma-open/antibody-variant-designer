@@ -16,6 +16,7 @@ def _candidate(
     low_confidence=False,
     worst_confidence_angstroms=3.0,
     imgt_start=1,
+    humanness_score=None,
 ):
     edits = tuple(
         variant_candidates.Edit(
@@ -32,6 +33,7 @@ def _candidate(
         worst_confidence_angstroms=worst_confidence_angstroms,
         addressed_target="Deamidation (N[GS]) @ FR1 H:107",
         changed_positions=changed_positions,
+        humanness_score=humanness_score,
     )
 
 
@@ -257,6 +259,28 @@ class TestRankVariantsOrderingAndTruncation:
 
         assert variants[0].changed_positions == "H:N107D"
         assert variants[0].binding_risk == "High"
+
+
+class TestHumannessScoreRidesOntoTheVariant:
+    def test_the_ranked_variant_copies_the_candidates_humanness_score(self):
+        candidate = _candidate(humanness_score=80.0)
+
+        [variant] = variant_ranking.rank_variants(
+            [candidate], residues=[], tolerance_lookup={},
+            variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=20,
+        )
+
+        assert variant.humanness_score == pytest.approx(80.0)
+
+    def test_a_candidate_with_no_humanness_score_yields_a_variant_with_none(self):
+        candidate = _candidate(humanness_score=None)
+
+        [variant] = variant_ranking.rank_variants(
+            [candidate], residues=[], tolerance_lookup={},
+            variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=20,
+        )
+
+        assert variant.humanness_score is None
 
 
 class TestRankVariantsVhhFlag:

@@ -22,3 +22,15 @@ class Objective:
     select_target_positions: Callable[[list, list[dict]], list]
     position_prior: Callable[[list, list], dict[tuple[str, str], dict[str, float]]] | None
     score_candidate: Callable[[list, list[dict], dict], GoalCheck]
+
+
+def mean_tolerance(mutated_site: list, tolerance_lookup: dict) -> float:
+    """The mean AntiFold perplexity over `mutated_site`'s positions.
+
+    Every `Candidate.tolerance` is this value, computed the same way regardless of which
+    objective scored the candidate — never `GoalCheck.score`, which the humanization
+    objective uses to carry a different quantity, the OASis identity."""
+    perplexities = [
+        tolerance_lookup[(residue.chain, residue.imgt)]["perplexity"] for residue in mutated_site
+    ]
+    return sum(perplexities) / len(perplexities)

@@ -22,11 +22,9 @@ def score_candidate(
 ) -> design_objective.GoalCheck:
     hits = liability_motifs.detect_all(mutated_site, taxonomy)
     hits += liability_cysteines.detect_all(mutated_site, taxonomy)
-    perplexities = [
-        tolerance_lookup[(residue.chain, residue.imgt)]["perplexity"] for residue in mutated_site
-    ]
     return design_objective.GoalCheck(
-        meets_goal=not hits, score=sum(perplexities) / len(perplexities)
+        meets_goal=not hits,
+        score=design_objective.mean_tolerance(mutated_site, tolerance_lookup),
     )
 
 

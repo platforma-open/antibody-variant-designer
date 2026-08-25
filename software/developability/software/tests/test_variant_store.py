@@ -6,6 +6,8 @@ across the whole run."""
 import csv
 import io
 
+import pytest
+
 from engine import variant_store
 
 
@@ -195,6 +197,61 @@ class TestObjectiveIsPerRow:
         }
 
 
+class TestHumannessScoreRoundTrips:
+    def test_a_none_humanness_score_writes_an_empty_cell_and_leaves_every_other_cell_alone(
+        self, tmp_path
+    ):
+        path = tmp_path / "variants.tsv"
+        original = _variant()
+
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(str(path), "clone-1", "liability", [original])
+        [(_, _, _, rehydrated)] = variant_store.read_variants_tsv(str(path))
+
+        row = _rows_of(path)[0]
+        assert row["humannessScore"] == ""
+        # Every other field round-trips to the same `Variant` the row before
+        # this column existed would have produced.
+        assert rehydrated == original
+
+    def test_a_humanness_score_round_trips_as_a_float(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(
+            str(path), "clone-1", "humanness", [_variant(humanness_score=80.0)]
+        )
+        [(_, _, _, rehydrated)] = variant_store.read_variants_tsv(str(path))
+
+        assert rehydrated.humanness_score == 80.0
+        assert isinstance(rehydrated.humanness_score, float)
+
+
+class TestNormalizeAndRerankScore:
+    def test_normalize_scores_zero_at_the_domain_floor_and_one_at_the_ceiling(self):
+        assert variant_store._normalize(1.0, variant_store.STRUCTURAL_TOLERANCE_DOMAIN) == 0.0
+        assert variant_store._normalize(20.0, variant_store.STRUCTURAL_TOLERANCE_DOMAIN) == 1.0
+        assert variant_store._normalize(0.0, variant_store.HUMANNESS_DOMAIN) == 0.0
+        assert variant_store._normalize(100.0, variant_store.HUMANNESS_DOMAIN) == 1.0
+
+    def test_alpha_equals_beta_equals_one_weighs_both_terms_equally_at_the_floor_and_ceiling(self):
+        # Both terms at their domain floor: the sum is 0 regardless of which
+        # term is which, so alpha and beta are weighing them equally, not
+        # just carrying the same name.
+        floor = _variant(structural_tolerance=1.0, humanness_score=0.0)
+        assert variant_store._rerank_score(floor, alpha=1.0, beta=1.0) == pytest.approx(0.0)
+
+        # Both terms at their domain ceiling: the sum is 2 — one full point
+        # from each term, not 1 point split between them.
+        ceiling = _variant(structural_tolerance=20.0, humanness_score=100.0)
+        assert variant_store._rerank_score(ceiling, alpha=1.0, beta=1.0) == pytest.approx(2.0)
+
+    def test_a_variant_with_no_humanness_score_contributes_nothing_to_the_beta_term(self):
+        no_humanness = _variant(structural_tolerance=20.0, humanness_score=None)
+
+        assert variant_store._rerank_score(no_humanness, alpha=1.0, beta=1.0) == pytest.approx(1.0)
+
+
 class TestRewriteGlobalRank:
     def test_renumbers_every_parents_survivors_by_tolerance_across_the_run(self, tmp_path):
         path = tmp_path / "variants.tsv"
@@ -271,3 +328,50 @@ class TestRewriteGlobalRank:
         )
 
         assert variant_store.read_variants_tsv(str(path)) == []
+
+    def test_equal_tolerance_ranks_the_higher_humanness_score_first(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(
+            str(path), "clone-1", "humanness",
+            [
+                _variant(rank=1, structural_tolerance=5.0, humanness_score=40.0,
+                         changed_positions="H:N107D"),
+                _variant(rank=2, structural_tolerance=5.0, humanness_score=90.0,
+                         changed_positions="H:N108D"),
+            ],
+        )
+
+        variant_store.rewrite_global_rank(
+            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+        )
+
+        written = variant_store.read_variants_tsv(str(path))
+        assert [v.changed_positions for _, _, _, v in written] == ["H:N108D", "H:N107D"]
+
+    def test_no_humanness_number_in_the_file_orders_the_same_for_any_positive_alpha(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(
+            str(path), "clone-1", "liability",
+            [
+                _variant(rank=1, structural_tolerance=9.0, changed_positions="H:N107D"),
+                _variant(rank=2, structural_tolerance=5.0, changed_positions="H:N108D"),
+            ],
+        )
+
+        one = tmp_path / "one.tsv"
+        one.write_text(path.read_text())
+        variant_store.rewrite_global_rank(str(one), alpha=1.0, beta=variant_store.DEFAULT_BETA)
+
+        seven = tmp_path / "seven.tsv"
+        seven.write_text(path.read_text())
+        variant_store.rewrite_global_rank(str(seven), alpha=7.0, beta=variant_store.DEFAULT_BETA)
+
+        order_at_one = [
+            v.changed_positions for _, _, _, v in variant_store.read_variants_tsv(str(one))
+        ]
+        order_at_seven = [
+            v.changed_positions for _, _, _, v in variant_store.read_variants_tsv(str(seven))
+        ]
+        assert order_at_one == order_at_seven == ["H:N107D", "H:N108D"]
