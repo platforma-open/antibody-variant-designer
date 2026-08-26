@@ -640,6 +640,69 @@ class TestHumanizationModeEndToEnd:
         assert by_key["mixed"] == by_key["plain"]
 
 
+def _stage_liability_mix(batch, clonotype_key, triaged):
+    """One parent whose triaged list `_stage_liability_mix`'s caller supplies, with the
+    framework residue and the `_ng_site` CDR residues both in its residue index and its
+    tolerance table — the fixture `TestModeTwoLiabilityTargetsCutToCdrs` runs against. The
+    prior scores every position above the default cutoff, so the humanization objective
+    selects nothing and every emitted variant is the liability objective's own."""
+    entry = batch.add(clonotype_key)
+    residues = [_framework_residue(), *_ng_site()]
+    liability_store.write_triaged(
+        str(Path(batch.dir("triaged"), f"{entry.stem}.json")), triaged
+    )
+    tolerance_store.write_tolerance_tsv(
+        str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+        [*_tolerance_rows(), {"posins": "1", **_row(["D", "Q", "A"], "N", 3.0)}],
+    )
+    residue_store.write_residues(
+        str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
+    )
+    _write_prior_tsv(
+        Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"), 0.9
+    )
+    return entry
+
+
+class TestModeTwoLiabilityTargetsCutToCdrs:
+    """Mode 2 designs the liability objective only against a triaged site whose whole site
+    lies inside a CDR — TODO-20's Outcome."""
+
+    def test_a_cdr_and_a_framework_liability_yield_variants_for_the_cdr_liability_only(
+        self, batch
+    ):
+        _stage_liability_mix(
+            batch, "clone-1", [_triaged(_ng_site()), _triaged([_framework_residue()])]
+        )
+
+        _, written = _run(batch, ["--run-mode", "liabilities + humanization"])
+
+        assert len(written) > 0
+        assert all(obj == "liability" for _, _, obj, _ in written)
+        assert all("H:N1D" not in v.changed_positions for _, _, _, v in written)
+
+    def test_liabilities_mode_over_the_same_parent_still_designs_the_framework_liability(
+        self, batch
+    ):
+        _stage_liability_mix(
+            batch, "clone-1", [_triaged(_ng_site()), _triaged([_framework_residue()])]
+        )
+
+        _, written = _run(batch, ["--run-mode", "liabilities"])
+
+        assert any("H:N1D" in v.changed_positions for _, _, _, v in written)
+
+    def test_a_framework_only_parent_in_mode_2_gets_no_variant_and_a_named_skip(self, batch):
+        _stage_liability_mix(batch, "clone-1", [_triaged([_framework_residue()])])
+
+        skips, written = _run(batch, ["--run-mode", "liabilities + humanization"])
+
+        assert written == []
+        [(clonotype_key, reason, _)] = skips
+        assert clonotype_key == "clone-1"
+        assert reason != ""
+
+
 class TestParentHumannessScoresEndToEnd:
     """`humanness.tsv`'s two new score columns, across the run modes and antibody shapes
     TODO-19's Outcome names."""

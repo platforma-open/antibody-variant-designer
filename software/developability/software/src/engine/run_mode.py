@@ -3,7 +3,9 @@
 `liabilities` runs the liability objective alone, targeting every triaged liability, highest
 risk level first. `humanization` runs the humanness objective alone, targeting every non-human
 framework position its own selection finds; the liability objective does not run in this mode
-and receives no targets. `liabilities + humanization` runs both, in that order.
+and receives no targets. `liabilities + humanization` runs both, in that order — the liability
+objective's targets there are cut to the triaged liabilities that lie entirely inside a CDR, so
+the two objectives never propose against the same residue.
 """
 
 from collections.abc import Callable
@@ -16,6 +18,8 @@ HUMANNESS = "humanness"
 LIABILITIES = "liabilities"
 HUMANIZATION = "humanization"
 LIABILITIES_AND_HUMANIZATION = "liabilities + humanization"
+
+CDR_PREFIX = "CDR"
 
 MODES = (LIABILITIES, HUMANIZATION, LIABILITIES_AND_HUMANIZATION)
 DEFAULT_MODE = LIABILITIES
@@ -66,6 +70,12 @@ def objectives_for(
     raise ValueError(f"unknown run mode: {mode}")
 
 
+def _in_cdr(triaged: liability_triage.Triaged) -> bool:
+    """A triaged liability's whole site lies inside a CDR — every one of its site residues
+    carries a region starting with `CDR_PREFIX`."""
+    return all(r.region is not None and r.region.startswith(CDR_PREFIX) for r in triaged.site)
+
+
 def targets_for(
     name: str,
     mode: str,
@@ -78,9 +88,14 @@ def targets_for(
 
     The humanness objective's targets are its own selection over the parent's residues. The
     liability objective targets every triaged liability, highest risk level first, except in
-    `humanization` mode, where it runs no design at all and gets none."""
+    `humanization` mode, where it runs no design at all and gets none, and in
+    `liabilities + humanization` mode, where a target must also lie entirely inside a CDR — a
+    framework liability is still scanned, triaged and reported, but never designed against
+    while humanization runs beside it."""
     if name == HUMANNESS:
         return objective.select_target_positions(residues, [])
     if mode == HUMANIZATION:
         return []
+    if mode == LIABILITIES_AND_HUMANIZATION:
+        triaged_list = [t for t in triaged_list if _in_cdr(t)]
     return [_as_design_target(t) for t in sorted(triaged_list, key=_risk_level_order)]

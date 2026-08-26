@@ -23,13 +23,13 @@ def _residue(chain, offset, region="CDR1", wild_type="A"):
 
 
 def _triaged(definition_id="deamidation_ng", risk_level="High", low_confidence=False,
-             confidence_angstroms=3.0):
+             confidence_angstroms=3.0, site=None):
     return liability_triage.Triaged(
         definition_id=definition_id,
         liability_type="deamidation",
         risk_level=risk_level,
         fixability="fixable",
-        site=[_residue("H", 6, region="FR1")],
+        site=site if site is not None else [_residue("H", 6, region="FR1")],
         verdict="exposed",
         low_confidence=low_confidence,
         confidence_angstroms=confidence_angstroms,
@@ -147,6 +147,80 @@ class TestTargetsFor:
         targets = run_mode.targets_for(
             run_mode.HUMANNESS, run_mode.HUMANIZATION, [_triaged()], objective,
             ["stand-in-residues"],
+        )
+
+        assert targets is selection
+
+    def test_liabilities_mode_keeps_a_framework_site_as_a_target(self):
+        framework = _triaged(definition_id="framework_lib", site=[_residue("H", 6, region="FR1")])
+
+        targets = run_mode.targets_for(
+            run_mode.LIABILITY, run_mode.LIABILITIES, [framework], liability_objective.OBJECTIVE,
+            [],
+        )
+
+        assert [t.definition_id for t in targets] == ["framework_lib"]
+
+    def test_mode_2_keeps_a_site_whose_every_residue_carries_a_cdr_region(self):
+        cdr_site = _triaged(
+            definition_id="cdr_lib",
+            site=[_residue("H", 6, region="CDR1"), _residue("H", 7, region="CDR1")],
+        )
+
+        targets = run_mode.targets_for(
+            run_mode.LIABILITY, run_mode.LIABILITIES_AND_HUMANIZATION, [cdr_site],
+            liability_objective.OBJECTIVE, [],
+        )
+
+        assert [t.definition_id for t in targets] == ["cdr_lib"]
+
+    def test_mode_2_drops_a_site_whose_every_residue_carries_a_framework_region(self):
+        framework_site = _triaged(
+            definition_id="framework_lib", site=[_residue("H", 6, region="FR1")]
+        )
+
+        targets = run_mode.targets_for(
+            run_mode.LIABILITY, run_mode.LIABILITIES_AND_HUMANIZATION, [framework_site],
+            liability_objective.OBJECTIVE, [],
+        )
+
+        assert targets == []
+
+    def test_mode_2_drops_a_site_straddling_a_cdr_and_a_framework_position(self):
+        straddling_site = _triaged(
+            definition_id="straddling_lib",
+            site=[_residue("H", 6, region="CDR1"), _residue("H", 7, region="FR2")],
+        )
+
+        targets = run_mode.targets_for(
+            run_mode.LIABILITY, run_mode.LIABILITIES_AND_HUMANIZATION, [straddling_site],
+            liability_objective.OBJECTIVE, [],
+        )
+
+        assert targets == []
+
+    def test_mode_2_over_an_all_framework_parent_yields_no_targets_at_all(self):
+        framework_a = _triaged(
+            definition_id="framework_a", site=[_residue("H", 6, region="FR1")]
+        )
+        framework_b = _triaged(
+            definition_id="framework_b", site=[_residue("H", 20, region="FR2")]
+        )
+
+        targets = run_mode.targets_for(
+            run_mode.LIABILITY, run_mode.LIABILITIES_AND_HUMANIZATION,
+            [framework_a, framework_b], liability_objective.OBJECTIVE, [],
+        )
+
+        assert targets == []
+
+    @pytest.mark.parametrize("mode", run_mode.MODES)
+    def test_the_humanness_objectives_targets_are_unchanged_by_the_mode(self, mode):
+        selection = ["stand-in-for-a-design-target"]
+        objective = _stub_objective(selection)
+
+        targets = run_mode.targets_for(
+            run_mode.HUMANNESS, mode, [_triaged()], objective, ["stand-in-residues"],
         )
 
         assert targets is selection
