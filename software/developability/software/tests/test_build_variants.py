@@ -704,13 +704,13 @@ class TestModeTwoLiabilityTargetsCutToCdrs:
 
 
 class TestParentHumannessScoresEndToEnd:
-    """`humanness.tsv`'s two new score columns, across the run modes and antibody shapes
-    TODO-19's Outcome names."""
+    """`humanness.tsv`'s score column, across the run modes and antibody shapes the
+    Outcome names."""
 
-    def test_a_paired_parent_scores_both_chains_from_the_gate(self, batch, monkeypatch):
+    def test_a_paired_parent_emits_its_heavy_chain_score(self, batch, monkeypatch):
         # A stub distinguishable by chain: the fixture's H sequence is three
-        # residues, its L sequence one, so a landing on the wrong column
-        # would be a visible number mismatch, not a silent one.
+        # residues, its L sequence one, so the light chain's score landing in
+        # the column would be a visible number mismatch, not a silent one.
         monkeypatch.setattr(humanness_gate, "identity", lambda seq: float(len(seq)))
         _stage_paired(batch, "clone-1", non_human_prior_score=0.01)
 
@@ -718,9 +718,9 @@ class TestParentHumannessScoresEndToEnd:
 
         [row] = humanness_rows
         assert row["heavyHumannessScore"] == "3.0"
-        assert row["lightHumannessScore"] == "1.0"
+        assert "lightHumannessScore" not in row
 
-    def test_a_single_chain_parent_leaves_the_light_column_empty(self, batch, monkeypatch):
+    def test_a_single_chain_parent_still_carries_its_heavy_score(self, batch, monkeypatch):
         _stub_rising_on_d(monkeypatch)
         _stage_mixed(batch, "clone-1", non_human_prior_score=0.01)
 
@@ -728,16 +728,14 @@ class TestParentHumannessScoresEndToEnd:
 
         [row] = humanness_rows
         assert row["heavyHumannessScore"] != ""
-        assert row["lightHumannessScore"] == ""
 
-    def test_liabilities_mode_over_the_same_input_leaves_both_columns_empty(self, batch):
+    def test_liabilities_mode_over_the_same_input_leaves_the_column_empty(self, batch):
         _stage_mixed(batch, "clone-1", non_human_prior_score=0.01)
 
         _, _, humanness_rows = _run_mixed(batch, ["--run-mode", "liabilities"])
 
         [row] = humanness_rows
         assert row["heavyHumannessScore"] == ""
-        assert row["lightHumannessScore"] == ""
 
     def test_a_parent_whose_candidates_were_all_gate_discarded_still_gets_its_scores(
         self, batch, monkeypatch

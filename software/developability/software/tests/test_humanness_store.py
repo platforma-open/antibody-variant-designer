@@ -126,8 +126,7 @@ class TestHumannessTsv:
 
         assert _rows_of(path) == []
         assert path.read_text() == (
-            "clonotypeKey\thumannessVerdict\thumannessSummary\t"
-            "heavyHumannessScore\tlightHumannessScore\n"
+            "clonotypeKey\thumannessVerdict\thumannessSummary\theavyHumannessScore\n"
         )
 
     def test_a_summary_holding_a_comma_round_trips_as_one_field(self, tmp_path):
@@ -159,7 +158,7 @@ class TestHumannessTsv:
 
         assert [r["clonotypeKey"] for r in _rows_of(path)] == ["clone-1", "clone-2"]
 
-    def test_a_parent_scored_on_both_chains_never_swaps_the_columns(self, tmp_path):
+    def test_the_heavy_chain_score_is_the_one_emitted(self, tmp_path):
         path = tmp_path / "humanness.tsv"
 
         humanness_store.write_humanness_header(str(path))
@@ -169,19 +168,18 @@ class TestHumannessTsv:
 
         [row] = _rows_of(path)
         assert row["heavyHumannessScore"] == "91.0"
-        assert row["lightHumannessScore"] == "84.0"
+        assert "lightHumannessScore" not in row
 
-    def test_a_parent_scored_on_one_chain_leaves_the_other_empty_not_zero(self, tmp_path):
+    def test_a_parent_with_no_heavy_score_leaves_the_column_empty_not_zero(self, tmp_path):
         path = tmp_path / "humanness.tsv"
 
         humanness_store.write_humanness_header(str(path))
-        humanness_store.append_humanness_tsv(str(path), "clone-1", [], [], {"H": 91.0})
+        humanness_store.append_humanness_tsv(str(path), "clone-1", [], [], {"L": 84.0})
 
         [row] = _rows_of(path)
-        assert row["heavyHumannessScore"] == "91.0"
-        assert row["lightHumannessScore"] == ""
+        assert row["heavyHumannessScore"] == ""
 
-    def test_a_parent_the_objective_never_ran_for_leaves_both_score_columns_empty(
+    def test_a_parent_the_objective_never_ran_for_leaves_the_score_column_empty(
         self, tmp_path
     ):
         path = tmp_path / "humanness.tsv"
@@ -193,4 +191,3 @@ class TestHumannessTsv:
         assert row["humannessVerdict"] == ""
         assert row["humannessSummary"] == ""
         assert row["heavyHumannessScore"] == ""
-        assert row["lightHumannessScore"] == ""

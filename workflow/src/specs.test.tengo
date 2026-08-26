@@ -178,7 +178,7 @@ TestParentsGroup := func() {
 	test.isEqual(1, len(settings.axes))
 	test.isEqual("pl7.app/vdj/scClonotypeKey", settings.axes[0].spec.name)
 
-	test.isEqual(8, len(settings.columns))
+	test.isEqual(7, len(settings.columns))
 	test.isEqual("pl7.app/liabilities/verdict", byColumn.verdict.spec.name)
 	test.isEqual("pl7.app/liabilities/summary", byColumn.summary.spec.name)
 	test.isEqual("String", byColumn.verdict.spec.valueType)
@@ -208,17 +208,17 @@ TestParentsGroup := func() {
 	test.isEqual("hidden", settings.axes[0].spec.annotations["pl7.app/table/visibility"])
 	test.isTrue(is_undefined(CLONOTYPE_AXIS.annotations["pl7.app/table/visibility"]))
 
-	// The parent leads, then its key, then Verdict, then Summary, then the
-	// humanness pair, then the parent's own two humanness scores — the list
-	// order.
+	// The parent leads, then both verdicts, then both summaries, then the
+	// parent's own humanness score, and the key last — the list order. The two
+	// verdicts sit together so a reader compares them without crossing a
+	// free-text column.
 	test.isEqual("parentClonotypeId", settings.columns[0].column)
-	test.isEqual("parentClonotypeKey", settings.columns[1].column)
-	test.isEqual("verdict", settings.columns[2].column)
+	test.isEqual("verdict", settings.columns[1].column)
+	test.isEqual("humannessVerdict", settings.columns[2].column)
 	test.isEqual("summary", settings.columns[3].column)
-	test.isEqual("humannessVerdict", settings.columns[4].column)
-	test.isEqual("humannessSummary", settings.columns[5].column)
-	test.isEqual("heavyHumannessScore", settings.columns[6].column)
-	test.isEqual("lightHumannessScore", settings.columns[7].column)
+	test.isEqual("humannessSummary", settings.columns[4].column)
+	test.isEqual("heavyHumannessScore", settings.columns[5].column)
+	test.isEqual("parentClonotypeKey", settings.columns[6].column)
 }
 
 TestParentsHumannessPair := func() {
@@ -239,30 +239,25 @@ TestParentsHumannessPair := func() {
 	test.isTrue(is_undefined(byColumn.humannessSummary.spec.annotations["pl7.app/isDiscreteFilter"]))
 }
 
-TestParentsHumannessScorePair := func() {
+TestParentsHumannessScore := func() {
 	settings := specs.buildParentsSettings(BLOCK_ID, CLONOTYPE_AXIS)
 	byColumn := _byColumn(settings.columns)
 
-	// One name, two columns — told apart by the chain domain, the same
-	// pattern `pl7.app/vdj/bindingRisk` and every other per-chain-role
-	// column in this corpus follows.
+	// The heavy chain alone carries a score column. It is the chain every
+	// antibody format in scope has, and the one the row is keyed on, so the
+	// chain domain says which chain the number measures rather than telling
+	// two columns apart.
 	test.isEqual("pl7.app/humannessScore", byColumn.heavyHumannessScore.spec.name)
-	test.isEqual("pl7.app/humannessScore", byColumn.lightHumannessScore.spec.name)
 	test.isEqual("Double", byColumn.heavyHumannessScore.spec.valueType)
-	test.isEqual("Double", byColumn.lightHumannessScore.spec.valueType)
 	test.isEqual("IGHeavy", byColumn.heavyHumannessScore.spec.domain["pl7.app/vdj/chain"])
-	test.isEqual("IGLight", byColumn.lightHumannessScore.spec.domain["pl7.app/vdj/chain"])
+	test.isTrue(is_undefined(byColumn.lightHumannessScore))
 
 	// The shipped disclosure rule: names the quantity and its tier, names no
 	// producing tool.
 	test.isTrue(text.contains(
 		byColumn.heavyHumannessScore.spec.annotations["pl7.app/description"], "humanness scale"))
-	test.isTrue(text.contains(
-		byColumn.lightHumannessScore.spec.annotations["pl7.app/description"], "humanness scale"))
 	test.isTrue(!text.contains(
 		byColumn.heavyHumannessScore.spec.annotations["pl7.app/description"], "OASis"))
-	test.isTrue(!text.contains(
-		byColumn.lightHumannessScore.spec.annotations["pl7.app/description"], "OASis"))
 }
 
 TestEveryColumnCarriesTheBlockId := func() {
@@ -375,6 +370,6 @@ TestOrderPriorityFollowsListPosition := func() {
 	// one step.
 	test.isEqual("17000", variants.columns[0].spec.annotations["pl7.app/table/orderPriority"])
 	test.isEqual("1000", variants.columns[16].spec.annotations["pl7.app/table/orderPriority"])
-	test.isEqual("8000", parents.columns[0].spec.annotations["pl7.app/table/orderPriority"])
-	test.isEqual("1000", parents.columns[7].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("7000", parents.columns[0].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("1000", parents.columns[6].spec.annotations["pl7.app/table/orderPriority"])
 }

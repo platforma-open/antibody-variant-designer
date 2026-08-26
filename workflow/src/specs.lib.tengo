@@ -511,47 +511,15 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 				}
 			},
 			{
-				// Reuses the Variants page's own PColumn name — same real-world
-				// value, same name, the precedent `parentClonotypeId` above already
-				// set on this page
-				// ([[089-decision-parents-page-gets-an-addable-parent-key-column]]).
-				// `spec-helpers.lib.tengo` aliases it off the flat `clonotypeKey`
-				// column; the hidden axis above is untouched.
-				column: "parentClonotypeKey",
-				spec: {
-					name: "pl7.app/antibodyVariantDesigner/parentClonotypeKey",
-					valueType: "String",
-					contextDomain: { "pl7.app/blockId": blockId },
-					annotations: {
-						"pl7.app/label": "Parent clone key",
-						"pl7.app/description": "The parent's clonotype key, as minted by the block that produced the structures dataset.",
-						"pl7.app/table/fontFamily": "monospace",
-						"pl7.app/table/visibility": "optional"
-					}
-				}
-			},
-			{
 				column: "verdict",
 				spec: {
 					name: "pl7.app/liabilities/verdict",
 					valueType: "String",
 					contextDomain: { "pl7.app/blockId": blockId },
 					annotations: {
-						"pl7.app/label": "Verdict",
+						"pl7.app/label": "Liability verdict",
 						"pl7.app/description": "Whether this parent carries any triaged liability at all — present or none — buried and declined ones included. Read Summary for what was found and why a declined one was declined.",
 						"pl7.app/isDiscreteFilter": "true"
-					}
-				}
-			},
-			{
-				column: "summary",
-				spec: {
-					name: "pl7.app/liabilities/summary",
-					valueType: "String",
-					contextDomain: { "pl7.app/blockId": blockId },
-					annotations: {
-						"pl7.app/label": "Summary",
-						"pl7.app/description": "Every triaged liability on this parent, comma-joined as <liability type>@<chain><IMGT position> (<verdict>), with the fixability class named when the verdict is fixability-declined. \"None\" when the parent triaged clean."
 					}
 				}
 			},
@@ -565,6 +533,18 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 						"pl7.app/label": "Humanness Verdict",
 						"pl7.app/description": "Whether humanization found any non-human framework position on this parent at all — present or none. Empty when the run did not include the humanization objective, which is not the same as none. Read Humanness Summary for what was found and what was decided at each position.",
 						"pl7.app/isDiscreteFilter": "true"
+					}
+				}
+			},
+			{
+				column: "summary",
+				spec: {
+					name: "pl7.app/liabilities/summary",
+					valueType: "String",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Summary",
+						"pl7.app/description": "Every triaged liability on this parent, comma-joined as <liability type>@<chain><IMGT position> (<verdict>), with the fixability class named when the verdict is fixability-declined. \"None\" when the parent triaged clean."
 					}
 				}
 			},
@@ -594,15 +574,22 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 				}
 			},
 			{
-				column: "lightHumannessScore",
+				// Reuses the Variants page's own PColumn name — same real-world
+				// value, same name, the precedent `parentClonotypeId` above already
+				// set on this page
+				// ([[089-decision-parents-page-gets-an-addable-parent-key-column]]).
+				// `spec-helpers.lib.tengo` aliases it off the flat `clonotypeKey`
+				// column; the hidden axis above is untouched.
+				column: "parentClonotypeKey",
 				spec: {
-					name: "pl7.app/humannessScore",
-					valueType: "Double",
-					domain: { "pl7.app/vdj/chain": "IGLight" },
+					name: "pl7.app/antibodyVariantDesigner/parentClonotypeKey",
+					valueType: "String",
 					contextDomain: { "pl7.app/blockId": blockId },
 					annotations: {
-						"pl7.app/label": "Light humanness",
-						"pl7.app/description": "This parent's own light chain scored on the humanness scale, before any edit. Raw identity at one fixed tier, not a calibrated percentile, so it is not comparable with a published figure. Empty for a single-chain antibody and when the run did not include the humanization objective."
+						"pl7.app/label": "Parent clone key",
+						"pl7.app/description": "The parent's clonotype key, as minted by the block that produced the structures dataset.",
+						"pl7.app/table/fontFamily": "monospace",
+						"pl7.app/table/visibility": "optional"
 					}
 				}
 			}

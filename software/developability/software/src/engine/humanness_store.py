@@ -19,7 +19,6 @@ TSV_COLUMNS = [
     "humannessVerdict",
     "humannessSummary",
     "heavyHumannessScore",
-    "lightHumannessScore",
 ]
 
 AMINO_SEP = ", "
@@ -77,10 +76,11 @@ def append_humanness_tsv(
 ) -> None:
     """Appends this parent's one row, reducing through summarize_humanness.
 
-    humanness_parent_scores is the parent's own baseline, keyed by chain role ("H"/"L") — empty
-    when the objective did not run for this parent, missing a role for a single-chain antibody,
-    and `None` for a role the gate could not score. Each case leaves that role's column empty,
-    the same three-state reading the verdict and summary columns already carry.
+    humanness_parent_scores is the parent's own baseline, keyed by chain role. Only the heavy
+    chain's score is emitted: it is the chain every antibody format in scope carries, and the
+    one the row is keyed on. The column is empty when the objective did not run for this
+    parent and when the gate could not score the chain, the same three-state reading the
+    verdict and summary columns already carry.
 
     Appends rather than returning a row to collect, for the reason `liability_store.py`'s
     `append_liabilities_tsv` gives: one file holds the whole dataset and the pipeline
@@ -94,7 +94,6 @@ def append_humanness_tsv(
             parent_summary.verdict,
             parent_summary.summary,
             _tsv_value(humanness_parent_scores.get("H")),
-            _tsv_value(humanness_parent_scores.get("L")),
         ]
     )
     with Path(path).open("a") as fh:
