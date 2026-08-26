@@ -108,6 +108,8 @@ withParentIdOnLiabilities := func(liabilitiesFile, humannessFile, parentLabels) 
  * wrong.
  *
  * @param variantsFile: reference - the flat `variants.tsv` step 3 wrote
+ * @param humannessFile: reference - the flat `humanness.tsv` step 3 wrote, read
+ *                 here for the parent's own score alone
  * @param parentLabels: frame | undefined - as in `_withParentClonotypeId`
  * @param blockId: string - this run's block id, which fixes the CSV's column
  *                 order through `specs.csvColumnOrder`
@@ -130,11 +132,14 @@ withParentIdOnLiabilities := func(liabilitiesFile, humannessFile, parentLabels) 
  *                       upstream's label column when it exists; derived from the
  *                       parent key as a fallback when the dataset carries no label
  *                   variantId: `<parentClonotypeId>:vNN` — the vendor's synthesis id
+ *                   parentHumannessScore: the parent's own heavy-chain score,
+ *                       joined from `humanness.tsv` as the baseline each row's
+ *                       own score is read against
  *                 }
  *             synthesisCsv: reference - the vendor's fixed column set
  *           }
  */
-withIdentityAndCsv := func(variantsFile, parentLabels, blockId) {
+withIdentityAndCsv := func(variantsFile, humannessFile, parentLabels, blockId) {
 	ptWf := pt.workflow().mem("1GiB").cpu(1)
 	rawDf := ptWf.frame(variantsFile, { xsvType: "tsv", inferSchema: false })
 
@@ -150,6 +155,18 @@ withIdentityAndCsv := func(variantsFile, parentLabels, blockId) {
 		df, "variantClonotypeKey", "variantClonotypeId", pt)
 
 	df = _withParentClonotypeId(ptWf, df, parentLabels)
+
+	// LEFT, and only the score of the four columns `humanness.tsv` holds: the
+	// verdict and the summary answer a question about the parent, which the
+	// Parents page asks, and a variant row repeating them says nothing new.
+	// A parent step 3 never scored keeps its variants with an empty cell.
+	df = df.join(
+		ptWf.frame(humannessFile, { xsvType: "tsv", inferSchema: false }).
+			select(
+				pt.col("clonotypeKey"),
+				pt.col("heavyHumannessScore").alias("parentHumannessScore")),
+		{ on: ["clonotypeKey"], how: "left" })
+	df = df.withColumns(pt.col("parentHumannessScore").fillNull(""))
 	df.save("variants-with-id.tsv")
 
 	// The parent's machine key under the header the vendor's order form fixes,

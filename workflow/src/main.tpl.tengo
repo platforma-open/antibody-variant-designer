@@ -235,7 +235,11 @@ wf.body(func(args) {
 	// liability group stays keyed on the upstream parent axis, so a
 	// downstream block auto-joins its rows exactly as it would on the PDB
 	// column itself.
-	variantsBuilt := specHelpers.withIdentityAndCsv(variants.output("variants"), parentLabels, blockId)
+	variantsBuilt := specHelpers.withIdentityAndCsv(
+		variants.output("variants"),
+		variants.output("humanness"),
+		parentLabels,
+		blockId)
 	variantsXsv := xsv.importFile(
 		variantsBuilt.variantsWithId, "tsv",
 		specs.buildVariantsSettings(blockId),

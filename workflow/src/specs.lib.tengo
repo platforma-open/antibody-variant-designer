@@ -285,6 +285,32 @@ variantColumns := func(blockId) {
 			}
 		},
 		{
+			// No `csvHeader`: the vendor's set is the thirteen headers
+			// `specs.test.tengo` pins, and this column is a reading aid on the
+			// page rather than part of that contract.
+			column: "parentHumannessScore",
+			// The same value the Parents page shows, joined onto this row from
+			// `humanness.tsv` so a reader compares the designed score against the
+			// baseline it had to beat without leaving the page. Filled exactly when
+			// "Humanness score" beside it is: both come from the humanization
+			// objective, and a liability variant carries neither.
+			//
+			// NOT spelled `pl7.app/humannessScore`, the name the variant's own score
+			// carries: on this axis a row IS a variant, so that name must mean the
+			// variant's own value. A consumer joining on it would otherwise read the
+			// parent's number for a designed sequence.
+			spec: {
+				name: "pl7.app/antibodyVariantDesigner/parentHumannessScore",
+				valueType: "Double",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Parent humanness",
+					"pl7.app/description": "The parent's own heavy chain on the humanness scale, before any edit — the baseline this variant had to beat. Measured the same way as \"Humanness score\" beside it, so the two subtract. Empty when the run did not include the humanization objective.",
+					"pl7.app/format": ".2f"
+				}
+			}
+		},
+		{
 			column: "worstConfidence",
 			csvHeader: "worstConfidence",
 			// Every member of the confidence family carries the metric
