@@ -32,13 +32,6 @@ buildVariants := import("@platforma-open/milaboratories.antibody-variant-designe
 
 self.validateInputs({
 	"__options__,closed": "",
-	// The PDB index, verbatim as `main.tpl.tengo` built it from the PDB
-	// ResourceMap's sorted keys.
-	pdbIndex: [{
-		"__options__,closed": "",
-		clonotypeKey: "string",
-		filename: "string"
-	}],
 	triaged: { any: validation.resource() },
 	tolerance: { any: validation.resource() },
 	residues: { any: validation.resource() },
@@ -48,9 +41,12 @@ self.validateInputs({
 		runMode: "string",
 		maxEditsPerVariant: "number",
 		candidateResiduesPerPosition: "number",
-		wStruct: "number",
-		wObj: "number",
-		nonHumanPriorCutoff: "number",
+		structuralWeight: "number",
+		objectiveWeight: "number",
+		nonHumanPriorMargin: "number",
+		maxNewLiabilities: "number",
+		humanizationIgnoredLiabilities: "string",
+		frConfidenceThreshold: "number",
 		variantsPerParent: "number",
 		lowToleranceFloor: "number",
 		epistasisRescoreTopK: "number"
@@ -64,11 +60,10 @@ self.validateInputs({
 	}
 })
 
-self.defineOutputs("variants", "humanness", "skip", "skipContent")
+self.defineOutputs("variants", "humanness", "rejected", "rejectedContent")
 
 self.body(func(inputs) {
 	return buildVariants.run({
-		pdbIndex: inputs.pdbIndex,
 		triaged: inputs.triaged,
 		tolerance: inputs.tolerance,
 		residues: inputs.residues,

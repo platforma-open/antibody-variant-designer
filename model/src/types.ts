@@ -19,15 +19,28 @@ export type BlockData = {
   rsasaBuriedCutoff: number;
   actOnFixability: string[];
   maxEditsPerVariant: number;
-  frConfThresh: number;
-  cdrConfThresh: number;
+  frConfidenceThreshold: number;
+  cdrConfidenceThreshold: number;
   variantsPerParent: number;
   candidateResiduesPerPosition: number;
-  wStruct: number;
-  wObj: number;
-  nonHumanPriorCutoff: number;
+  structuralWeight: number;
+  objectiveWeight: number;
+  nonHumanPriorMargin: number;
+  maxNewLiabilities: number;
+  /** Taxonomy ids the humanization gate does not count as a liability. Empty
+   *  counts every one of them, so a liability the taxonomy gains later blocks
+   *  humanization until the operator unticks it. */
+  humanizationIgnoredLiabilities: string[];
   lowToleranceFloor: number;
   epistasisRescoreTopK: number;
+  /** The spellings these fields carried before they were renamed to say the
+   *  quantity instead of abbreviating it. A project persisted under the old
+   *  names still holds them, and `.args()` reads them when the new key is
+   *  absent. Nothing writes them. */
+  frConfThresh?: number;
+  cdrConfThresh?: number;
+  wStruct?: number;
+  wObj?: number;
   /** Results-table sort / filter / column state, one per page. */
   variantsTableState: PlDataTableStateV2;
   liabilitiesTableState: PlDataTableStateV2;
@@ -56,13 +69,15 @@ export type BlockArgs = {
   rsasaBuriedCutoff: number;
   actOnFixability: string[];
   maxEditsPerVariant: number;
-  frConfThresh: number;
-  cdrConfThresh: number;
+  frConfidenceThreshold: number;
+  cdrConfidenceThreshold: number;
   variantsPerParent: number;
   candidateResiduesPerPosition: number;
-  wStruct: number;
-  wObj: number;
-  nonHumanPriorCutoff: number;
+  structuralWeight: number;
+  objectiveWeight: number;
+  nonHumanPriorMargin: number;
+  maxNewLiabilities: number;
+  humanizationIgnoredLiabilities: string[];
   lowToleranceFloor: number;
   epistasisRescoreTopK: number;
   indexAndScanCpu?: number;
@@ -73,30 +88,37 @@ export type BlockArgs = {
   buildVariantsMem?: number;
 };
 
-/** The seven skip reasons the three steps can raise. `no-structure`,
- *  `structure-not-imgt`, `structure-multi-domain-chain` and
- *  `no-researchable-residue` come from index-and-scan's index phase;
- *  `no-liability-survived-triage` from its scan phase; `backend-failed` from
- *  read-tolerance; `no-candidate-cleared-motif` from build-variants. Kept as
- *  seven distinct values rather than folding the two later-added index-phase
- *  reasons into `no-structure`: each already has its own shipped skip TSV
- *  row, and merging them would under-report a structural-numbering failure
- *  as a missing-input one. */
-export type SkipReason =
+/** The rejection reasons the three steps can raise. Index-and-scan's index phase
+ *  raises `no-structure`, `structure-not-imgt`,
+ *  `structure-multi-domain-chain` and `no-researchable-residue`; its scan
+ *  phase `no-liability-survived-triage`; read-tolerance `backend-failed`;
+ *  build-variants the rest. Each value stays distinct rather than
+ *  folding into a neighbour: each already has its own shipped rejection TSV row,
+ *  and merging two would under-report one failure as another. */
+export type RejectionReason =
   | "no-structure"
   | "structure-not-imgt"
   | "structure-multi-domain-chain"
   | "no-researchable-residue"
   | "no-liability-survived-triage"
   | "backend-failed"
-  | "no-candidate-cleared-motif";
+  | "no-candidate-cleared-the-gate"
+  | "no-nonhuman-framework-position"
+  | "no-tolerance-at-humanization-position"
+  | "no-humanization-variant-cleared-the-gate";
 
-/** One skipped parent, for the Skipped page.
- *  `detail` is free text and empty for every reason except `backend-failed`:
- *  the other six reasons are named, deterministic conditions already fully
- *  explained by the reason itself. */
-export type SkippedClonotype = {
+/** What a rejection row lost. `parent` means the run designed nothing for
+ *  that clonotype — no structure, no target, no tolerance. `variant` means a
+ *  candidate was built and an objective's goal check turned it away. */
+export type RejectedType = "parent" | "variant";
+
+/** One rejected parent or variant, for the Rejection Causes page.
+ *  `detail` is free text, empty where the reason stands alone and otherwise
+ *  carrying the measurement behind it: the caught exception on
+ *  `backend-failed`, the failed check on a design-gate reason. */
+export type RejectedClonotype = {
   clonotypeKey: string;
-  reason: SkipReason;
+  reason: RejectionReason;
   detail: string;
+  rejectedType: RejectedType;
 };

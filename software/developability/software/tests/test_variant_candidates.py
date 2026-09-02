@@ -7,7 +7,7 @@ import pytest
 from engine import (
     design_objective,
     liability_objective,
-    residue_store,
+    residue_index,
     tolerance_store,
     variant_candidates,
 )
@@ -27,7 +27,7 @@ _OBJECTIVE = liability_objective.OBJECTIVE
 
 
 def _residue(chain, offset, wild_type, imgt=None):
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain=chain,
         offset=offset,
         imgt=imgt or str(offset + 1),
@@ -119,9 +119,8 @@ class TestBuildCandidatesRescanGate:
         candidates_out = variant_candidates.build_candidates(
             [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
-            is_humanness_objective=False,
             max_edits_per_variant=5, candidate_residues_per_position=3,
-            w_struct=1.0, w_obj=1.0,
+            structural_weight=1.0, objective_weight=1.0,
         )
 
         survivors = {tuple(e.to for e in c.edits) for c in candidates_out}
@@ -133,9 +132,8 @@ class TestBuildCandidatesRescanGate:
         candidates_out = variant_candidates.build_candidates(
             [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
-            is_humanness_objective=False,
             max_edits_per_variant=5, candidate_residues_per_position=3,
-            w_struct=1.0, w_obj=1.0,
+            structural_weight=1.0, objective_weight=1.0,
         )
 
         survivors = {tuple(e.to for e in c.edits) for c in candidates_out}
@@ -147,9 +145,8 @@ class TestBuildCandidatesRescanGate:
             for c in variant_candidates.build_candidates(
                 [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
-                is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
-                w_struct=1.0, w_obj=1.0,
+                structural_weight=1.0, objective_weight=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -162,9 +159,8 @@ class TestBuildCandidatesRescanGate:
             for c in variant_candidates.build_candidates(
                 [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
-                is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
-                w_struct=1.0, w_obj=1.0,
+                structural_weight=1.0, objective_weight=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -186,18 +182,16 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
             for c in variant_candidates.build_candidates(
                 [_liability_target(_ng_site())], lookup, _ng_site(), TAXONOMY,
                 objective=_humanness_objective(identity=80.0),
-                is_humanness_objective=True,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
-                w_struct=1.0, w_obj=1.0,
+                structural_weight=1.0, objective_weight=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
 
-        # Two distinct numbers on the same candidate: tolerance is the
-        # mean perplexity the table gives, never the goal check's OASis
-        # identity.
+        # Tolerance is the mean perplexity the table gives, never the goal check's OASis
+        # identity. This module carries no humanness number at all: `variant_ranking`
+        # measures it on the variants it keeps.
         assert candidate.tolerance == pytest.approx(5.0)
-        assert candidate.humanness_score == pytest.approx(80.0)
 
     def test_a_liability_candidates_tolerance_is_unaffected_by_the_extraction(self):
         [candidate] = [
@@ -205,9 +199,8 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
             for c in variant_candidates.build_candidates(
                 [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
-                is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
-                w_struct=1.0, w_obj=1.0,
+                structural_weight=1.0, objective_weight=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -215,7 +208,6 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
         # Sharing the mean-perplexity computation with the humanization
         # path changes no liability candidate's value.
         assert candidate.tolerance == pytest.approx(3.5)
-        assert candidate.humanness_score is None
 
     def test_region_low_confidence_and_worst_confidence_carry_forward_from_the_target(self):
         [candidate] = [
@@ -224,9 +216,8 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
                 [_liability_target(_ng_site(), low_confidence=True, confidence_angstroms=7.5)],
                 _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
-                is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
-                w_struct=1.0, w_obj=1.0,
+                structural_weight=1.0, objective_weight=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -241,9 +232,8 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
             for c in variant_candidates.build_candidates(
                 [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
-                is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
-                w_struct=1.0, w_obj=1.0,
+                structural_weight=1.0, objective_weight=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -256,9 +246,8 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
             for c in variant_candidates.build_candidates(
                 [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
                 objective=_OBJECTIVE,
-                is_humanness_objective=False,
                 max_edits_per_variant=5, candidate_residues_per_position=3,
-                w_struct=1.0, w_obj=1.0,
+                structural_weight=1.0, objective_weight=1.0,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -274,9 +263,8 @@ class TestBuildCandidatesHumanizationTarget:
         candidates_out = variant_candidates.build_candidates(
             [_humanization_target(site)], _wide_tolerance_lookup(), site, TAXONOMY,
             objective=_humanness_objective(identity=80.0),
-            is_humanness_objective=True,
             max_edits_per_variant=1, candidate_residues_per_position=3,
-            w_struct=1.0, w_obj=1.0,
+            structural_weight=1.0, objective_weight=1.0,
         )
 
         assert len(candidates_out) == 1
@@ -287,9 +275,8 @@ class TestBuildCandidatesHumanizationTarget:
         [candidate] = variant_candidates.build_candidates(
             [_humanization_target(site)], _wide_tolerance_lookup(), site, TAXONOMY,
             objective=_humanness_objective(identity=80.0),
-            is_humanness_objective=True,
             max_edits_per_variant=5, candidate_residues_per_position=3,
-            w_struct=1.0, w_obj=1.0,
+            structural_weight=1.0, objective_weight=1.0,
         )
 
         # Never a product: exactly one combo, the top-ranked residue at
@@ -301,9 +288,8 @@ class TestBuildCandidatesHumanizationTarget:
         [candidate] = variant_candidates.build_candidates(
             [_humanization_target(site)], _wide_tolerance_lookup(), site, TAXONOMY,
             objective=_humanness_objective(identity=80.0),
-            is_humanness_objective=True,
             max_edits_per_variant=5, candidate_residues_per_position=3,
-            w_struct=1.0, w_obj=1.0,
+            structural_weight=1.0, objective_weight=1.0,
         )
 
         assert candidate.target_definition_id is None
@@ -316,12 +302,28 @@ class TestBuildCandidatesHumanizationTarget:
         candidates_out = variant_candidates.build_candidates(
             [_humanization_target(site)], lookup, site, TAXONOMY,
             objective=_humanness_objective(identity=80.0),
-            is_humanness_objective=True,
             max_edits_per_variant=5, candidate_residues_per_position=3,
-            w_struct=1.0, w_obj=1.0,
+            structural_weight=1.0, objective_weight=1.0,
         )
 
         assert candidates_out == []
+
+    def test_the_positions_that_forced_the_rejection_are_the_ones_no_tolerance_row_covers(self):
+        site = _wide_site()
+        lookup = {("H", "150"): _wide_tolerance_lookup()[("H", "150")]}
+
+        unscored = variant_candidates.unscored_positions(tuple(site), lookup)
+
+        # The same two positions the drop above turned on, named rather than
+        # left for a caller to re-derive.
+        assert tuple(r.imgt for r in unscored) == ("151", "152")
+
+    def test_a_fully_covered_site_names_no_unscored_position(self):
+        site = _wide_site()
+
+        assert variant_candidates.unscored_positions(
+            tuple(site), _wide_tolerance_lookup()
+        ) == ()
 
 
 class TestTopSubstitutionsRanksByLogProbability:
@@ -338,7 +340,7 @@ class TestTopSubstitutionsRanksByLogProbability:
         lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=3.0)}
 
         assert variant_candidates._top_substitutions(
-            residue, lookup, k=2, prior=None, w_struct=1.0, w_obj=1.0
+            residue, lookup, k=2, prior=None, structural_weight=1.0, objective_weight=1.0
         ) == ["D", "Q"]
 
     def test_a_prior_favourite_that_disagrees_with_the_log_row_wins_first(self):
@@ -351,7 +353,7 @@ class TestTopSubstitutionsRanksByLogProbability:
         prior = {("H", "107"): {"E": 10.0}}
 
         assert variant_candidates._top_substitutions(
-            residue, lookup, k=2, prior=prior, w_struct=1.0, w_obj=1.0
+            residue, lookup, k=2, prior=prior, structural_weight=1.0, objective_weight=1.0
         ) == ["E", "D"]
 
     def test_a_prior_with_no_row_for_this_position_falls_back_to_prior_none(self):
@@ -360,10 +362,10 @@ class TestTopSubstitutionsRanksByLogProbability:
         prior = {("H", "999"): {"E": 10.0}}  # a different position — uncovered here
 
         assert variant_candidates._top_substitutions(
-            residue, lookup, k=2, prior=prior, w_struct=1.0, w_obj=1.0
+            residue, lookup, k=2, prior=prior, structural_weight=1.0, objective_weight=1.0
         ) == (
             variant_candidates._top_substitutions(
-                residue, lookup, k=2, prior=None, w_struct=1.0, w_obj=1.0
+                residue, lookup, k=2, prior=None, structural_weight=1.0, objective_weight=1.0
             )
         )
 
@@ -375,7 +377,7 @@ class TestCombinedScoresWeighting:
         prior = {("H", "107"): {"D": 0.4, "Q": 0.2}}
 
         weighted = variant_candidates._combined_scores(
-            residue, log_probs, prior, w_struct=1.0, w_obj=1.0
+            residue, log_probs, prior, structural_weight=1.0, objective_weight=1.0
         )
 
         prior_row = prior[("H", "107")]
@@ -385,16 +387,16 @@ class TestCombinedScoresWeighting:
     def test_a_high_objective_weight_lets_the_prior_favourite_win_where_default_does_not(self):
         # "E" scores far below every log-probability favourite on its own;
         # a modest prior term is not enough to overcome that gap at
-        # `w_obj = 1.0`, but tripling it is.
+        # `objective_weight = 1.0`, but tripling it is.
         residue = _residue("H", 6, "N", imgt="107")
         log_probs = _row(["D", "Q", "A"], wild_type="N")["logProbs"]
         prior = {("H", "107"): {"E": 2.0}}
 
         at_default = variant_candidates._combined_scores(
-            residue, log_probs, prior, w_struct=1.0, w_obj=1.0
+            residue, log_probs, prior, structural_weight=1.0, objective_weight=1.0
         )
         at_triple = variant_candidates._combined_scores(
-            residue, log_probs, prior, w_struct=1.0, w_obj=3.0
+            residue, log_probs, prior, structural_weight=1.0, objective_weight=3.0
         )
 
         assert max(at_default, key=lambda aa: (at_default[aa], aa)) != "E"
@@ -406,10 +408,10 @@ class TestCombinedScoresWeighting:
         prior = {("H", "107"): {"D": 5.0, "Q": -5.0}}
 
         with_prior_zeroed = variant_candidates._combined_scores(
-            residue, log_probs, prior, w_struct=1.0, w_obj=0.0
+            residue, log_probs, prior, structural_weight=1.0, objective_weight=0.0
         )
         with_no_prior_at_all = variant_candidates._combined_scores(
-            residue, log_probs, None, w_struct=1.0, w_obj=0.0
+            residue, log_probs, None, structural_weight=1.0, objective_weight=0.0
         )
         assert with_prior_zeroed == with_no_prior_at_all
 
@@ -419,7 +421,7 @@ class TestCombinedScoresWeighting:
         prior = {("H", "999"): {"E": 10.0}}  # a different position — uncovered here
 
         scores = variant_candidates._combined_scores(
-            residue, log_probs, prior, w_struct=2.5, w_obj=1.0
+            residue, log_probs, prior, structural_weight=2.5, objective_weight=1.0
         )
 
         assert scores == {aa: 2.5 * value for aa, value in log_probs.items()}
@@ -429,7 +431,7 @@ class TestCombinedScoresWeighting:
         lookup = {("H", "107"): _row(["D", "Q", "A"], wild_type="N")}
 
         substitutions = variant_candidates._top_substitutions(
-            residue, lookup, k=5, prior=None, w_struct=0.0, w_obj=1.0
+            residue, lookup, k=5, prior=None, structural_weight=0.0, objective_weight=1.0
         )
 
         assert substitutions == [aa for aa in tolerance_store.AMINO_ACIDS if aa != "N"][:5]
@@ -440,9 +442,8 @@ class TestBuildCandidatesEditBudget:
         candidates_out = variant_candidates.build_candidates(
             [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
-            is_humanness_objective=False,
             max_edits_per_variant=1, candidate_residues_per_position=3,
-            w_struct=1.0, w_obj=1.0,
+            structural_weight=1.0, objective_weight=1.0,
         )
 
         assert candidates_out == []
@@ -453,9 +454,86 @@ class TestBuildCandidatesEditBudget:
         candidates_out = variant_candidates.build_candidates(
             [_liability_target(_ng_site())], lookup, _ng_site(), TAXONOMY,
             objective=_OBJECTIVE,
-            is_humanness_objective=False,
             max_edits_per_variant=5, candidate_residues_per_position=3,
-            w_struct=1.0, w_obj=1.0,
+            structural_weight=1.0, objective_weight=1.0,
         )
 
         assert candidates_out == []
+
+
+def _objective_blocking(blocked_imgt):
+    """A stub goal check that rejects while any position in `blocked_imgt` is still edited,
+    naming those positions as the blockers — the shape `humanness_objective` reports when a
+    substitution spells a liability the parent did not carry."""
+
+    def score_candidate(mutated_site, taxonomy, tolerance_lookup):
+        del taxonomy, tolerance_lookup
+        blocking = tuple(
+            (residue.chain, residue.imgt)
+            for residue in mutated_site
+            if residue.imgt in blocked_imgt
+        )
+        if blocking:
+            return design_objective.GoalCheck(
+                meets_goal=False, score=0.0, reason="adds a liability",
+                detail="stub", blocking_positions=blocking,
+            )
+        return design_objective.GoalCheck(meets_goal=True, score=80.0)
+
+    return design_objective.Objective(
+        select_target_positions=lambda residues, taxonomy: [],
+        position_prior=None,
+        score_candidate=score_candidate,
+    )
+
+
+class TestABlockedPositionIsDroppedRatherThanSinkingTheSet:
+    """One position whose substitution the goal check rejects must not take the other edits
+    down with it. The humanization objective edits its full non-human framework set, and an
+    all-or-nothing drop over a single spoiled position ships nothing at all."""
+
+    def _build(self, objective):
+        return variant_candidates.build_candidates_and_declines(
+            [_humanization_target(_wide_site())], _wide_tolerance_lookup(), _wide_site(),
+            TAXONOMY, objective=objective,
+            max_edits_per_variant=5, candidate_residues_per_position=3,
+            structural_weight=1.0, objective_weight=1.0,
+        )
+
+    def test_the_other_positions_still_ship(self):
+        candidates, declines = self._build(_objective_blocking({"151"}))
+
+        [candidate] = candidates
+        assert tuple(e.imgt for e in candidate.edits) == ("150", "152")
+        assert declines == []
+
+    def test_every_position_blocked_ships_nothing_and_names_the_reason(self):
+        candidates, declines = self._build(_objective_blocking({"150", "151", "152"}))
+
+        assert candidates == []
+        [decline] = declines
+        assert (decline.chain, decline.reason) == ("H", "adds a liability")
+
+    def test_a_check_that_blocks_nothing_still_drops_the_whole_target(self):
+        # No blocking position means dropping a part changes nothing, so the retry stops
+        # rather than shrinking the site one residue at a time to no purpose.
+        seen = []
+
+        def score_candidate(mutated_site, taxonomy, tolerance_lookup):
+            del taxonomy, tolerance_lookup
+            seen.append(tuple(r.imgt for r in mutated_site))
+            return design_objective.GoalCheck(
+                meets_goal=False, score=0.0, reason="humanness did not rise"
+            )
+
+        candidates, declines = self._build(
+            design_objective.Objective(
+                select_target_positions=lambda residues, taxonomy: [],
+                position_prior=None,
+                score_candidate=score_candidate,
+            )
+        )
+
+        assert candidates == []
+        assert seen == [("150", "151", "152")]
+        assert declines[0].reason == "humanness did not rise"

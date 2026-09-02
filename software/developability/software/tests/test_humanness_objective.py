@@ -10,6 +10,7 @@ import math
 import socket
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import read_tolerance
@@ -20,7 +21,12 @@ from engine import (
     humanness_gate,
     humanness_objective,
     liability_motifs,
+    liability_triage,
+    parent_summary,
+    residue_index,
     residue_store,
+    run_mode,
+    variant_candidates,
 )
 
 REGIONS = ["FR1", "CDR1", "FR2", "CDR2", "FR3", "CDR3", "FR4"]
@@ -48,7 +54,7 @@ def _residue(chain, offset, region, chain_role, imgt=None):
     # residue): distinct from every region's own letter, so an
     # over-correction that leaked it into a call's sequence would show up
     # as content, not only as a stray length.
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain=chain,
         offset=offset,
         imgt=imgt or str(offset + 1),
@@ -398,7 +404,7 @@ class TestNetworkGuardWrapsThePriorCall:
             read_tolerance,
             "_run_model",
             lambda *_a, **_k: [
-                {"chain": r.chain, "posins": r.imgt, "perplexity": 1.0,
+                {"chain": r.chain, "imgt": r.imgt, "perplexity": 1.0,
                  "logits": dict.fromkeys(read_tolerance.AMINO_ACIDS, 0.0)}
                 for r in h_l_residues
             ],
@@ -435,7 +441,7 @@ _UNUSED_CUTOFF = 0.05
 
 
 def _gate_residue(chain, offset, region, wild_type, chain_role):
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain=chain,
         offset=offset,
         imgt=str(offset + 1),
@@ -468,6 +474,23 @@ def _edited(residues, chain, offset, to):
     contract as producing."""
     original = next(r for r in residues if r.chain == chain and r.offset == offset)
     return [replace(original, wild_type=to)]
+
+
+def _detect_on(monkeypatch, trigger_residue):
+    """Replaces the motif detector with one that reports a hit only on a chain carrying
+    `trigger_residue`, and records the sequence of every chain it was handed.
+
+    The detector must see a whole chain: a scan over the edited residues alone would
+    spell a motif across positions that never touch."""
+    seen = []
+
+    def _detect(chain_residues, _taxonomy):
+        seen.append("".join(r.wild_type for r in chain_residues))
+        hit = [r for r in chain_residues if r.wild_type == trigger_residue]
+        return [SimpleNamespace(definition_id="deamidation_ng", site=hit)] if hit else []
+
+    monkeypatch.setattr(liability_motifs, "detect_all", _detect)
+    return seen
 
 
 class TestScoreCandidateGoalCheck:
@@ -512,12 +535,12 @@ class TestScoreCandidateGoalCheck:
 
         assert result.meets_goal is False
 
-    def test_a_rise_that_spells_another_motif_does_not_meet_the_goal(self, monkeypatch):
+    def test_a_rise_that_spells_a_new_motif_does_not_meet_the_goal(self, monkeypatch):
         residues = _gate_residues()
         mutated_site = _edited(residues, "H", 0, "Q")
         calls = []
         monkeypatch.setattr(humanness_gate, "identity", lambda seq: calls.append(seq) or 999.0)
-        monkeypatch.setattr(liability_motifs, "detect_all", lambda *_a, **_k: [object()])
+        seen = _detect_on(monkeypatch, trigger_residue="Q")
         objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF)
 
         result = objective.score_candidate(mutated_site, [], {})
@@ -527,6 +550,90 @@ class TestScoreCandidateGoalCheck:
         # The measurement never runs once a re-scan hit discards the
         # candidate outright.
         assert calls == []
+        # Whole chains, never the one edited residue on its own.
+        assert seen == ["QCDE", "ACDE"]
+
+    def test_an_added_liability_names_the_edited_positions_it_blocks_on(self, monkeypatch):
+        # `variant_candidates` drops these and scores the rest, so the whole selected set is
+        # not lost to one position whose substitution spells a motif.
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+        monkeypatch.setattr(humanness_gate, "identity", lambda seq: 999.0)
+        _detect_on(monkeypatch, trigger_residue="Q")
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF)
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.reason == humanness_objective.TOO_MANY_NEW_LIABILITIES_REASON
+        assert result.blocking_positions == (("H", "1"),)
+
+    def test_an_allowance_lets_the_candidate_buy_humanness_with_one_new_liability(
+        self, monkeypatch
+    ):
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+        monkeypatch.setattr(humanness_gate, "identity", lambda seq: 999.0 if "Q" in seq else 1.0)
+        _detect_on(monkeypatch, trigger_residue="Q")
+        objective = humanness_objective.build(
+            _UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF, max_new_liabilities=1
+        )
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.meets_goal is True
+        assert result.reason == ""
+
+    def test_an_ignored_liability_id_never_blocks_the_candidate(self, monkeypatch):
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+        monkeypatch.setattr(humanness_gate, "identity", lambda seq: 999.0 if "Q" in seq else 1.0)
+        _detect_on(monkeypatch, trigger_residue="Q")
+        objective = humanness_objective.build(
+            _UNUSED_PRIOR_PATH,
+            residues,
+            _UNUSED_CUTOFF,
+            ignored_liability_ids=frozenset({"deamidation_ng"}),
+        )
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.meets_goal is True
+        assert result.reason == ""
+
+    def test_a_liability_id_left_out_of_the_ignored_set_still_blocks(self, monkeypatch):
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+        monkeypatch.setattr(humanness_gate, "identity", lambda seq: 999.0 if "Q" in seq else 1.0)
+        _detect_on(monkeypatch, trigger_residue="Q")
+        objective = humanness_objective.build(
+            _UNUSED_PRIOR_PATH,
+            residues,
+            _UNUSED_CUTOFF,
+            ignored_liability_ids=frozenset({"extra_cysteines"}),
+        )
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.meets_goal is False
+        assert result.reason == humanness_objective.TOO_MANY_NEW_LIABILITIES_REASON
+
+    def test_a_motif_the_parent_already_carries_does_not_reject_the_candidate(
+        self, monkeypatch
+    ):
+        # The gate is what the edits introduce. A liability the parent already had belongs
+        # to the liability objective, and rejecting on it would leave every antibody that
+        # carries one unhumanizable.
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+        monkeypatch.setattr(humanness_gate, "identity", lambda seq: 999.0 if "Q" in seq else 1.0)
+        # "C" sits at H CDR1 in the fixture, so both the parent chain and the edited chain
+        # carry this hit.
+        _detect_on(monkeypatch, trigger_residue="C")
+        objective = humanness_objective.build(_UNUSED_PRIOR_PATH, residues, _UNUSED_CUTOFF)
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.meets_goal is True
 
     def test_a_rise_at_a_cdr_position_does_not_meet_the_goal(self, monkeypatch):
         residues = _gate_residues()
@@ -599,42 +706,120 @@ class TestScoreCandidateGoalCheck:
         assert calls == []
 
 
-def _selection_residue(chain, offset, region, wild_type, chain_role="H"):
-    return residue_store.Residue(
+def _selection_residue(chain, offset, region, wild_type, chain_role="H", b_factor=20.0):
+    return residue_index.Residue(
         chain=chain,
         offset=offset,
         imgt=str(offset + 1),
         wild_type=wild_type,
         res_name=wild_type,
-        b_factor=20.0,
+        b_factor=b_factor,
         region=region,
         chain_role=chain_role,
     )
 
 
+def _prior_row(wild_type, wild_type_probability, best_probability):
+    """One prior row where `K` is the residue human repertoires prefer over `wild_type`.
+
+    Selection turns on the gap between the two, so a row naming only the wild type states no
+    preference and can never select."""
+    return {wild_type: math.log(wild_type_probability), "K": math.log(best_probability)}
+
+
+class TestAHumanizationTargetReportsItsPredictedError:
+    """A humanization target carries the same two structural readings a triaged liability
+    does, so the Variants page fills those cells for either objective."""
+
+    def _prior_beating_wild_type(self, *residues):
+        return {(r.chain, r.imgt): _prior_row(r.wild_type, 0.04, 0.60) for r in residues}
+
+    def test_the_target_reports_the_worst_predicted_error_over_its_own_positions(self):
+        near = _selection_residue("H", 0, "FR1", "A", b_factor=2.0)
+        far = _selection_residue("H", 1, "FR1", "A", b_factor=7.5)
+
+        [target] = humanness_objective.select_non_human_positions(
+            [near, far], self._prior_beating_wild_type(near, far), 0.05
+        )
+
+        assert target.confidence_angstroms == pytest.approx(7.5)
+
+    def test_a_position_above_the_framework_threshold_warns(self):
+        residue = _selection_residue("H", 0, "FR1", "A", b_factor=7.5)
+
+        [target] = humanness_objective.select_non_human_positions(
+            [residue], self._prior_beating_wild_type(residue), 0.05, fr_confidence_threshold=4.0
+        )
+
+        assert target.is_low_confidence is True
+
+    def test_a_position_at_or_below_the_framework_threshold_does_not_warn(self):
+        residue = _selection_residue("H", 0, "FR1", "A", b_factor=4.0)
+
+        [target] = humanness_objective.select_non_human_positions(
+            [residue], self._prior_beating_wild_type(residue), 0.05, fr_confidence_threshold=4.0
+        )
+
+        assert target.is_low_confidence is False
+
+    def test_an_unmeasured_position_neither_warns_nor_is_reported(self):
+        # `liability_triage._low_confidence_for` reads an unmeasured residue the same way:
+        # nothing measured it, so it is no evidence of a bad prediction.
+        residue = _selection_residue("H", 0, "FR1", "A", b_factor=None)
+
+        [target] = humanness_objective.select_non_human_positions(
+            [residue], self._prior_beating_wild_type(residue), 0.05, fr_confidence_threshold=4.0
+        )
+
+        assert target.is_low_confidence is False
+        assert target.confidence_angstroms is None
+
+
 class TestSelectNonHumanPositions:
     """`humanness_objective.select_non_human_positions` — which framework positions become
-    this run's humanization targets, at a given cutoff."""
+    this run's humanization targets, at a given margin."""
 
-    def test_a_framework_position_below_the_cutoff_is_selected(self):
+    def test_a_framework_position_the_prior_beats_by_more_than_the_margin_is_selected(self):
         residue = _selection_residue("H", 0, "FR1", "A")
-        prior = {("H", "1"): {"A": math.log(0.04)}}
+        prior = {("H", "1"): _prior_row("A", 0.04, 0.60)}
 
         targets = humanness_objective.select_non_human_positions([residue], prior, 0.05)
 
         assert [t.site for t in targets] == [(residue,)]
 
-    def test_a_framework_position_at_exactly_the_cutoff_is_not_selected(self):
+    def test_a_framework_position_beaten_by_exactly_the_margin_is_not_selected(self):
+        # Halves and quarters, so the gap is exact in binary and the boundary this pins is
+        # the comparison rather than a rounding step inside `exp`.
         residue = _selection_residue("H", 0, "FR1", "A")
-        prior = {("H", "1"): {"A": math.log(0.05)}}
+        prior = {("H", "1"): _prior_row("A", 0.25, 0.50)}
+
+        targets = humanness_objective.select_non_human_positions([residue], prior, 0.25)
+
+        assert targets == []
+
+    def test_a_position_whose_own_wild_type_the_prior_prefers_is_not_selected(self):
+        # However rare the residue is in absolute terms, a row that names it as the best
+        # residue here is not evidence against it.
+        residue = _selection_residue("H", 0, "FR1", "A")
+        prior = {("H", "1"): _prior_row("A", 0.04, 0.01)}
 
         targets = humanness_objective.select_non_human_positions([residue], prior, 0.05)
 
         assert targets == []
 
-    def test_a_cdr_position_below_the_cutoff_is_not_selected(self):
+    def test_a_zero_margin_selects_every_position_the_prior_does_not_lead_with(self):
+        # BioPhi's own rule: substitute wherever the model's best residue is not the one
+        # carried, however small the gap.
+        residue = _selection_residue("H", 0, "FR1", "A")
+        prior = {("H", "1"): _prior_row("A", 0.30, 0.31)}
+
+        targets = humanness_objective.select_non_human_positions([residue], prior, 0.0)
+
+        assert [t.site for t in targets] == [(residue,)]
+
+    def test_a_cdr_position_the_prior_beats_is_not_selected(self):
         residue = _selection_residue("H", 0, "CDR1", "A")
-        prior = {("H", "1"): {"A": math.log(0.04)}}
+        prior = {("H", "1"): _prior_row("A", 0.04, 0.60)}
 
         targets = humanness_objective.select_non_human_positions([residue], prior, 0.05)
 
@@ -662,7 +847,10 @@ class TestSelectNonHumanPositions:
     def test_two_chains_each_holding_a_non_human_position_yield_two_targets(self):
         h_residue = _selection_residue("H", 0, "FR1", "A", chain_role="H")
         l_residue = _selection_residue("L", 0, "FR1", "A", chain_role="L")
-        prior = {("H", "1"): {"A": math.log(0.01)}, ("L", "1"): {"A": math.log(0.01)}}
+        prior = {
+            ("H", "1"): _prior_row("A", 0.01, 0.60),
+            ("L", "1"): _prior_row("A", 0.01, 0.60),
+        }
 
         targets = humanness_objective.select_non_human_positions(
             [h_residue, l_residue], prior, 0.05
@@ -671,12 +859,15 @@ class TestSelectNonHumanPositions:
         assert len(targets) == 2
         assert {t.site[0].chain for t in targets} == {"H", "L"}
 
-    def test_every_framework_position_at_or_above_the_cutoff_yields_no_target(self):
+    def test_a_chain_the_prior_never_beats_yields_no_target(self):
         residues = [
             _selection_residue("H", 0, "FR1", "A"),
             _selection_residue("H", 1, "FR2", "C"),
         ]
-        prior = {("H", "1"): {"A": math.log(0.05)}, ("H", "2"): {"C": math.log(0.9)}}
+        prior = {
+            ("H", "1"): _prior_row("A", 0.50, 0.51),
+            ("H", "2"): _prior_row("C", 0.90, 0.01),
+        }
 
         targets = humanness_objective.select_non_human_positions(residues, prior, 0.05)
 
@@ -684,10 +875,232 @@ class TestSelectNonHumanPositions:
 
     def test_a_target_carries_no_definition_id_and_the_positions_own_region(self):
         residue = _selection_residue("H", 0, "FR1", "A")
-        prior = {("H", "1"): {"A": math.log(0.001)}}
+        prior = {("H", "1"): _prior_row("A", 0.001, 0.60)}
 
         [target] = humanness_objective.select_non_human_positions([residue], prior, 0.05)
 
         assert isinstance(target, design_objective.DesignTarget)
         assert target.definition_id is None
         assert target.region == "FR1"
+
+    def test_the_whole_selected_set_rides_on_one_target_per_chain(self):
+        # The humanization objective edits its full non-human framework set, so every
+        # selected position on a chain must arrive as one site rather than one target each.
+        residues = [
+            _selection_residue("H", offset, "FR1", "A") for offset in range(4)
+        ]
+        prior = {("H", str(offset + 1)): _prior_row("A", 0.02, 0.60) for offset in range(4)}
+
+        [target] = humanness_objective.select_non_human_positions(residues, prior, 0.05)
+
+        assert tuple(r.imgt for r in target.site) == ("1", "2", "3", "4")
+
+
+class TestTheVhhFr2HallmarkTetradIsProtected:
+    """A VHH carries its hallmark tetrad where a human VH carries the light-chain interface.
+    Those residues keep a single domain soluble, so humanizing one costs the fold — the
+    objective must never target them on a nanobody, however non-human the prior reads them."""
+
+    def _hallmark_residues(self, chain_role):
+        return [
+            _selection_residue(chain_role, int(imgt) - 1, "FR2", "A", chain_role=chain_role)
+            for imgt in sorted(humanness_objective.VHH_FR2_HALLMARK_IMGT)
+        ]
+
+    def _beaten_prior(self, residues):
+        return {(r.chain, r.imgt): _prior_row(r.wild_type, 0.01, 0.90) for r in residues}
+
+    def test_a_nanobody_never_targets_a_hallmark_position(self):
+        residues = self._hallmark_residues("H")
+
+        targets = humanness_objective.select_non_human_positions(
+            residues, self._beaten_prior(residues), 0.05
+        )
+
+        assert targets == []
+
+    def test_a_nanobody_still_targets_a_non_hallmark_framework_position(self):
+        # The guard names positions, not the whole FR2 region.
+        hallmarks = self._hallmark_residues("H")
+        ordinary = _selection_residue("H", 100, "FR2", "A", chain_role="H")
+        residues = [*hallmarks, ordinary]
+
+        [target] = humanness_objective.select_non_human_positions(
+            residues, self._beaten_prior(residues), 0.05
+        )
+
+        assert target.site == (ordinary,)
+
+    def test_a_paired_antibody_targets_the_same_heavy_positions(self):
+        # A human VH carries its own residues there and a light chain covers the face, so
+        # the tetrad is a nanobody rule, not a heavy-chain one.
+        heavy = self._hallmark_residues("H")
+        light = [_selection_residue("L", 0, "FR1", "A", chain_role="L")]
+        residues = [*heavy, *light]
+
+        targets = humanness_objective.select_non_human_positions(
+            residues, self._beaten_prior(residues), 0.05
+        )
+
+        heavy_target = next(t for t in targets if t.site[0].chain == "H")
+        assert tuple(r.imgt for r in heavy_target.site) == tuple(
+            sorted(humanness_objective.VHH_FR2_HALLMARK_IMGT)
+        )
+
+
+class TestPrefersAnotherResidue:
+    """`humanness_objective.prefers_another_residue` — the one predicate the selector reads."""
+
+    def test_an_empty_row_prefers_nothing(self):
+        assert humanness_objective.prefers_another_residue({}, "A", 0.05) is False
+
+    def test_a_missing_row_prefers_nothing(self):
+        assert humanness_objective.prefers_another_residue(None, "A", 0.05) is False
+
+    def test_a_row_without_the_wild_type_prefers_nothing(self):
+        row = {"K": math.log(0.9)}
+
+        assert humanness_objective.prefers_another_residue(row, "X", 0.05) is False
+
+    def test_the_margin_is_read_on_the_probability_scale(self):
+        # log(0.60) - log(0.04) is about 2.7; the gap that decides is 0.56.
+        row = _prior_row("A", 0.04, 0.60)
+
+        assert humanness_objective.prefers_another_residue(row, "A", 0.55) is True
+        assert humanness_objective.prefers_another_residue(row, "A", 0.57) is False
+
+
+def _framework_residue(chain, offset, imgt, wild_type):
+    return residue_index.Residue(
+        chain=chain,
+        offset=offset,
+        imgt=imgt,
+        wild_type=wild_type,
+        res_name=wild_type,
+        b_factor=20.0,
+        region="FR1",
+    )
+
+
+def _framework_candidate(edits):
+    return variant_candidates.Candidate(
+        target_definition_id="framework_liability",
+        edits=tuple(edits),
+        tolerance=3.0,
+        region="FR1",
+        low_confidence=False,
+        worst_confidence_angstroms=3.0,
+        addressed_target="Framework liability @ FR1 H:107",
+        changed_positions="H:N107D",
+    )
+
+
+def _framework_edit(chain, imgt, wild_type, to="D"):
+    return variant_candidates.Edit(
+        chain=chain, offset=0, imgt=imgt, wild_type=wild_type, to=to
+    )
+
+
+class TestTheGateAtItsDefaults:
+    """`run_mode.objectives_for` with no setting touched — the empty ignore list and the
+    zero allowance. This is what an operator who has changed nothing runs, and one added
+    liability must still turn a candidate away in every mode that runs the gate."""
+
+    @pytest.mark.parametrize(
+        "mode", [run_mode.HUMANIZATION, run_mode.LIABILITIES_AND_HUMANIZATION]
+    )
+    def test_one_added_liability_still_fails_the_gate(self, monkeypatch, mode):
+        residues = _gate_residues()
+        mutated_site = _edited(residues, "H", 0, "Q")
+        monkeypatch.setattr(humanness_gate, "identity", lambda seq: 999.0 if "Q" in seq else 1.0)
+        _detect_on(monkeypatch, trigger_residue="Q")
+        builders = dict(run_mode.objectives_for(mode, _UNUSED_PRIOR_PATH, _UNUSED_CUTOFF))
+        objective = builders[run_mode.HUMANNESS](residues)
+
+        result = objective.score_candidate(mutated_site, [], {})
+
+        assert result.meets_goal is False
+        assert result.reason == humanness_objective.TOO_MANY_NEW_LIABILITIES_REASON
+        # The humanness rise is measured only after the liability count clears, so a
+        # candidate that raises humanness far is still turned away here.
+        assert result.score == 0.0
+
+class TestSummarizeHumanness:
+    def test_targets_none_makes_no_claim(self):
+        assert humanness_objective.summarize_humanness(
+            None, []
+        ) == parent_summary.ParentSummary(verdict="", summary="")
+
+    def test_targets_empty_reads_none_and_none(self):
+        assert humanness_objective.summarize_humanness(
+            [], []
+        ) == parent_summary.ParentSummary(verdict="none", summary="None")
+
+    def test_every_target_edited_by_some_cleared_candidate_reads_humanised(self):
+        targets = [_framework_residue("H", 0, "107", "N"), _framework_residue("H", 1, "108", "G")]
+        cleared = [
+            _framework_candidate([_framework_edit("H", "107", "N")]),
+            _framework_candidate([_framework_edit("H", "108", "G")]),
+        ]
+
+        result = humanness_objective.summarize_humanness(targets, cleared)
+
+        assert result.verdict == "present"
+        assert result.summary == "N@H107 (humanised), G@H108 (humanised)"
+
+    def test_a_target_no_cleared_candidate_edits_reads_declined(self):
+        targets = [_framework_residue("H", 0, "107", "N"), _framework_residue("H", 1, "108", "G")]
+        cleared = [_framework_candidate([_framework_edit("H", "107", "N")])]
+
+        result = humanness_objective.summarize_humanness(targets, cleared)
+
+        assert result.summary == "N@H107 (humanised), G@H108 (declined)"
+
+    def test_entries_follow_target_order_joined_by_comma_space(self):
+        targets = [_framework_residue("H", 1, "108", "G"), _framework_residue("H", 0, "107", "N")]
+        cleared = [
+            _framework_candidate([_framework_edit("H", "107", "N")]),
+            _framework_candidate([_framework_edit("H", "108", "G")]),
+        ]
+
+        result = humanness_objective.summarize_humanness(targets, cleared)
+
+        assert result.summary == "G@H108 (humanised), N@H107 (humanised)"
+
+    def test_entry_spelling_is_wild_type_at_chain_imgt_verdict(self):
+        targets = [_framework_residue("H", 0, "107", "N")]
+
+        result = humanness_objective.summarize_humanness(targets, [])
+
+        assert result.summary == "N@H107 (declined)"
+
+    def test_a_target_edited_by_a_candidate_the_rank_cap_dropped_still_reads_humanised(self):
+        # summarize_humanness sees only the gate-cleared candidates, never the
+        # per-parent cap's later decision — the cap is not a decline.
+        targets = [_framework_residue("H", 0, "107", "N")]
+        cleared = [_framework_candidate([_framework_edit("H", "107", "N")])]
+
+        result = humanness_objective.summarize_humanness(targets, cleared)
+
+        assert result.summary == "N@H107 (humanised)"
+
+
+class TestBothReductionsShareOneSummaryType:
+    def test_both_objectives_produce_the_same_summary_type(self):
+
+        triaged = liability_triage.Triaged(
+            definition_id="deamidation_ng",
+            liability_type="deamidation",
+            risk_level="High",
+            fixability="fixable",
+            site=[_framework_residue("H", 0, "107", "N")],
+            verdict="exposed",
+            low_confidence=False,
+            confidence_angstroms=3.0,
+            rsasa=0.5,
+        )
+
+        liability_result = liability_triage.summarize_liabilities([triaged])
+        humanness_result = humanness_objective.summarize_humanness([], [])
+
+        assert type(liability_result) is type(humanness_result) is parent_summary.ParentSummary

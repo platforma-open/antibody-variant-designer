@@ -27,3 +27,5 @@ catalog:
   "@platforma-open/milaboratories.runenv-python-3": 1.8.2
   vue: 3.5.24
   "@milaboratories/helpers": 1.14.5
+  ag-grid-enterprise: ~34.1.2
+  ag-grid-vue3: ~34.1.2

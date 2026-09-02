@@ -136,6 +136,9 @@ withParentIdOnLiabilities := func(liabilitiesFile, humannessFile, parentLabels) 
  *                       joined from `humanness.tsv` as the baseline each row's
  *                       own score is read against
  *                 }
+ *             parentLink: reference - one row per variant, holding the two keys
+ *                 the linker's axes take and the sentinel `1` its value column
+ *                 takes
  *             synthesisCsv: reference - the vendor's fixed column set
  *           }
  */
@@ -169,6 +172,16 @@ withIdentityAndCsv := func(variantsFile, humannessFile, parentLabels, blockId) {
 	df = df.withColumns(pt.col("parentHumannessScore").fillNull(""))
 	df.save("variants-with-id.tsv")
 
+	// The linker's own table: the two keys the edge runs between, and a sentinel
+	// the import turns into its value column. Written as a table of its own
+	// because a PColumn's axis set is fixed at import time, and this one is keyed
+	// on both identities while every variant column is keyed on one.
+	df.select(
+		pt.col("variantClonotypeKey"),
+		pt.col("clonotypeKey"),
+		pt.lit(1).alias("link")
+	).save("variant-parent-link.tsv")
+
 	// The parent's machine key under the header the vendor's order form fixes,
 	// and the only CSV header `specs.csvColumnOrder` does not name: it renames a
 	// column the import turns into an axis, not one of the variant columns.
@@ -181,6 +194,7 @@ withIdentityAndCsv := func(variantsFile, humannessFile, parentLabels, blockId) {
 	result := ptWf.run()
 	return {
 		variantsWithId: result.getFile("variants-with-id.tsv"),
+		parentLink: result.getFile("variant-parent-link.tsv"),
 		synthesisCsv: result.getFile("synthesis.csv")
 	}
 }

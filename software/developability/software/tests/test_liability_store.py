@@ -4,11 +4,11 @@ and the write-only path for `liabilities.tsv`."""
 import csv
 import io
 
-from engine import liability_store, liability_triage, residue_store
+from engine import liability_store, liability_triage, residue_index
 
 
 def _residue(chain, offset, imgt=None, region="CDR1"):
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain=chain,
         offset=offset,
         imgt=imgt or str(offset + 1),
@@ -31,6 +31,10 @@ def _triaged(site, verdict="exposed", low_confidence=False, confidence_angstroms
         confidence_angstroms=confidence_angstroms,
         rsasa=rsasa,
     )
+
+
+def _rows_of(path):
+    return list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
 
 
 class TestTriagedJsonRoundTrips:
@@ -60,56 +64,6 @@ class TestTriagedJsonRoundTrips:
         liability_store.write_triaged(str(path), [])
 
         assert liability_store.read_triaged(str(path)) == []
-
-
-class TestLiabilityKey:
-    def test_key_is_type_at_chain_and_span_start_imgt(self):
-        site = [_residue("H", 0, imgt="107"), _residue("H", 1, imgt="108")]
-        triaged = _triaged(site)
-
-        assert liability_store.liability_key(triaged) == "deamidation@H107"
-
-
-def _rows_of(path):
-    return list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
-
-
-class TestSummarizeLiabilities:
-    def test_clean_parent_is_none_and_none(self):
-        assert liability_store.summarize_liabilities([]) == liability_store.ParentSummary(
-            verdict="none", summary="None"
-        )
-
-    def test_any_triaged_liability_makes_the_verdict_present(self):
-        buried = _triaged([_residue("H", 0, imgt="107")], verdict="buried", rsasa=0.01)
-
-        result = liability_store.summarize_liabilities([buried])
-
-        assert result.verdict == "present"
-
-    def test_summary_joins_every_liability_with_its_verdict(self):
-        exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
-        buried = _triaged([_residue("H", 1, imgt="108")], verdict="buried", rsasa=0.01)
-
-        result = liability_store.summarize_liabilities([exposed, buried])
-
-        assert result.summary == "deamidation@H107 (exposed), deamidation@H108 (buried)"
-
-    def test_declined_entry_names_its_fixability_class(self):
-        declined = _triaged(
-            [_residue("H", 2, imgt="109")], verdict="fixability-declined", rsasa=0.9
-        )
-
-        result = liability_store.summarize_liabilities([declined])
-
-        assert result.summary == "deamidation@H109 (fixability-declined: fixable)"
-
-    def test_exposed_entry_names_no_fixability_class(self):
-        exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
-
-        result = liability_store.summarize_liabilities([exposed])
-
-        assert result.summary == "deamidation@H107 (exposed)"
 
 
 class TestLiabilitiesTsv:

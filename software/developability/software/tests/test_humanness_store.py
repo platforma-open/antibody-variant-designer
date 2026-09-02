@@ -1,14 +1,17 @@
-"""Unit tests for `humanness_store.py` — the reduction from a parent's considered
-framework positions to a coarse verdict, and the write-only path for `humanness.tsv`."""
+"""Unit tests for `humanness_store.py` — the write-only path for `humanness.tsv`."""
 
 import csv
 import io
 
-from engine import humanness_store, liability_store, residue_store, variant_candidates
+from engine import (
+    humanness_store,
+    residue_index,
+    variant_candidates,
+)
 
 
 def _residue(chain, offset, imgt, wild_type):
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain=chain,
         offset=offset,
         imgt=imgt,
@@ -40,82 +43,6 @@ def _edit(chain, imgt, wild_type, to="D"):
 
 def _rows_of(path):
     return list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
-
-
-class TestSummarizeHumanness:
-    def test_targets_none_makes_no_claim(self):
-        assert humanness_store.summarize_humanness(
-            None, []
-        ) == liability_store.ParentSummary(verdict="", summary="")
-
-    def test_targets_empty_reads_none_and_none(self):
-        assert humanness_store.summarize_humanness(
-            [], []
-        ) == liability_store.ParentSummary(verdict="none", summary="None")
-
-    def test_every_target_edited_by_some_cleared_candidate_reads_humanised(self):
-        targets = [_residue("H", 0, "107", "N"), _residue("H", 1, "108", "G")]
-        cleared = [_candidate([_edit("H", "107", "N")]), _candidate([_edit("H", "108", "G")])]
-
-        result = humanness_store.summarize_humanness(targets, cleared)
-
-        assert result.verdict == "present"
-        assert result.summary == "N@H107 (humanised), G@H108 (humanised)"
-
-    def test_a_target_no_cleared_candidate_edits_reads_declined(self):
-        targets = [_residue("H", 0, "107", "N"), _residue("H", 1, "108", "G")]
-        cleared = [_candidate([_edit("H", "107", "N")])]
-
-        result = humanness_store.summarize_humanness(targets, cleared)
-
-        assert result.summary == "N@H107 (humanised), G@H108 (declined)"
-
-    def test_entries_follow_target_order_joined_by_comma_space(self):
-        targets = [_residue("H", 1, "108", "G"), _residue("H", 0, "107", "N")]
-        cleared = [_candidate([_edit("H", "107", "N")]), _candidate([_edit("H", "108", "G")])]
-
-        result = humanness_store.summarize_humanness(targets, cleared)
-
-        assert result.summary == "G@H108 (humanised), N@H107 (humanised)"
-
-    def test_entry_spelling_is_wild_type_at_chain_imgt_verdict(self):
-        targets = [_residue("H", 0, "107", "N")]
-
-        result = humanness_store.summarize_humanness(targets, [])
-
-        assert result.summary == "N@H107 (declined)"
-
-    def test_a_target_edited_by_a_candidate_the_rank_cap_dropped_still_reads_humanised(self):
-        # summarize_humanness sees only the gate-cleared candidates, never the
-        # per-parent cap's later decision — the cap is not a decline.
-        targets = [_residue("H", 0, "107", "N")]
-        cleared = [_candidate([_edit("H", "107", "N")])]
-
-        result = humanness_store.summarize_humanness(targets, cleared)
-
-        assert result.summary == "N@H107 (humanised)"
-
-
-class TestBothReductionsShareOneSummaryType:
-    def test_both_objectives_produce_the_same_summary_type(self):
-        from engine import liability_triage
-
-        triaged = liability_triage.Triaged(
-            definition_id="deamidation_ng",
-            liability_type="deamidation",
-            risk_level="High",
-            fixability="fixable",
-            site=[_residue("H", 0, "107", "N")],
-            verdict="exposed",
-            low_confidence=False,
-            confidence_angstroms=3.0,
-            rsasa=0.5,
-        )
-
-        liability_result = liability_store.summarize_liabilities([triaged])
-        humanness_result = humanness_store.summarize_humanness([], [])
-
-        assert type(liability_result) is type(humanness_result) is liability_store.ParentSummary
 
 
 class TestHumannessTsv:

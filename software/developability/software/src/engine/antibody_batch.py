@@ -9,32 +9,40 @@ force it to request more.
 import sys
 from collections.abc import Callable
 
-from engine import pdb_index_store, skip_store
+from engine import parent_clonotypes, rejection_store
 
 
-def run(
-    entries: list[pdb_index_store.Entry],
-    process_one: Callable[[pdb_index_store.Entry], str | None],
-    out_skip: str,
+def process_every_parent(
+    parents: list[parent_clonotypes.ParentClonotype],
+    process_one: Callable[[parent_clonotypes.ParentClonotype], tuple[str, str, str] | None],
+    out_rejected: str,
     error_reason: str | None = None,
 ) -> int:
-    """`error_reason`, when set, turns a `process_one` exception into a skip row for that
+    """`error_reason`, when set, turns a `process_one` exception into a rejection row for that
     antibody's clonotype, instead of raising. Only the tolerance step passes it, because AntiFold
     exits 0 on its own swallowed exceptions.
 
-    `process_one` returning `None` means an earlier step already named this antibody's skip
-    reason. The loop then writes no row, so the skip files count the antibody once."""
-    rows: list[tuple[str, str, str]] = []
-    for entry in entries:
+    `process_one` returns `(reason, detail, rejected_type)`, reason and detail `""` on a pass.
+    `detail` carries the measurement behind the reason where a step has one, and
+    `rejected_type` is one of `rejection_store`'s two values. Every step writes all three, so no
+    caller has to remember which reasons come with a detail.
+
+    `process_one` returning `None` means an earlier step already named this antibody's rejection
+    reason. The loop then writes no row, so the rejection files count the antibody once."""
+    rejection_rows: list[tuple[str, str, str, str]] = []
+    for parent in parents:
         try:
-            reason = process_one(entry)
+            outcome = process_one(parent)
         except Exception as exc:
             if error_reason is None:
                 raise
-            print(f"{entry.clonotype_key}: {exc}", file=sys.stderr)
-            rows.append((entry.clonotype_key, error_reason, str(exc)))
+            print(f"{parent.clonotype_key}: {exc}", file=sys.stderr)
+            rejection_rows.append(
+                (parent.clonotype_key, error_reason, str(exc), rejection_store.PARENT_REJECTED)
+            )
             continue
-        if reason is not None:
-            rows.append((entry.clonotype_key, reason, ""))
-    skip_store.write_skips(out_skip, rows)
+        if outcome is not None:
+            reason, detail, rejected_type = outcome
+            rejection_rows.append((parent.clonotype_key, reason, detail, rejected_type))
+    rejection_store.write_rejections(out_rejected, rejection_rows)
     return 0

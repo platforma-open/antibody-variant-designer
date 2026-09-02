@@ -27,7 +27,7 @@ weightsAsset := assets.importAsset("@platforma-open/milaboratories.antifold-weig
 sapiensAsset := assets.importAsset("@platforma-open/milaboratories.sapiens-weights-assets:sapiens")
 
 TOLERANCE_DIR := "tolerance"
-SKIP_FILE := "skip.tsv"
+REJECTED_FILE := "rejected.tsv"
 
 // Where the weights asset is mounted, and the checkpoint path inside it that
 // the python is given. One constant pair, because the two must agree and only
@@ -102,11 +102,6 @@ ramFor := func(count) {
 // the developability piece's `index-and-scan.lib.tengo`.
 ARGS := {
 	"__options__,closed": "",
-	pdbIndex: [{
-		"__options__,closed": "",
-		clonotypeKey: "string",
-		filename: "string"
-	}],
 	// Each a `workdir path -> blob` map, as `tpl.inputs()` flattens a staged
 	// directory.
 	pdbs: { any: validation.resource() },
@@ -126,13 +121,13 @@ ARGS := {
 /**
  * Read AntiFold's per-position tolerance for every runnable antibody.
  *
- * @return {tolerance: fileSet, skip: file, skipContent: content}
+ * @return {tolerance: fileSet, rejected: file, rejectedContent: content}
  */
 run := func(args) {
 	validation.assertType(args, ARGS, "read-tolerance: bad args")
 
 	cpu := is_undefined(args.cpu) ? DEFAULT_CPU : args.cpu
-	ram := is_undefined(args.ram) ? ramFor(len(args.pdbIndex)) : args.ram
+	ram := is_undefined(args.ram) ? ramFor(len(args.pdbs)) : args.ram
 
 	result := exec.builder().
 		software(antifoldSw).
@@ -147,24 +142,22 @@ run := func(args) {
 		addFiles(args.pdbs, { tag: STRUCTURE_TAG }).
 		addFiles(args.residues).
 		addFiles(args.triaged).
-		writeFile(workdir.INDEX_FILE, workdir.renderIndex(args.pdbIndex)).
 		arg("--pdb-dir").arg("pdbs").
-		arg("--pdb-index").arg(workdir.INDEX_FILE).
 		arg("--residues-dir").arg("residues").
 		arg("--triaged-dir").arg("triaged").
 		arg("--weights").arg(WEIGHTS_FILE).
 		arg("--sapiens-weights").arg(SAPIENS_MOUNT).
 		arg("--out-tolerance-dir").arg(TOLERANCE_DIR).
-		arg("--out-skip").arg(SKIP_FILE).
+		arg("--out-rejected").arg(REJECTED_FILE).
 		saveFileSet("tolerance", workdir.dirPattern(TOLERANCE_DIR)).
-		saveFile(SKIP_FILE).
-		saveFileContent(SKIP_FILE).
+		saveFile(REJECTED_FILE).
+		saveFileContent(REJECTED_FILE).
 		run()
 
 	return {
 		tolerance: result.getFileSet("tolerance"),
-		skip: result.getFile(SKIP_FILE),
-		skipContent: result.getFileContent(SKIP_FILE)
+		rejected: result.getFile(REJECTED_FILE),
+		rejectedContent: result.getFileContent(REJECTED_FILE)
 	}
 }
 

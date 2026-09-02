@@ -17,7 +17,7 @@ f := exec.formula
 variantsSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software-developability:build-variants")
 
 VARIANTS_FILE := "variants.tsv"
-SKIP_FILE := "skip.tsv"
+REJECTED_FILE := "rejected.tsv"
 HUMANNESS_FILE := "humanness.tsv"
 
 // The tag the RAM formula measures. All three staged directories carry it: an
@@ -72,11 +72,6 @@ ramFor := func(count) {
 // `index-and-scan.lib.tengo`.
 ARGS := {
 	"__options__,closed": "",
-	pdbIndex: [{
-		"__options__,closed": "",
-		clonotypeKey: "string",
-		filename: "string"
-	}],
 	// Each a `workdir path -> blob` map, as `tpl.inputs()` flattens a staged
 	// directory.
 	triaged: { any: validation.resource() },
@@ -88,9 +83,12 @@ ARGS := {
 		runMode: "string",
 		maxEditsPerVariant: "number",
 		candidateResiduesPerPosition: "number",
-		wStruct: "number",
-		wObj: "number",
-		nonHumanPriorCutoff: "number",
+		structuralWeight: "number",
+		objectiveWeight: "number",
+		nonHumanPriorMargin: "number",
+		maxNewLiabilities: "number",
+		humanizationIgnoredLiabilities: "string",
+		frConfidenceThreshold: "number",
 		variantsPerParent: "number",
 		lowToleranceFloor: "number",
 		epistasisRescoreTopK: "number"
@@ -104,55 +102,66 @@ ARGS := {
 /**
  * Build, gate and rank the variants of every antibody in the PDB index.
  *
- * @return {variants: file, humanness: file, skip: file, skipContent: content}
+ * @return {variants: file, humanness: file, rejected: file, rejectedContent: content}
  */
 run := func(args) {
 	validation.assertType(args, ARGS, "build-variants: bad args")
 
-	result := exec.builder().
+	cmd := exec.builder().
 		software(variantsSw).
 		resources({
 			queue: execConstants.MEDIUM_QUEUE,
 			onCPU: {
 				cpu: is_undefined(args.cpu) ? DEFAULT_CPU : args.cpu,
-				ram: is_undefined(args.ram) ? ramFor(len(args.pdbIndex)) : args.ram
+				ram: is_undefined(args.ram) ? ramFor(len(args.triaged)) : args.ram
 			}
 		}).
 		printErrStreamToStdout().
 		addFiles(args.triaged, { tag: PER_ANTIBODY_TAG }).
 		addFiles(args.tolerance, { tag: PER_ANTIBODY_TAG }).
 		addFiles(args.residues, { tag: PER_ANTIBODY_TAG }).
-		writeFile(workdir.INDEX_FILE, workdir.renderIndex(args.pdbIndex)).
 		addFile("definitions.json", args.definitions).
-		arg("--pdb-index").arg(workdir.INDEX_FILE).
 		arg("--triaged-dir").arg("triaged").
 		arg("--tolerance-dir").arg("tolerance").
 		arg("--residues-dir").arg("residues").
 		arg("--definitions").arg("definitions.json").
 		arg("--out-variants").arg(VARIANTS_FILE).
-		arg("--out-skip").arg(SKIP_FILE).
+		arg("--out-rejected").arg(REJECTED_FILE).
 		arg("--out-humanness").arg(HUMANNESS_FILE).
 		arg("--run-mode").arg(args.params.runMode).
 		arg("--max-edits-per-variant").arg(string(args.params.maxEditsPerVariant)).
 		arg("--candidate-residues-per-position").
 		arg(string(args.params.candidateResiduesPerPosition)).
-		arg("--w-struct").arg(string(args.params.wStruct)).
-		arg("--w-obj").arg(string(args.params.wObj)).
-		arg("--non-human-prior-cutoff").arg(string(args.params.nonHumanPriorCutoff)).
+		arg("--structural-weight").arg(string(args.params.structuralWeight)).
+		arg("--objective-weight").arg(string(args.params.objectiveWeight)).
+		arg("--non-human-prior-margin").arg(string(args.params.nonHumanPriorMargin)).
+		arg("--max-new-liabilities").arg(string(args.params.maxNewLiabilities)).
+		arg("--fr-confidence-threshold").arg(string(args.params.frConfidenceThreshold)).
 		arg("--variants-per-parent").arg(string(args.params.variantsPerParent)).
 		arg("--low-tolerance-floor").arg(string(args.params.lowToleranceFloor)).
-		arg("--epistasis-rescore-top-k").arg(string(args.params.epistasisRescoreTopK)).
+		arg("--epistasis-rescore-top-k").arg(string(args.params.epistasisRescoreTopK))
+
+	// The flag is omitted when the operator ignores nothing, the way the sidecar
+	// flags in `index-and-scan.lib.tengo` are. An empty argv element would leave
+	// the next flag standing where the value belongs.
+	if args.params.humanizationIgnoredLiabilities != "" {
+		cmd = cmd.
+			arg("--humanization-ignored-liabilities").
+			arg(args.params.humanizationIgnoredLiabilities)
+	}
+
+	result := cmd.
 		saveFile(VARIANTS_FILE).
 		saveFile(HUMANNESS_FILE).
-		saveFile(SKIP_FILE).
-		saveFileContent(SKIP_FILE).
+		saveFile(REJECTED_FILE).
+		saveFileContent(REJECTED_FILE).
 		run()
 
 	return {
 		variants: result.getFile(VARIANTS_FILE),
 		humanness: result.getFile(HUMANNESS_FILE),
-		skip: result.getFile(SKIP_FILE),
-		skipContent: result.getFileContent(SKIP_FILE)
+		rejected: result.getFile(REJECTED_FILE),
+		rejectedContent: result.getFileContent(REJECTED_FILE)
 	}
 }
 

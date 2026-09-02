@@ -25,28 +25,21 @@ indexAndScan := import("@platforma-open/milaboratories.antibody-variant-designer
 
 self.validateInputs({
 	"__options__,closed": "",
-	// The PDB index, verbatim as `main.tpl.tengo` built it from the PDB
-	// ResourceMap's sorted keys.
-	pdbIndex: [{
-		"__options__,closed": "",
-		clonotypeKey: "string",
-		filename: "string"
-	}],
 	// Each staged directory arrives flattened by `tpl.inputs()` — a
 	// `workdir path -> blob` map, which is exactly what `addFiles` takes.
 	pdbs: { any: validation.resource() },
 	// Optional: one dataset-wide TSV each, never a directory of per-stem
 	// files. An older upstream emits no per-residue confidence at all, and
 	// each antibody then falls back to its own B-factor column; an absent
-	// filter means the whole index is in scope.
+	// filter means every parent clonotype is in scope.
 	"confidence,?": validation.resource(),
 	"clonotypeFilter,?": validation.resource(),
 	definitions: validation.resource(),
 	params: {
 		"__options__,closed": "",
 		rsasaBuriedCutoff: "number",
-		frConfThresh: "number",
-		cdrConfThresh: "number",
+		frConfidenceThreshold: "number",
+		cdrConfidenceThreshold: "number",
 		actOnFixability: "string"
 	},
 	// Advanced Settings → Resource Allocation. Either may be unset — the recipe
@@ -58,11 +51,10 @@ self.validateInputs({
 	}
 })
 
-self.defineOutputs("residues", "triaged", "liabilities", "skip", "skipContent")
+self.defineOutputs("residues", "triaged", "liabilities", "rejected", "rejectedContent")
 
 self.body(func(inputs) {
 	return indexAndScan.run({
-		pdbIndex: inputs.pdbIndex,
 		pdbs: inputs.pdbs,
 		definitions: inputs.definitions,
 		confidence: inputs.confidence,

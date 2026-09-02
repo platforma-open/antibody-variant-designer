@@ -9,7 +9,7 @@ worth acting on is `liability_triage.py`'s question, not this module's.
 import re
 from dataclasses import dataclass
 
-from engine import residue_store
+from engine import residue_index
 
 # Index, within each regex match, of the residue whose chemistry
 # actually changes. In the `N[GS]` deamidation motif, the reactive Asn
@@ -48,8 +48,8 @@ class DetectedMotif:
     liability_type: str
     risk_level: str
     fixability: str
-    site: list[residue_store.Residue]
-    relevant: residue_store.Residue
+    site: list[residue_index.Residue]
+    relevant: residue_index.Residue
 
 
 def _qualifying_entries(taxonomy: list[dict]) -> list[dict]:
@@ -68,7 +68,7 @@ def _qualifying_entries(taxonomy: list[dict]) -> list[dict]:
 
 
 def detect_all(
-    residues: list[residue_store.Residue], taxonomy: list[dict]
+    residues: list[residue_index.Residue], taxonomy: list[dict]
 ) -> list[DetectedMotif]:
     """Every motif match over every chain, taxonomy entry by taxonomy
     entry.
@@ -80,7 +80,7 @@ def detect_all(
     that does not exist in either domain."""
     hits: list[DetectedMotif] = []
     entries = _qualifying_entries(taxonomy)
-    for chain in residue_store.in_scope_chains(residues):
+    for chain in residue_index.in_scope_chains(residues):
         sequence = chain.sequence
         for entry in entries:
             pattern = re.compile(entry["motif"])

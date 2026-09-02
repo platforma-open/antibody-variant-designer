@@ -7,6 +7,7 @@
   "scripts": {
     "build": "block-tools software build",
     "check": "uv run --group dev ruff check .",
+    "test": "uv run pytest -q",
     "deps:export": "bash scripts/deps-export.sh",
     "prepublishOnly": "pl-pkg prepublish"
   },

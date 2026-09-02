@@ -3,14 +3,20 @@ objectives, and each objective's design targets."""
 
 import pytest
 
-from engine import design_objective, liability_objective, liability_triage, residue_store, run_mode
+from engine import (
+    design_objective,
+    liability_objective,
+    liability_triage,
+    residue_index,
+    run_mode,
+)
 
 _UNUSED_PRIOR_PATH = "unused-prior-path"
 _UNUSED_CUTOFF = 0.05
 
 
 def _residue(chain, offset, region="CDR1", wild_type="A"):
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain=chain,
         offset=offset,
         imgt=str(offset + 1),

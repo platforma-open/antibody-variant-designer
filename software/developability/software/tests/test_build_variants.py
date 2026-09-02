@@ -13,11 +13,13 @@ from engine import (
     humanness_gate,
     liability_store,
     liability_triage,
+    rejection_store,
+    residue_index,
     residue_store,
     run_mode,
-    skip_store,
     tolerance_store,
     variant_candidates,
+    variant_ranking,
     variant_store,
 )
 
@@ -36,7 +38,7 @@ AMINO_ACIDS = tolerance_store.AMINO_ACIDS
 
 
 def _residue(chain, offset, wild_type, imgt=None, region="CDR1"):
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain=chain,
         offset=offset,
         imgt=imgt or str(offset + 1),
@@ -89,8 +91,8 @@ def _row(ranked, wild_type, perplexity):
 
 def _tolerance_rows():
     return [
-        {"posins": "107", **_row(["D", "Q", "A"], "N", 5.0)},
-        {"posins": "108", **_row(["P", "S", "A"], "G", 2.0)},
+        {"imgt": "107", **_row(["D", "Q", "A"], "N", 5.0)},
+        {"imgt": "108", **_row(["P", "S", "A"], "G", 2.0)},
     ]
 
 
@@ -119,7 +121,7 @@ def _framework_residue():
     # Wild type "N", chosen so a substitution to the tolerance table's
     # top-ranked "D" is content the parent chain otherwise never carries —
     # `_stub_rising_on_d` below reads a "D" count off the assembled sequence.
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain="H", offset=0, imgt="1", wild_type="N", res_name="N",
         b_factor=20.0, region="FR1", chain_role="H",
     )
@@ -129,7 +131,7 @@ def _write_prior_tsv(path, wild_type_probability):
     """One position's prior row, in the log-probability scale
     `sapiens_prior._log_softmax` writes: every amino acid scores `log(0.9)` except the
     wild type `N`, which scores `log(wild_type_probability)` — the one cell every
-    selection case in this class turns the cutoff against."""
+    selection case in this class turns the margin against."""
     scores = dict.fromkeys(AMINO_ACIDS, math.log(0.9))
     scores["N"] = math.log(wild_type_probability)
     with Path(path).open("w", newline="") as fh:
@@ -149,9 +151,9 @@ def _stub_rising_on_d(monkeypatch):
 
 def _light_framework_residue():
     # The paired fixture's one light-chain residue — enough for
-    # `residue_store.in_scope_chains` to yield an `L` chain beside the `H`
+    # `residue_index.in_scope_chains` to yield an `L` chain beside the `H`
     # one `_framework_residue`/`_ng_site` already carry.
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain="L", offset=0, imgt="1", wild_type="Q", res_name="Q",
         b_factor=20.0, region="FR1", chain_role="L",
     )
@@ -167,7 +169,7 @@ def _stage_paired(batch, clonotype_key, non_human_prior_score):
     )
     tolerance_store.write_tolerance_tsv(
         str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
-        [*_tolerance_rows(), {"posins": "1", **_row(["D", "Q", "A"], "N", 3.0)}],
+        [*_tolerance_rows(), {"imgt": "1", **_row(["D", "Q", "A"], "N", 3.0)}],
     )
     residue_store.write_residues(
         str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
@@ -179,18 +181,24 @@ def _stage_paired(batch, clonotype_key, non_human_prior_score):
     return entry
 
 
-def _stage_mixed(batch, clonotype_key, non_human_prior_score):
+def _stage_mixed(batch, clonotype_key, non_human_prior_score, score_framework_position=True):
     """One parent carrying both a liability (the `_ng_site` deamidation
     motif, on CDR1) and a non-human framework position (`_framework_residue`,
-    on FR1) — the fixture `TestHumanizationModeEndToEnd` runs against."""
+    on FR1) — the fixture `TestHumanizationModeEndToEnd` runs against.
+
+    `score_framework_position=False` withholds that position's tolerance row, leaving the
+    humanization objective a target AntiFold never scored."""
     entry = batch.add(clonotype_key)
     residues = [_framework_residue(), *_ng_site()]
     liability_store.write_triaged(
         str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_triaged(_ng_site())]
     )
+    framework_rows = (
+        [{"imgt": "1", **_row(["D", "Q", "A"], "N", 3.0)}] if score_framework_position else []
+    )
     tolerance_store.write_tolerance_tsv(
         str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
-        [*_tolerance_rows(), {"posins": "1", **_row(["D", "Q", "A"], "N", 3.0)}],
+        [*_tolerance_rows(), *framework_rows],
     )
     residue_store.write_residues(
         str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
@@ -205,33 +213,35 @@ def _stage_mixed(batch, clonotype_key, non_human_prior_score):
 def _run(batch, extra_args=None):
     definitions = batch.definitions(TAXONOMY)
     out_variants = batch.path("variants.tsv")
-    out_skip = batch.path("skip.tsv")
+    out_rejected = batch.path("rejected.tsv")
 
     rc = build_variants.main(
         [
             "--triaged-dir", batch.dir("triaged"),
             "--tolerance-dir", batch.dir("tolerance"),
             "--residues-dir", batch.dir("residues"),
-            "--pdb-index", batch.index,
             "--definitions", definitions,
             "--out-variants", out_variants,
-            "--out-skip", out_skip,
+            "--out-rejected", out_rejected,
             "--out-humanness", batch.path("humanness.tsv"),
         ]
         + (extra_args or [])
     )
 
     assert rc == 0
-    return skip_store.read_skips(out_skip), variant_store.read_variants_tsv(out_variants)
+    return (
+        rejection_store.read_rejections(out_rejected),
+        variant_store.read_variants_tsv(out_variants),
+    )
 
 
 class TestGateAndRankInOnePass:
     def test_a_cleared_liability_becomes_ranked_variants(self, batch):
         _stage(batch, "clone-1")
 
-        skips, written = _run(batch)
+        rejections, written = _run(batch)
 
-        assert skips == [("clone-1", "", "")]
+        assert rejections == [("clone-1", "", "", "parent")]
         assert len(written) > 0
         assert [v.status for _, _, _, v in written] == ["unvalidated-hypothesis"] * len(written)
 
@@ -245,27 +255,31 @@ class TestGateAndRankInOnePass:
         assert "H:N107D, H:G108P" not in [v.changed_positions for _, _, _, v in written]
         assert "H:N107D, H:G108S" in [v.changed_positions for _, _, _, v in written]
 
-    def test_no_surviving_candidate_writes_the_named_skip_and_no_rows(self, batch):
+    def test_no_surviving_candidate_writes_the_named_rejection_and_no_rows(self, batch):
         _stage(batch, "clone-1")
 
-        skips, written = _run(batch, ["--max-edits-per-variant", "1"])
+        rejections, written = _run(batch, ["--max-edits-per-variant", "1"])
 
-        assert skips == [("clone-1", "no-candidate-cleared-motif", "")]
+        assert rejections == [("clone-1", "no-candidate-cleared-the-gate", "", "parent")]
         assert written == []
 
-    def test_the_default_mode_still_names_the_same_skip_reason(self, batch):
+    def test_the_default_mode_still_names_the_same_rejection_reason(self, batch):
         # `--run-mode` omitted and `--run-mode liabilities` given explicitly
-        # must resolve to the identical skip reason — proving the mode
-        # selector's own wiring left the default path's skip-reason string
+        # must resolve to the identical rejection reason — proving the mode
+        # selector's own wiring left the default path's rejection-reason string
         # untouched.
         _stage(batch, "clone-1")
 
-        default_skips, default_written = _run(batch, ["--max-edits-per-variant", "1"])
-        explicit_skips, explicit_written = _run(
+        default_rejections, default_written = _run(batch, ["--max-edits-per-variant", "1"])
+        explicit_rejections, explicit_written = _run(
             batch, ["--max-edits-per-variant", "1", "--run-mode", "liabilities"]
         )
 
-        assert default_skips == explicit_skips == [("clone-1", "no-candidate-cleared-motif", "")]
+        assert (
+            default_rejections
+            == explicit_rejections
+            == [("clone-1", "no-candidate-cleared-the-gate", "", "parent")]
+        )
         assert default_written == explicit_written == []
 
     def test_a_gate_threshold_and_a_ranking_threshold_both_reach_this_one_command(self, batch):
@@ -286,7 +300,7 @@ class TestGateAndRankInOnePass:
         _stage(batch, "clone-1")
 
         _, omitted = _run(batch)
-        _, explicit = _run(batch, ["--w-struct", "1.0", "--w-obj", "1.0"])
+        _, explicit = _run(batch, ["--structural-weight", "1.0", "--objective-weight", "1.0"])
 
         assert explicit == omitted
 
@@ -302,9 +316,9 @@ class TestDatasetWideVariantsTsv:
         _stage(batch, "clone-1")
         _stage(batch, "clone-2")
 
-        skips, written = _run(batch, ["--variants-per-parent", "2"])
+        rejections, written = _run(batch, ["--variants-per-parent", "2"])
 
-        assert skips == [("clone-1", "", ""), ("clone-2", "", "")]
+        assert rejections == [("clone-1", "", "", "parent"), ("clone-2", "", "", "parent")]
         assert [(key, v.rank) for key, _, _, v in written] == [
             ("clone-1", 1), ("clone-2", 2), ("clone-1", 3), ("clone-2", 4),
         ]
@@ -331,9 +345,9 @@ class TestDatasetWideVariantsTsv:
         assert {variant for _, variant, _, _ in written} == {"v01"}
 
     def test_an_empty_index_leaves_a_header_only_variants_tsv(self, batch):
-        skips, written = _run(batch)
+        rejections, written = _run(batch)
 
-        assert skips == []
+        assert rejections == []
         assert written == []
 
 
@@ -348,9 +362,9 @@ class TestNoReReportingAcrossPredecessors:
             str(Path(batch.dir("residues"), f"{partial.stem}.json")), _ng_site()
         )
 
-        skips, written = _run(batch)
+        rejections, written = _run(batch)
 
-        assert skips == [("complete", "", "")]
+        assert rejections == [("complete", "", "", "parent")]
         assert {key for key, _, _, _ in written} == {"complete"}
 
 
@@ -364,10 +378,9 @@ class TestMainRequiresTheTaxonomy:
                     "--triaged-dir", batch.dir("triaged"),
                     "--tolerance-dir", batch.dir("tolerance"),
                     "--residues-dir", batch.dir("residues"),
-                    "--pdb-index", batch.index,
                     "--definitions", missing,
                     "--out-variants", batch.path("variants.tsv"),
-                    "--out-skip", batch.path("skip.tsv"),
+                    "--out-rejected", batch.path("rejected.tsv"),
                     "--out-humanness", batch.path("humanness.tsv"),
                 ]
             )
@@ -403,10 +416,9 @@ class TestRunModeSelectsObjectives:
                     "--triaged-dir", batch.dir("triaged"),
                     "--tolerance-dir", batch.dir("tolerance"),
                     "--residues-dir", batch.dir("residues"),
-                    "--pdb-index", batch.index,
                     "--definitions", batch.definitions(TAXONOMY),
                     "--out-variants", out_variants,
-                    "--out-skip", batch.path("skip.tsv"),
+                    "--out-rejected", batch.path("rejected.tsv"),
                     "--out-humanness", batch.path("humanness.tsv"),
                     "--run-mode", "misspelled-mode",
                 ]
@@ -429,7 +441,7 @@ class TestRunModeSelectsObjectives:
         monkeypatch.setattr(
             build_variants.run_mode,
             "objectives_for",
-            lambda mode, prior_path, non_human_prior_cutoff: [
+            lambda *_args: [
                 (run_mode.LIABILITY, lambda _residues: stub_objective),
                 (run_mode.HUMANNESS, lambda _residues: stub_objective),
             ],
@@ -457,12 +469,13 @@ class TestRunModeSelectsObjectives:
             run_mode.LIABILITY, run_mode.HUMANNESS,
         ]
 
-    def test_the_humanization_objectives_score_lands_on_its_candidate_as_humanness(
+    def test_every_objectives_variants_carry_a_measured_humanness_score(
         self, batch, monkeypatch
     ):
-        # The same stub, but its score is distinguishable from every fold
-        # tolerance in the fixture — a landing on the wrong field would be
-        # a visible number match, not a silent one.
+        # The goal check's own score (80.0) and every fold tolerance in the fixture are
+        # distinguishable from the measurement's, so a landing on the wrong field would be a
+        # visible number match, not a silent one.
+        _stub_rising_on_d(monkeypatch)
         entry = _stage(batch, "clone-1")
         stub_objective = design_objective.Objective(
             select_target_positions=lambda residues, taxonomy: [],
@@ -474,7 +487,7 @@ class TestRunModeSelectsObjectives:
         monkeypatch.setattr(
             build_variants.run_mode,
             "objectives_for",
-            lambda mode, prior_path, non_human_prior_cutoff: [
+            lambda *_args: [
                 (run_mode.LIABILITY, lambda _residues: stub_objective),
                 (run_mode.HUMANNESS, lambda _residues: stub_objective),
             ],
@@ -497,8 +510,12 @@ class TestRunModeSelectsObjectives:
         )
 
         by_name = dict(result.per_objective)
-        assert all(v.humanness_score is None for v in by_name[run_mode.LIABILITY])
-        assert all(v.humanness_score == pytest.approx(80.0) for v in by_name[run_mode.HUMANNESS])
+        # Measured on the variant's own heavy chain, for both objectives — never the goal
+        # check's score, which is what the humanization gate compares and this column is not.
+        scored = [v for variants in by_name.values() for v in variants]
+        assert len(scored) > 0
+        assert all(v.humanness_score is not None for v in scored)
+        assert all(v.humanness_score != pytest.approx(80.0) for v in scored)
         # And the tolerance the stub's own score never reaches: this fixture's
         # two-position mean, never the stub's score.
         assert all(
@@ -521,7 +538,7 @@ class TestRunModeSelectsObjectives:
         monkeypatch.setattr(
             build_variants.run_mode,
             "objectives_for",
-            lambda mode, prior_path, non_human_prior_cutoff: [
+            lambda *_args: [
                 (run_mode.LIABILITY, lambda _residues: stub_objective),
                 (run_mode.HUMANNESS, lambda _residues: stub_objective),
             ],
@@ -571,10 +588,10 @@ class TestRunModeSelectsObjectives:
 
 def _run_mixed(batch, extra_args=None):
     out_humanness = batch.path("humanness.tsv")
-    skips, written = _run(batch, extra_args)
+    rejections, written = _run(batch, extra_args)
     with Path(out_humanness).open(newline="") as fh:
         humanness_rows = list(csv.DictReader(fh, delimiter="\t"))
-    return skips, written, humanness_rows
+    return rejections, written, humanness_rows
 
 
 class TestHumanizationModeEndToEnd:
@@ -603,19 +620,37 @@ class TestHumanizationModeEndToEnd:
         assert row["humannessVerdict"] == "present"
         assert row["humannessSummary"] == "N@H1 (humanised)"
 
-    def test_a_zero_cutoff_selects_nothing_and_names_the_no_target_skip_reason(self, batch):
-        # The wild type's own prior score (0.01) is never below a 0.0 cutoff,
-        # whatever it is — R5's strict comparison leaves nothing selected.
-        _stage_mixed(batch, "clone-1", non_human_prior_score=0.01)
+    def test_a_prior_leading_with_the_wild_type_names_the_no_target_rejection_reason(self, batch):
+        # The prior's best residue is the one the antibody already carries, so no gap exists
+        # to clear and even a margin of 0 — the loosest setting there is — selects nothing.
+        _stage_mixed(batch, "clone-1", non_human_prior_score=0.95)
 
-        skips, written, humanness_rows = _run_mixed(
-            batch, ["--run-mode", "humanization", "--non-human-prior-cutoff", "0.0"]
+        rejections, written, humanness_rows = _run_mixed(
+            batch, ["--run-mode", "humanization", "--non-human-prior-margin", "0.0"]
         )
 
-        assert skips == [("clone-1", "no-nonhuman-framework-position", "")]
+        assert rejections == [("clone-1", "no-nonhuman-framework-position", "", "parent")]
         assert written == []
         [row] = humanness_rows
         assert row["humannessVerdict"] == "none"
+
+    def test_an_unscored_selected_position_names_its_own_rejection_reason(self, batch, monkeypatch):
+        # The whole chain's set is dropped together, so the parent emits nothing.
+        # The reason must say which quantity was missing: no motif was involved,
+        # and the humanness gate never ran to reject anything.
+        _stub_rising_on_d(monkeypatch)
+        _stage_mixed(batch, "clone-1", non_human_prior_score=0.01,
+                     score_framework_position=False)
+
+        rejections, written, humanness_rows = _run_mixed(batch, ["--run-mode", "humanization"])
+
+        assert rejections == [("clone-1", "no-tolerance-at-humanization-position", "", "parent")]
+        assert written == []
+        # The position was selected, so the parent's own row still reports it —
+        # `declined`, because no candidate was ever built at it.
+        [row] = humanness_rows
+        assert row["humannessVerdict"] == "present"
+        assert row["humannessSummary"] == "N@H1 (declined)"
 
     def test_liabilities_mode_over_the_same_fixture_is_unaffected_by_the_extra_residue(
         self, batch
@@ -629,14 +664,14 @@ class TestHumanizationModeEndToEnd:
         _stage_mixed(batch, "mixed", non_human_prior_score=0.01)
         _stage(batch, "plain")
 
-        skips, written = _run(batch, ["--run-mode", "liabilities"])
+        rejections, written = _run(batch, ["--run-mode", "liabilities"])
 
         by_key = {"mixed": [], "plain": []}
         for clonotype_key, _, objective, variant in written:
             by_key[clonotype_key].append(
                 (objective, variant.structural_tolerance, variant.changed_positions)
             )
-        assert {reason for _, reason, _ in skips} == {""}
+        assert {reason for _, reason, _detail, _type in rejections} == {""}
         assert by_key["mixed"] == by_key["plain"]
 
 
@@ -653,7 +688,7 @@ def _stage_liability_mix(batch, clonotype_key, triaged):
     )
     tolerance_store.write_tolerance_tsv(
         str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
-        [*_tolerance_rows(), {"posins": "1", **_row(["D", "Q", "A"], "N", 3.0)}],
+        [*_tolerance_rows(), {"imgt": "1", **_row(["D", "Q", "A"], "N", 3.0)}],
     )
     residue_store.write_residues(
         str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
@@ -695,10 +730,10 @@ class TestModeTwoLiabilityTargetsCutToCdrs:
     def test_a_framework_only_parent_in_mode_2_gets_no_variant_and_a_named_skip(self, batch):
         _stage_liability_mix(batch, "clone-1", [_triaged([_framework_residue()])])
 
-        skips, written = _run(batch, ["--run-mode", "liabilities + humanization"])
+        rejections, written = _run(batch, ["--run-mode", "liabilities + humanization"])
 
         assert written == []
-        [(clonotype_key, reason, _)] = skips
+        [(clonotype_key, reason, _detail, _type)] = rejections
         assert clonotype_key == "clone-1"
         assert reason != ""
 
@@ -760,10 +795,10 @@ class TestReRankWeightsReachTheGlobalRewrite:
         monkeypatch.setattr(
             variant_store,
             "rewrite_global_rank",
-            lambda path, alpha, beta: calls.append((alpha, beta)),
+            lambda path, structural, humanness: calls.append((structural, humanness)),
         )
 
-        _run(batch, ["--alpha", "2.5", "--beta", "0.5"])
+        _run(batch, ["--rerank-structural-weight", "2.5", "--rerank-humanness-weight", "0.5"])
 
         assert calls == [(2.5, 0.5)]
 
@@ -773,9 +808,14 @@ class TestReRankWeightsReachTheGlobalRewrite:
         monkeypatch.setattr(
             variant_store,
             "rewrite_global_rank",
-            lambda path, alpha, beta: calls.append((alpha, beta)),
+            lambda path, structural, humanness: calls.append((structural, humanness)),
         )
 
         _run(batch)
 
-        assert calls == [(variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA)]
+        assert calls == [
+            (
+                variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+                variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
+            )
+        ]

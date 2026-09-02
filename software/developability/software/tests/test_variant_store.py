@@ -1,14 +1,13 @@
 """Unit tests for `variant_store.py` — the `variants.tsv` round trip, the
 per-parent-ordinal `variantKey` the variant axis is built from, and the
 second pass that turns each parent's own local `rank` into one ordinal
-across the whole run."""
+across the whole run. The score that pass sorts on is tested in
+`test_variant_ranking.py`."""
 
 import csv
 import io
 
-import pytest
-
-from engine import variant_store
+from engine import variant_ranking, variant_store
 
 
 def _variant(
@@ -23,7 +22,7 @@ def _variant(
 ):
     # `parent_rank` defaults to `rank` — the shape every caller sees before
     # `rewrite_global_rank` ever runs, when the two are still identical.
-    return variant_store.Variant(
+    return variant_ranking.Variant(
         rank=rank,
         parent_rank=rank if parent_rank is None else parent_rank,
         chain=chain,
@@ -188,7 +187,9 @@ class TestObjectiveIsPerRow:
         )
 
         variant_store.rewrite_global_rank(
-            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+            str(path),
+            variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+            variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
         )
 
         written = variant_store.read_variants_tsv(str(path))
@@ -227,43 +228,6 @@ class TestHumannessScoreRoundTrips:
         assert isinstance(rehydrated.humanness_score, float)
 
 
-class TestNormalizeAndRerankScore:
-    def test_a_mixed_candidates_two_terms_normalise_over_their_own_distinct_domain(self):
-        # Structural tolerance and humanness normalise over their own
-        # separate fixed domain, never the same fraction applied twice.
-        v = _variant(structural_tolerance=5.0, humanness_score=80.0)
-
-        assert variant_store._normalize(
-            v.structural_tolerance, variant_store.STRUCTURAL_TOLERANCE_DOMAIN
-        ) == pytest.approx(4 / 19)
-        assert variant_store._normalize(
-            v.humanness_score, variant_store.HUMANNESS_DOMAIN
-        ) == pytest.approx(0.8)
-
-    def test_normalize_scores_zero_at_the_domain_floor_and_one_at_the_ceiling(self):
-        assert variant_store._normalize(1.0, variant_store.STRUCTURAL_TOLERANCE_DOMAIN) == 0.0
-        assert variant_store._normalize(20.0, variant_store.STRUCTURAL_TOLERANCE_DOMAIN) == 1.0
-        assert variant_store._normalize(0.0, variant_store.HUMANNESS_DOMAIN) == 0.0
-        assert variant_store._normalize(100.0, variant_store.HUMANNESS_DOMAIN) == 1.0
-
-    def test_alpha_equals_beta_equals_one_weighs_both_terms_equally_at_the_floor_and_ceiling(self):
-        # Both terms at their domain floor: the sum is 0 regardless of which
-        # term is which, so alpha and beta are weighing them equally, not
-        # just carrying the same name.
-        floor = _variant(structural_tolerance=1.0, humanness_score=0.0)
-        assert variant_store._rerank_score(floor, alpha=1.0, beta=1.0) == pytest.approx(0.0)
-
-        # Both terms at their domain ceiling: the sum is 2 — one full point
-        # from each term, not 1 point split between them.
-        ceiling = _variant(structural_tolerance=20.0, humanness_score=100.0)
-        assert variant_store._rerank_score(ceiling, alpha=1.0, beta=1.0) == pytest.approx(2.0)
-
-    def test_a_variant_with_no_humanness_score_contributes_nothing_to_the_beta_term(self):
-        no_humanness = _variant(structural_tolerance=20.0, humanness_score=None)
-
-        assert variant_store._rerank_score(no_humanness, alpha=1.0, beta=1.0) == pytest.approx(1.0)
-
-
 class TestRewriteGlobalRank:
     def test_renumbers_every_parents_survivors_by_tolerance_across_the_run(self, tmp_path):
         path = tmp_path / "variants.tsv"
@@ -283,7 +247,9 @@ class TestRewriteGlobalRank:
         )
 
         variant_store.rewrite_global_rank(
-            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+            str(path),
+            variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+            variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
         )
 
         written = variant_store.read_variants_tsv(str(path))
@@ -308,7 +274,9 @@ class TestRewriteGlobalRank:
         )
 
         variant_store.rewrite_global_rank(
-            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+            str(path),
+            variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+            variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
         )
 
         # Both parents' one survivor was locally rank 1, so both still
@@ -325,7 +293,9 @@ class TestRewriteGlobalRank:
         variant_store.append_variants_tsv(str(path), "clone-1", "liability", [tied])
 
         variant_store.rewrite_global_rank(
-            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+            str(path),
+            variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+            variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
         )
 
         written = variant_store.read_variants_tsv(str(path))
@@ -336,7 +306,9 @@ class TestRewriteGlobalRank:
         variant_store.write_variants_header(str(path))
 
         variant_store.rewrite_global_rank(
-            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+            str(path),
+            variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+            variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
         )
 
         assert variant_store.read_variants_tsv(str(path)) == []
@@ -355,7 +327,9 @@ class TestRewriteGlobalRank:
         )
 
         variant_store.rewrite_global_rank(
-            str(path), variant_store.DEFAULT_ALPHA, variant_store.DEFAULT_BETA
+            str(path),
+            variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+            variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
         )
 
         written = variant_store.read_variants_tsv(str(path))
@@ -374,11 +348,19 @@ class TestRewriteGlobalRank:
 
         one = tmp_path / "one.tsv"
         one.write_text(path.read_text())
-        variant_store.rewrite_global_rank(str(one), alpha=1.0, beta=variant_store.DEFAULT_BETA)
+        variant_store.rewrite_global_rank(
+            str(one),
+            rerank_structural_weight=1.0,
+            rerank_humanness_weight=variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
+        )
 
         seven = tmp_path / "seven.tsv"
         seven.write_text(path.read_text())
-        variant_store.rewrite_global_rank(str(seven), alpha=7.0, beta=variant_store.DEFAULT_BETA)
+        variant_store.rewrite_global_rank(
+            str(seven),
+            rerank_structural_weight=7.0,
+            rerank_humanness_weight=variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
+        )
 
         order_at_one = [
             v.changed_positions for _, _, _, v in variant_store.read_variants_tsv(str(one))

@@ -176,6 +176,30 @@ TestVariantColumns := func() {
 		byColumn.parentClonotypeKey.spec.annotations["pl7.app/table/visibility"])
 }
 
+TestParentLinkGroup := func() {
+	settings := specs.buildParentLinkSettings(BLOCK_ID, CLONOTYPE_AXIS)
+	variants := specs.buildVariantsSettings(BLOCK_ID)
+
+	// Two axes, the variant first and the parent second, and one column that
+	// carries no fact of its own — the shape that makes a linker traversable.
+	test.isEqual(2, len(settings.axes))
+	test.isEqual(1, len(settings.columns))
+	test.isEqual("true", settings.columns[0].spec.annotations["pl7.app/isLinkerColumn"])
+	test.isEqual("Int", settings.columns[0].spec.valueType)
+
+	// The variant side is the Variants page's own axis, spec for spec: a
+	// spelling of its own would leave the edge pointing at no group.
+	test.isEqual(variants.axes[0].column, settings.axes[0].column)
+	test.isEqual(variants.axes[0].spec.name, settings.axes[0].spec.name)
+	test.isEqual(
+		BLOCK_ID,
+		settings.axes[0].spec.domain["pl7.app/antibodyVariantDesigner/designRunId"])
+
+	// The parent side is upstream's axis verbatim, for the same reason.
+	test.isEqual(CLONOTYPE_AXIS.name, settings.axes[1].spec.name)
+	test.isEqual(CLONOTYPE_AXIS.type, settings.axes[1].spec.type)
+}
+
 TestParentsGroup := func() {
 	settings := specs.buildParentsSettings(BLOCK_ID, CLONOTYPE_AXIS)
 	byColumn := _byColumn(settings.columns)

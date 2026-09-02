@@ -29,13 +29,6 @@ readTolerance := import("@platforma-open/milaboratories.antibody-variant-designe
 
 self.validateInputs({
 	"__options__,closed": "",
-	// The PDB index, verbatim as `main.tpl.tengo` built it from the PDB
-	// ResourceMap's sorted keys.
-	pdbIndex: [{
-		"__options__,closed": "",
-		clonotypeKey: "string",
-		filename: "string"
-	}],
 	pdbs: { any: validation.resource() },
 	residues: { any: validation.resource() },
 	// Read only as a gate — never opened. An antibody absent here has no
@@ -52,11 +45,10 @@ self.validateInputs({
 	}
 })
 
-self.defineOutputs("tolerance", "skip", "skipContent")
+self.defineOutputs("tolerance", "rejected", "rejectedContent")
 
 self.body(func(inputs) {
 	return readTolerance.run({
-		pdbIndex: inputs.pdbIndex,
 		pdbs: inputs.pdbs,
 		residues: inputs.residues,
 		triaged: inputs.triaged,

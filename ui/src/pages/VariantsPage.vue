@@ -134,7 +134,7 @@ const comparisonProps = computed(() => {
       :settings="variantsTableSettings"
       not-ready-text="Run on a 3D structures dataset to see variant hypotheses"
       running-text="Designing variants — scanning liabilities, reading fold tolerance, and ranking candidates across the run."
-      no-rows-text="No variants — every parent may have been skipped, or none needed a fix"
+      no-rows-text="No variants — every parent may have been rejected, or none needed a fix"
       @row-double-clicked="openComparison"
     />
 

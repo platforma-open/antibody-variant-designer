@@ -48,15 +48,29 @@ def _as_design_target(triaged: liability_triage.Triaged) -> design_objective.Des
 
 
 def objectives_for(
-    mode: str, prior_path: str, non_human_prior_cutoff: float
+    mode: str,
+    prior_path: str,
+    non_human_prior_margin: float,
+    fr_confidence_threshold: float = liability_triage.DEFAULT_FR_CONFIDENCE_THRESHOLD,
+    max_new_liabilities: int = humanness_objective.DEFAULT_MAX_NEW_LIABILITIES,
+    ignored_liability_ids: frozenset[str] = humanness_objective.DEFAULT_IGNORED_LIABILITY_IDS,
 ) -> list[tuple[str, Callable[[list], design_objective.Objective]]]:
     """Returns the (name, builder) pairs `mode` runs, in run order.
 
     Each builder takes the parent's residue index and returns the built `Objective` —
-    the humanization objective needs the residues to read the prior over and the cutoff to
-    select against; the liability objective ignores them."""
+    the humanization objective needs the residues to read the prior over, the cutoff to
+    select against, the threshold to warn on, the liabilities its gate may accept and the
+    ones it does not count at all; the liability objective ignores them, and reads its own
+    confidence from the triage that already ran."""
     def humanness_builder(residues: list) -> design_objective.Objective:
-        return humanness_objective.build(prior_path, residues, non_human_prior_cutoff)
+        return humanness_objective.build(
+            prior_path,
+            residues,
+            non_human_prior_margin,
+            fr_confidence_threshold,
+            max_new_liabilities,
+            ignored_liability_ids,
+        )
 
     if mode == LIABILITIES:
         return [(LIABILITY, lambda _residues: liability_objective.OBJECTIVE)]

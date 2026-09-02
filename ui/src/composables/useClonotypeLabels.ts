@@ -7,7 +7,8 @@ import { ref, watch, type ComputedRef } from "vue";
  * emit. The label column is Parquet-stored, so the model-side `findLabels`
  * API doesn't return it; this goes through the PFrame driver instead.
  *
- * Pattern lifted from `3D-Structure-Based-Liabilities/ui/src/composables/useClonotypeLabels.ts`.
+ * Pattern lifted from `3D-Structure-Based-Liabilities/ui/src/composables/useClonotypeLabels.ts`,
+ * which reads one label column where this one merges every column on the axis.
  */
 export function useClonotypeLabels(
   labelsPf: ComputedRef<PFrameHandle | undefined>,
@@ -28,24 +29,25 @@ export function useClonotypeLabels(
           strictlyCompatible: false,
           names: ["pl7.app/label"],
         });
-        const match = labelCols.find(
+        // Every label column on the axis, merged, not the first one found. A
+        // subset column labels only the clonotypes it selected, so reading one
+        // column alone leaves the clonotypes outside it falling back to their
+        // raw key. An earlier column's label wins, so the merge is stable.
+        const matches = labelCols.filter(
           (c) => c.spec.axesSpec.length === 1 && c.spec.axesSpec[0].name === axis.name,
         );
-        if (!match) {
-          labels.value = {};
-          return;
-        }
-        const { axesData, data } = await getSingleColumnData(handle, match.columnId);
-        const axisKeys = Object.values(axesData)[0];
-        if (!axisKeys || axisKeys.length !== data.length) {
-          labels.value = {};
-          return;
-        }
         const out: Record<string, string> = {};
-        for (let i = 0; i < axisKeys.length; i++) {
-          const k = axisKeys[i];
-          const v = data[i];
-          if (k != null && v != null) out[String(k)] = String(v);
+        for (const match of matches) {
+          const { axesData, data } = await getSingleColumnData(handle, match.columnId);
+          const axisKeys = Object.values(axesData)[0];
+          if (!axisKeys || axisKeys.length !== data.length) continue;
+          for (let i = 0; i < axisKeys.length; i++) {
+            const k = axisKeys[i];
+            const v = data[i];
+            if (k == null || v == null) continue;
+            const key = String(k);
+            if (out[key] === undefined) out[key] = String(v);
+          }
         }
         labels.value = out;
       } catch (err) {

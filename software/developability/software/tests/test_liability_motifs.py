@@ -3,7 +3,7 @@
 import inspect
 
 from engine.liability_motifs import detect_all
-from engine.residue_store import Residue
+from engine.residue_index import Residue
 
 
 def _residue(chain, offset, wild_type, region="FR1"):

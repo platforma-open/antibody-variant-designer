@@ -55,15 +55,14 @@ _resourceRail := func(cpu, mem) {
  * declined liabilities the Parents page needs.
  * Optional confidence / subset sidecars are single dataset-wide TSVs.
  */
-_scanLiabilities := func(pdbIndex, pdbs, definitions, args, columns, resolvedSubset) {
+_scanLiabilities := func(pdbs, definitions, args, columns, resolvedSubset) {
 	inputs := {
-		pdbIndex: pdbIndex,
 		pdbs: pdbs,
 		definitions: definitions,
 		params: {
 			rsasaBuriedCutoff: args.rsasaBuriedCutoff,
-			frConfThresh: args.frConfThresh,
-			cdrConfThresh: args.cdrConfThresh,
+			frConfidenceThreshold: args.frConfidenceThreshold,
+			cdrConfidenceThreshold: args.cdrConfidenceThreshold,
 			// A set, already sorted by the model's `.args()` so that the same set
 			// is the same key — see `_resourceRail` on why a key matters here.
 			actOnFixability: text.join(args.actOnFixability, ",")
@@ -89,9 +88,8 @@ _scanLiabilities := func(pdbIndex, pdbs, definitions, args, columns, resolvedSub
 /**
  * Per-position structural tolerance for every antibody that still has work.
  */
-_readTolerance := func(pdbIndex, pdbs, residues, triaged, args) {
+_readTolerance := func(pdbs, residues, triaged, args) {
 	return render.create(step2ReadToleranceTpl, {
-		pdbIndex: pdbIndex,
 		pdbs: pdbs,
 		residues: residues,
 		triaged: triaged
@@ -105,9 +103,8 @@ _readTolerance := func(pdbIndex, pdbs, residues, triaged, args) {
  * domain applied after this exec, never as an exec input, so two blocks over one
  * dataset share this run.
  */
-_buildVariants := func(pdbIndex, triaged, tolerance, residues, definitions, args) {
+_buildVariants := func(triaged, tolerance, residues, definitions, args) {
 	return render.create(step3BuildVariantsTpl, {
-		pdbIndex: pdbIndex,
 		triaged: triaged,
 		tolerance: tolerance,
 		residues: residues,
@@ -116,9 +113,13 @@ _buildVariants := func(pdbIndex, triaged, tolerance, residues, definitions, args
 			runMode: args.runMode,
 			maxEditsPerVariant: args.maxEditsPerVariant,
 			candidateResiduesPerPosition: args.candidateResiduesPerPosition,
-			wStruct: args.wStruct,
-			wObj: args.wObj,
-			nonHumanPriorCutoff: args.nonHumanPriorCutoff,
+			structuralWeight: args.structuralWeight,
+			objectiveWeight: args.objectiveWeight,
+			nonHumanPriorMargin: args.nonHumanPriorMargin,
+			maxNewLiabilities: args.maxNewLiabilities,
+			// Sorted by the model's `.args()` for the same reason `actOnFixability` is.
+			humanizationIgnoredLiabilities: text.join(args.humanizationIgnoredLiabilities, ","),
+			frConfidenceThreshold: args.frConfidenceThreshold,
 			variantsPerParent: args.variantsPerParent,
 			lowToleranceFloor: args.lowToleranceFloor,
 			epistasisRescoreTopK: args.epistasisRescoreTopK
@@ -181,17 +182,18 @@ wf.body(func(args) {
 	clonotypeAxis := pdbAxes[0]
 
 	// Each ResourceMap key is a JSON-encoded [clonotypeKey] array; each value
-	// is a Blob ref to a PDB file. One sorted pass builds the PDB index every
-	// step shares and the path -> blob map `pdbs` restages into each exec —
-	// sorted keys keep every step's input canonical so the pure step dedups.
+	// is a Blob ref to a PDB file. One sorted pass builds the path -> blob map
+	// `pdbs` restages into each exec — sorted keys keep every step's input
+	// canonical so the pure step dedups.
+	//
+	// Naming each staged file after its clonotype key is what lets
+	// `parent_clonotypes.py` recover the parent clonotypes from the directory
+	// listing, so no step is handed a list file.
 	inputsMap := pdbCol.data.inputs()
-	pdbIndex := []
 	pdbs := {}
 	for keyJson in maps.getKeys(inputsMap) {
 		clonotypeKey := json.decode(keyJson)[0]
-		bareName := clonotypeKey + ".pdb"
-		pdbs["pdbs/" + bareName] = inputsMap[keyJson].getValue()
-		pdbIndex = append(pdbIndex, { clonotypeKey: clonotypeKey, filename: bareName })
+		pdbs["pdbs/" + clonotypeKey + ".pdb"] = inputsMap[keyJson].getValue()
 	}
 
 	// The shared liability taxonomy, read once per run and handed to steps
@@ -206,11 +208,10 @@ wf.body(func(args) {
 		run()
 	definitions := definitionsResult.getFile("definitions.json")
 
-	liabilities := _scanLiabilities(pdbIndex, pdbs, definitions, args, args.columns, args.resolvedSubset)
+	liabilities := _scanLiabilities(pdbs, definitions, args, args.columns, args.resolvedSubset)
 	tolerance := _readTolerance(
-		pdbIndex, pdbs, liabilities.output("residues"), liabilities.output("triaged"), args)
+		pdbs, liabilities.output("residues"), liabilities.output("triaged"), args)
 	variants := _buildVariants(
-		pdbIndex,
 		liabilities.output("triaged"),
 		tolerance.output("tolerance"),
 		liabilities.output("residues"),
@@ -244,6 +245,12 @@ wf.body(func(args) {
 		variantsBuilt.variantsWithId, "tsv",
 		specs.buildVariantsSettings(blockId),
 		{ splitDataAndSpec: true })
+	// The edge between the two, on both axes at once, so a consumer anchored on
+	// either identity can reach the other side's columns.
+	parentLinkXsv := xsv.importFile(
+		variantsBuilt.parentLink, "tsv",
+		specs.buildParentLinkSettings(blockId, clonotypeAxis),
+		{ splitDataAndSpec: true })
 	liabilitiesXsv := xsv.importFile(
 		specHelpers.withParentIdOnLiabilities(
 			liabilities.output("liabilities"),
@@ -265,6 +272,9 @@ wf.body(func(args) {
 	for k, v in variantsXsv {
 		variantsPfBuilder.add(k, trace.inject(v.spec), v.data)
 	}
+	for k, v in parentLinkXsv {
+		variantsPfBuilder.add("parentLink" + k, trace.inject(v.spec), v.data)
+	}
 	variantsPf := variantsPfBuilder.build()
 
 	liabilitiesPfBuilder := pframes.pFrameBuilder()
@@ -279,9 +289,9 @@ wf.body(func(args) {
 
 	return {
 		outputs: {
-			liabilitiesSkip: liabilities.output("skipContent"),
-			toleranceSkip: tolerance.output("skipContent"),
-			variantsSkip: variants.output("skipContent"),
+			liabilitiesRejected: liabilities.output("rejectedContent"),
+			toleranceRejected: tolerance.output("rejectedContent"),
+			variantsRejected: variants.output("rejectedContent"),
 			variantsData: pframes.exportFrame(variantsPf),
 			liabilitiesData: pframes.exportFrame(liabilitiesPf),
 			synthesisCsv: file.exportFile(synthesisCsv),

@@ -5,8 +5,8 @@ Writes the residue index, one `triaged.json` per antibody, and the
 dataset-wide `liabilities.tsv`.
 
 The four phases run in one exec because a verdict needs exposure and
-detection together. No boundary inside the scan could name a skip on
-its own. Each antibody therefore gets exactly one skip reason.
+detection together. No boundary inside the scan could name a rejection on
+its own. Each antibody therefore gets exactly one rejection reason.
 """
 
 import argparse
@@ -22,7 +22,8 @@ from engine import (
     liability_objective,
     liability_store,
     liability_triage,
-    pdb_index_store,
+    parent_clonotypes,
+    rejection_store,
     residue_exposure,
     residue_index,
     residue_store,
@@ -35,7 +36,7 @@ DEFAULT_CDR_CONFIDENCE_THRESHOLD = 6.0
 DEFAULT_ACT_ON_FIXABILITY = "fixable,easily_fixable"
 
 # The two reasons meaning `process_one` reached the scan phase at all.
-# Every other reason comes from `residue_index.py`'s index phase and leaves
+# Every other reason comes from `index_one` below and leaves
 # `triaged` as `[]` too — from the short-circuit, not a clean scan.
 # Only these two are safe to summarize into `liabilities.tsv`.
 _REACHED_TRIAGE_REASONS = ("", "no-liability-survived-triage")
@@ -84,7 +85,7 @@ def _load_confidence_tsv(path: str | None) -> dict[str, list[dict]]:
 def _load_clonotype_filter(path: str | None) -> set[str] | None:
     """The optional Lead Selection subset, exported as one dataset-wide TSV.
 
-    `None` means no filter was picked, so the whole `pdb_index` gets
+    `None` means no filter was picked, so every parent clonotype gets
     processed. A picked filter yields a keep set, possibly empty. A
     clonotype whose value is falsy is treated as not selected — the same
     grammar the sibling block's `--clonotype-filter` uses."""
@@ -105,7 +106,7 @@ def _load_clonotype_filter(path: str | None) -> set[str] | None:
 
 
 def _confidence_lookup(
-    residues: list[residue_store.Residue], confidence_records: list[dict] | None
+    residues: list[residue_index.Residue], confidence_records: list[dict] | None
 ) -> dict[tuple[str, str], float | None]:
     """Per-residue confidence: sidecar records first, the PDB B-factor
     column second.
@@ -134,6 +135,36 @@ def _confidence_lookup(
     return lookup
 
 
+def index_one(pdb_path: str, out_residues: str) -> str:
+    """Index one antibody and return the rejection reason, or empty string on success.
+
+    out_residues is written only on success. A missing file indicates an
+    earlier phase rejected this antibody; an empty file would break that
+    pattern (double-counting).
+    """
+    parsed = residue_store.read_pdb(pdb_path)
+    if not parsed.chain_order:
+        return "no-structure"
+
+    if not residue_index.is_imgt_numbered(parsed):
+        return "structure-not-imgt"
+
+    if residue_index.multi_domain_chain(parsed) is not None:
+        return "structure-multi-domain-chain"
+
+    residues = residue_index.index_residues(parsed)
+    # The index keeps every residue, including a constant-domain, antigen,
+    # or second-arm residue, so exposure and AntiFold still see it. The
+    # rejection fires only when nothing at all is researchable. A file of pure
+    # constant region therefore never reaches the scan phase as a silent
+    # empty scan.
+    if not any(r.in_scope for r in residues):
+        return "no-researchable-residue"
+
+    residue_store.write_residues(out_residues, residues)
+    return ""
+
+
 def process_one(
     pdb_path: str,
     out_residues: str,
@@ -148,7 +179,7 @@ def process_one(
 ) -> tuple[str, list[liability_triage.Triaged]]:
     """Index, scan, and triage one antibody.
 
-    Returns skip reason (empty on pass) and every triaged liability (the
+    Returns rejection reason (empty on pass) and every triaged liability (the
     Parents page needs declined ones too). out_triaged holds only "exposed"
     verdicts — the set the re-scan gate reads.
 
@@ -156,8 +187,8 @@ def process_one(
     the index reason.
 
     Skipped antibodies write no residues.json or triaged.json. A missing
-    file indicates "already skipped"; an empty file would double-count."""
-    index_reason = residue_index.index_one(pdb_path, out_residues)
+    file indicates "already rejected"; an empty file would double-count."""
+    index_reason = index_one(pdb_path, out_residues)
     if index_reason:
         return index_reason, []
 
@@ -192,7 +223,6 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="the staged blobs — the index phase parses them and freesasa reads them again",
     )
-    parser.add_argument("--pdb-index", required=True, help="the pdb_index")
     parser.add_argument("--out-residues-dir", required=True)
     parser.add_argument(
         "--definitions", required=True, help="taxonomy JSON from the shared package"
@@ -209,17 +239,17 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         dest="clonotype_filter",
         help="optional dataset-wide TSV naming the subset to process; omitted means the "
-        "whole pdb_index",
+        "every parent clonotype",
     )
     parser.add_argument("--out-triaged-dir", required=True)
     parser.add_argument("--out-liabilities", required=True)
-    parser.add_argument("--out-skip", required=True)
+    parser.add_argument("--out-rejected", required=True)
     parser.add_argument("--rsasa-buried-cutoff", type=float, default=DEFAULT_RSASA_BURIED_CUTOFF)
     parser.add_argument(
-        "--fr-confidence-gating-threshold", type=float, default=DEFAULT_FR_CONFIDENCE_THRESHOLD
+        "--fr-confidence-threshold", type=float, default=DEFAULT_FR_CONFIDENCE_THRESHOLD
     )
     parser.add_argument(
-        "--cdr-confidence-gating-threshold", type=float, default=DEFAULT_CDR_CONFIDENCE_THRESHOLD
+        "--cdr-confidence-threshold", type=float, default=DEFAULT_CDR_CONFIDENCE_THRESHOLD
     )
     parser.add_argument("--act-on-fixability", default=DEFAULT_ACT_ON_FIXABILITY)
     args = parser.parse_args(argv)
@@ -236,18 +266,13 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     liability_store.write_liabilities_header(args.out_liabilities)
 
-    def one(entry: pdb_index_store.Entry) -> str | None:
+    def one(entry: parent_clonotypes.ParentClonotype) -> tuple[str, str, str] | None:
         # A picked filter narrows which parents this step attempts. A
-        # filtered-out clonotype was never in scope, so it gets no skip
+        # filtered-out clonotype was never in scope, so it gets no rejection
         # row at all.
         if keep_clonotypes is not None and entry.clonotype_key not in keep_clonotypes:
             return None
         pdb_path = pdb_dir / entry.filename
-        # A clonotype the upstream block failed for leaves no staged blob
-        # at all, never an empty placeholder. This step treats that
-        # absence as its own named skip reason, not a raised error.
-        if not pdb_path.is_file():
-            return "no-structure"
 
         reason, triaged = process_one(
             str(pdb_path),
@@ -257,8 +282,8 @@ def main(argv: list[str] | None = None) -> int:
             liability_objective.OBJECTIVE,
             confidence_by_clonotype.get(entry.clonotype_key),
             args.rsasa_buried_cutoff,
-            args.fr_confidence_gating_threshold,
-            args.cdr_confidence_gating_threshold,
+            args.fr_confidence_threshold,
+            args.cdr_confidence_threshold,
             act_on_fixability,
         )
         # Appended for every antibody that reached triage, so a
@@ -269,9 +294,10 @@ def main(argv: list[str] | None = None) -> int:
             liability_store.append_liabilities_tsv(
                 args.out_liabilities, entry.clonotype_key, triaged
             )
-        return reason
+        return reason, "", rejection_store.PARENT_REJECTED
 
-    return antibody_batch.run(pdb_index_store.read_index(args.pdb_index), one, args.out_skip)
+    parents = parent_clonotypes.scan_parent_clonotypes(args.pdb_dir, parent_clonotypes.PDB_SUFFIX)
+    return antibody_batch.process_every_parent(parents, one, args.out_rejected)
 
 
 if __name__ == "__main__":

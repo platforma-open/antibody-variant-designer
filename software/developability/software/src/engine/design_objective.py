@@ -15,6 +15,15 @@ from dataclasses import dataclass
 class GoalCheck:
     meets_goal: bool
     score: float
+    # Which check turned the candidate away, and the measurement behind it. Both are `""` on
+    # a pass and on an objective that names no reason. `build_variants` renders them onto the
+    # rejection page, so a parent that produced nothing says why rather than only that it did.
+    reason: str = ""
+    detail: str = ""
+    # The site's own `(chain, imgt)` positions that caused the failure. A builder may drop
+    # these and score what is left. Empty means the whole site failed together, so dropping a
+    # part of it would change nothing.
+    blocking_positions: tuple = ()
 
 
 @dataclass(frozen=True)

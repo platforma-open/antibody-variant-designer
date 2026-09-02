@@ -14,8 +14,8 @@ from engine import design_objective, humanness_objective
 
 DEFAULT_MAX_EDITS_PER_VARIANT = 5
 DEFAULT_CANDIDATE_RESIDUES_PER_POSITION = 3
-DEFAULT_W_STRUCT = 1.0
-DEFAULT_W_OBJ = 1.0
+DEFAULT_STRUCTURAL_WEIGHT = 1.0
+DEFAULT_OBJECTIVE_WEIGHT = 1.0
 
 
 @dataclass(frozen=True)
@@ -56,29 +56,26 @@ class Candidate:
     # for the targeted liability, and the fixed-spelling rendering of the edits.
     addressed_target: str
     changed_positions: str
-    # humanness_score keeps the humanization objective's own score separate from
-    # `tolerance`.
-    humanness_score: float | None = None
 
 
 def _combined_scores(
     residue,
     log_probs: dict[str, float],
     prior: dict | None,
-    w_struct: float,
-    w_obj: float,
+    structural_weight: float,
+    objective_weight: float,
 ) -> dict[str, float]:
     """The structural log-probability row and the objective's position
     prior at this residue, each scaled by its own weight, then summed.
 
     An uncovered position, or an objective with no prior at all, takes
-    only the `w_struct` scaling. The weight then means the same thing on
+    only the `structural_weight` scaling. The weight then means the same thing on
     every path."""
     prior_row = None if prior is None else prior.get((residue.chain, residue.imgt))
     if prior_row is None:
-        return {aa: w_struct * value for aa, value in log_probs.items()}
+        return {aa: structural_weight * value for aa, value in log_probs.items()}
     return {
-        aa: w_struct * value + w_obj * prior_row.get(aa, 0.0)
+        aa: structural_weight * value + objective_weight * prior_row.get(aa, 0.0)
         for aa, value in log_probs.items()
     }
 
@@ -88,8 +85,8 @@ def _top_substitutions(
     tolerance_lookup: dict,
     k: int,
     prior: dict | None,
-    w_struct: float,
-    w_obj: float,
+    structural_weight: float,
+    objective_weight: float,
 ) -> list[str]:
     """Up to `k` amino acids at `residue`'s position, ranked by the
     combined score, wild type excluded.
@@ -99,9 +96,18 @@ def _top_substitutions(
     row = tolerance_lookup.get((residue.chain, residue.imgt))
     if row is None:
         return []
-    scores = _combined_scores(residue, row["logProbs"], prior, w_struct, w_obj)
+    scores = _combined_scores(residue, row["logProbs"], prior, structural_weight, objective_weight)
     ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
     return [aa for aa, _ in ranked if aa != residue.wild_type][:k]
+
+
+def unscored_positions(site: tuple, tolerance_lookup: dict) -> tuple:
+    """The site's residues no tolerance row covers.
+
+    An unscored position offers no substitution, so `build_candidates` drops the whole
+    target rather than a part of it. `build_variants` reads this same function to name why
+    a parent produced nothing."""
+    return tuple(r for r in site if (r.chain, r.imgt) not in tolerance_lookup)
 
 
 def _changed_positions(edits: tuple) -> str:
@@ -129,27 +135,41 @@ def _humanization_addressed_target(site: tuple) -> str:
     return f"{humanness_objective.HUMANIZATION_LABEL} @ {site[0].chain}"
 
 
+@dataclass(frozen=True)
+class Decline:
+    """One target whose goal check turned away every candidate built from it.
+
+    `reason` and `detail` come from the objective's own `GoalCheck`, so a target that
+    produced nothing says which check stopped it. A target that produced at least one
+    candidate raises no `Decline`."""
+
+    chain: str
+    reason: str
+    detail: str
+
+
 def _cleared_candidate(
     target: design_objective.DesignTarget,
     combo: tuple,
     taxonomy: list[dict],
     tolerance_lookup: dict,
     objective: design_objective.Objective,
-    is_humanness_objective: bool,
     addressed_target: str,
-) -> Candidate | None:
+) -> tuple["Candidate | None", design_objective.GoalCheck]:
     """Scores one substitution combo against `objective`'s goal check and, on a pass, builds
-    the `Candidate` every field of `target` rides forward onto — `None` on a fail."""
+    the `Candidate` every field of `target` rides forward onto.
+
+    Returns the check beside the candidate, so a caller can report why a fail failed. The
+    candidate is `None` on a fail."""
     site = target.site
     mutated_site = [
         replace(residue, wild_type=to_aa) for residue, to_aa in zip(site, combo, strict=True)
     ]
     check = objective.score_candidate(mutated_site, taxonomy, tolerance_lookup)
     if not check.meets_goal:
-        return None
+        return None, check
 
     tolerance = design_objective.mean_tolerance(mutated_site, tolerance_lookup)
-    humanness_score = check.score if is_humanness_objective else None
 
     edits = tuple(
         Edit(
@@ -161,7 +181,7 @@ def _cleared_candidate(
         )
         for residue, to_aa in zip(site, combo, strict=True)
     )
-    return Candidate(
+    candidate = Candidate(
         target_definition_id=target.definition_id,
         edits=edits,
         tolerance=tolerance,
@@ -170,8 +190,48 @@ def _cleared_candidate(
         worst_confidence_angstroms=target.confidence_angstroms,
         addressed_target=addressed_target,
         changed_positions=_changed_positions(edits),
-        humanness_score=humanness_score,
     )
+    return candidate, check
+
+
+def _scored_dropping_blockers(
+    target: design_objective.DesignTarget,
+    combo: tuple,
+    taxonomy: list[dict],
+    tolerance_lookup: dict,
+    objective: design_objective.Objective,
+    addressed_target: str,
+) -> tuple["Candidate | None", design_objective.GoalCheck]:
+    """`_cleared_candidate`, retried without the positions each failed check blocks on.
+
+    One position whose substitution spells a liability would otherwise sink every other edit
+    beside it. Dropping that position and scoring the rest keeps the edits that are fine,
+    which is what the full-set rule wants; an all-or-nothing drop throws them away.
+
+    A check that blocks on nothing ends the retry, and so does an empty site. Returns the
+    last check, so a caller that got no candidate still has a reason to report."""
+    site, chosen = target.site, combo
+    check = design_objective.GoalCheck(meets_goal=False, score=0.0)
+    while site:
+        candidate, check = _cleared_candidate(
+            replace(target, site=site), chosen, taxonomy, tolerance_lookup, objective,
+            addressed_target,
+        )
+        if candidate is not None:
+            return candidate, check
+        if not check.blocking_positions:
+            return None, check
+        blocked = set(check.blocking_positions)
+        kept = [
+            (residue, to_aa)
+            for residue, to_aa in zip(site, chosen, strict=True)
+            if (residue.chain, residue.imgt) not in blocked
+        ]
+        # Every position blocked means nothing is left to try, and a check that blocked none
+        # of them already returned above — so the site always shrinks here.
+        site = tuple(residue for residue, _ in kept)
+        chosen = tuple(to_aa for _, to_aa in kept)
+    return None, check
 
 
 def build_candidates(
@@ -180,24 +240,53 @@ def build_candidates(
     residues: list,
     taxonomy: list[dict],
     objective: design_objective.Objective,
-    is_humanness_objective: bool,
     max_edits_per_variant: int,
     candidate_residues_per_position: int,
-    w_struct: float,
-    w_obj: float,
+    structural_weight: float,
+    objective_weight: float,
 ) -> list[Candidate]:
-    """One candidate per target whose objective goal check passed.
+    """The candidates of `build_candidates_and_declines`, for a caller with no use for the
+    declines."""
+    return build_candidates_and_declines(
+        targets,
+        tolerance_lookup,
+        residues,
+        taxonomy,
+        objective,
+        max_edits_per_variant,
+        candidate_residues_per_position,
+        structural_weight,
+        objective_weight,
+    )[0]
+
+
+def build_candidates_and_declines(
+    targets: list[design_objective.DesignTarget],
+    tolerance_lookup: dict,
+    residues: list,
+    taxonomy: list[dict],
+    objective: design_objective.Objective,
+    max_edits_per_variant: int,
+    candidate_residues_per_position: int,
+    structural_weight: float,
+    objective_weight: float,
+) -> tuple[list[Candidate], list[Decline]]:
+    """One candidate per target whose objective goal check passed, and one `Decline` per
+    target whose goal check passed nothing.
+
+    A target dropped before the objective runs raises no `Decline`: no check saw it, so
+    none has a reason to give.
 
     A liability target (`definition_id` set) enumerates the product of every position's
     top substitutions, capped by `max_edits_per_variant`. A humanization target
     (`definition_id` is `None`) never enumerates a product and is never capped: it builds
     one candidate substituting every selected position to its own single top-scoring residue.
 
-    Either target is skipped before the objective runs when one of its positions has no
-    admissible substitution.
+    Either way, a position the goal check blocks on is dropped and the rest are scored again
+    — see `_scored_dropping_blockers`.
 
-    `is_humanness_objective` comes from `run_mode.objectives_for`'s `(name, builder)` pair.
-    `objective` carries no name.
+    Either target is dropped before the objective runs when one of its positions has no
+    admissible substitution.
 
     `score_candidate` sees only the candidate's site, never the residue index or the PDB."""
     taxonomy_by_id = {d["id"]: d for d in taxonomy}
@@ -205,9 +294,13 @@ def build_candidates(
         None if objective.position_prior is None else objective.position_prior(residues, targets)
     )
     candidates: list[Candidate] = []
+    declines: list[Decline] = []
     for target in targets:
         is_liability = target.definition_id is not None
         if is_liability and len(target.site) > max_edits_per_variant:
+            continue
+
+        if unscored_positions(target.site, tolerance_lookup):
             continue
 
         per_position_options = [
@@ -216,8 +309,8 @@ def build_candidates(
                 tolerance_lookup,
                 candidate_residues_per_position,
                 prior,
-                w_struct,
-                w_obj,
+                structural_weight,
+                objective_weight,
             )
             for residue in target.site
         ]
@@ -231,11 +324,26 @@ def build_candidates(
             addressed_target = _humanization_addressed_target(target.site)
             combos = [tuple(options[0] for options in per_position_options)]
 
+        cleared_here = 0
+        first_check = None
         for combo in combos:
-            candidate = _cleared_candidate(
-                target, combo, taxonomy, tolerance_lookup, objective, is_humanness_objective,
-                addressed_target,
+            candidate, check = _scored_dropping_blockers(
+                target, combo, taxonomy, tolerance_lookup, objective, addressed_target
             )
+            if first_check is None:
+                first_check = check
             if candidate is not None:
+                cleared_here += 1
                 candidates.append(candidate)
-    return candidates
+
+        # The first combo's check, because a liability target enumerates many and they fail
+        # the same way; a humanization target enumerates one, so first and only agree.
+        if cleared_here == 0 and first_check is not None:
+            declines.append(
+                Decline(
+                    chain=target.site[0].chain,
+                    reason=first_check.reason,
+                    detail=first_check.detail,
+                )
+            )
+    return candidates, declines

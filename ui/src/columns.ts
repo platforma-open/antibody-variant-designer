@@ -30,7 +30,20 @@ export const LIABILITY_VALUE_COLUMNS = {
   parentClonotypeId: "pl7.app/antibodyVariantDesigner/parentClonotypeId",
   verdict: "pl7.app/liabilities/verdict",
   summary: "pl7.app/liabilities/summary",
+  humannessVerdict: "pl7.app/humannessVerdict",
+  humannessSummary: "pl7.app/humannessSummary",
 } as const;
+
+/** Splits a joined summary cell into one entry per line. Both summary columns
+ *  join their entries with this separator, and the engine writes it in
+ *  `humanness_objective.AMINO_SEP`. */
+export function summaryLines(summary: string | number | null | undefined): string[] {
+  if (summary === undefined || summary === null) return [];
+  return String(summary)
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
 
 /** One edit parsed out of a `changedPositions` cell:
  *  `<chain>:<wildType><imgtLabel><mutant>`, e.g. `H:N111AQ`. */

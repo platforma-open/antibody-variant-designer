@@ -22,7 +22,7 @@ def read_taxonomy(path: str) -> list[dict]:
     """Returns the taxonomy's liability list.
 
     Raises when the payload is not the shared package's document shape. Reading it as an empty
-    taxonomy instead would detect nothing. Every antibody would then skip with
+    taxonomy instead would detect nothing. Every antibody would then be rejected with
     `no-liability-survived-triage`, making the run look like clean input rather than a taxonomy
     failure."""
     parsed = json.loads(Path(path).read_text())
