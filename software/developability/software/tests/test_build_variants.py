@@ -244,7 +244,7 @@ class TestGateAndRankInOnePass:
 
         assert rejections == [("clone-1", "", "", "parent")]
         assert len(written) > 0
-        assert [v.status for _, _, _, v in written] == ["unvalidated-hypothesis"] * len(written)
+        assert [v.status for _, _, v in written] == ["unvalidated-hypothesis"] * len(written)
 
     def test_the_gate_still_discards_a_candidate_that_creates_a_new_liability(self, batch):
         # D then P spells `fragmentation_dp` — it clears the NG target but
@@ -253,8 +253,8 @@ class TestGateAndRankInOnePass:
 
         _, written = _run(batch)
 
-        assert "H:N107D, H:G108P" not in [v.changed_positions for _, _, _, v in written]
-        assert "H:N107D, H:G108S" in [v.changed_positions for _, _, _, v in written]
+        assert "H:N107D, H:G108P" not in [v.changed_positions for _, _, v in written]
+        assert "H:N107D, H:G108S" in [v.changed_positions for _, _, v in written]
 
     def test_no_surviving_candidate_writes_the_named_rejection_and_no_rows(
         self, batch, monkeypatch
@@ -299,7 +299,7 @@ class TestGateAndRankInOnePass:
         )
 
         assert len(written) == 1
-        assert [v.rank for _, _, _, v in written] == [1]
+        assert [v.rank for _, _, v in written] == [1]
 
     def test_the_weight_flags_default_to_one(self, batch):
         # The entrypoint's own `default=` carries the same `1.0` the block
@@ -423,7 +423,7 @@ class TestTheTwoEditCapFlags:
         )
 
         assert len(written) > 0
-        best = written[0][3]
+        best = written[0][2]
         liability_hits = [f"H:{r.wild_type}{r.imgt}" for r in liability_residues]
         framework_hits = [f"H:{r.wild_type}{r.imgt}" for r in framework_residues]
         assert sum(best.changed_positions.count(p) for p in liability_hits) == 1
@@ -440,7 +440,7 @@ class TestTheTwoEditCapFlags:
         )
 
         assert len(written) > 0
-        best = written[0][3]
+        best = written[0][2]
         liability_hits = [f"H:{r.wild_type}{r.imgt}" for r in liability_residues]
         framework_hits = [f"H:{r.wild_type}{r.imgt}" for r in framework_residues]
         assert sum(best.changed_positions.count(p) for p in liability_hits) == len(
@@ -463,7 +463,7 @@ class TestDatasetWideVariantsTsv:
         rejections, written = _run(batch, ["--variants-per-parent", "2"])
 
         assert rejections == [("clone-1", "", "", "parent"), ("clone-2", "", "", "parent")]
-        assert [(key, v.rank) for key, _, _, v in written] == [
+        assert [(key, v.rank) for key, _, v in written] == [
             ("clone-1", 1), ("clone-2", 2), ("clone-1", 3), ("clone-2", 4),
         ]
 
@@ -473,7 +473,7 @@ class TestDatasetWideVariantsTsv:
 
         _, written = _run(batch, ["--variants-per-parent", "2"])
 
-        keys = [(clonotype, variant) for clonotype, variant, _, _ in written]
+        keys = [(clonotype, variant) for clonotype, variant, _ in written]
         assert len(set(keys)) == len(written) == 4
 
     def test_two_parents_rank_one_share_the_same_ordinal_variant_key(self, batch):
@@ -486,7 +486,7 @@ class TestDatasetWideVariantsTsv:
 
         _, written = _run(batch, ["--variants-per-parent", "1"])
 
-        assert {variant for _, variant, _, _ in written} == {"v01"}
+        assert {variant for _, variant, _ in written} == {"v01"}
 
     def test_an_empty_index_leaves_a_header_only_variants_tsv(self, batch):
         rejections, written = _run(batch)
@@ -509,7 +509,7 @@ class TestNoReReportingAcrossPredecessors:
         rejections, written = _run(batch)
 
         assert rejections == [("complete", "", "", "parent")]
-        assert {key for key, _, _, _ in written} == {"complete"}
+        assert {key for key, _, _ in written} == {"complete"}
 
 
 class TestMainRequiresTheTaxonomy:
@@ -544,15 +544,11 @@ class TestRunModeSelectsObjectives:
         )
 
         assert mode_1_skips == mode_2_skips
-        # `objective` names the objectives that ran, which the two calls above deliberately
-        # differ on — every other column is what must stay identical.
         assert [(ck, v.structural_tolerance, v.changed_positions)
-                for ck, _, _obj, v in mode_1_written] == [
+                for ck, _, v in mode_1_written] == [
             (ck, v.structural_tolerance, v.changed_positions)
-            for ck, _, _obj, v in mode_2_written
+            for ck, _, v in mode_2_written
         ]
-        assert {obj for _, _, obj, _ in mode_1_written} == {"liability"}
-        assert {obj for _, _, obj, _ in mode_2_written} == {"liability + humanness"}
 
     def test_an_unrecognised_mode_exits_non_zero_and_writes_no_rows(self, batch):
         _stage(batch, "clone-1")
@@ -815,8 +811,7 @@ class TestHumanizationModeEndToEnd:
         _, written, _ = _run_mixed(batch, ["--run-mode", "humanization"])
 
         assert len(written) > 0
-        assert {obj for _, _, obj, _ in written} == {"humanness"}
-        assert all(v.humanness_score is not None for _, _, _, v in written)
+        assert all(v.humanness_score is not None for _, _, v in written)
 
     def test_the_humanness_row_reads_present_and_names_the_selected_position(self, batch,
                                                                                 monkeypatch):
@@ -876,12 +871,25 @@ class TestHumanizationModeEndToEnd:
         rejections, written = _run(batch, ["--run-mode", "liabilities"])
 
         by_key = {"mixed": [], "plain": []}
-        for clonotype_key, _, objective, variant in written:
+        for clonotype_key, _, variant in written:
             by_key[clonotype_key].append(
-                (objective, variant.structural_tolerance, variant.changed_positions)
+                (variant.structural_tolerance, variant.changed_positions)
             )
         assert {reason for _, reason, _detail, _type in rejections} == {""}
         assert by_key["mixed"] == by_key["plain"]
+
+    def test_combined_mode_writes_both_targets_on_one_row(self, batch, monkeypatch):
+        # The written TSV row, not just the returned `Variant`, so the addressed-target
+        # column survives the full write path in the mode the Variants page actually offers.
+        _stub_rising_on_d(monkeypatch)
+        _stage_mixed(batch, "clone-1", non_human_prior_score=0.01)
+
+        _, written, _ = _run_mixed(batch, ["--run-mode", "liabilities + humanization"])
+
+        assert any(
+            "Deamidation" in v.addressed_target and "Humanization" in v.addressed_target
+            for _, _, v in written
+        )
 
 
 def _stage_liability_mix(batch, clonotype_key, triaged):
@@ -922,8 +930,7 @@ class TestModeTwoLiabilityTargetsCutToCdrs:
         _, written = _run(batch, ["--run-mode", "liabilities + humanization"])
 
         assert len(written) > 0
-        assert all(obj == "liability + humanness" for _, _, obj, _ in written)
-        assert all("H:N1D" not in v.changed_positions for _, _, _, v in written)
+        assert all("H:N1D" not in v.changed_positions for _, _, v in written)
 
     def test_liabilities_mode_over_the_same_parent_still_designs_the_framework_liability(
         self, batch
@@ -934,7 +941,7 @@ class TestModeTwoLiabilityTargetsCutToCdrs:
 
         _, written = _run(batch, ["--run-mode", "liabilities"])
 
-        assert any("H:N1D" in v.changed_positions for _, _, _, v in written)
+        assert any("H:N1D" in v.changed_positions for _, _, v in written)
 
     def test_a_framework_only_parent_in_mode_2_gets_no_variant_and_a_named_skip(self, batch):
         _stage_liability_mix(batch, "clone-1", [_triaged([_framework_residue()])])

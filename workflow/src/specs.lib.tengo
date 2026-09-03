@@ -217,24 +217,6 @@ variantColumns := func(blockId) {
 			}
 		},
 		{
-			column: "objective",
-			csvHeader: "objective",
-			// The constant `liability` — the only objective this block designs
-			// against. A column rather than a domain key, like `status`, because
-			// the synthesis CSV must carry the word.
-			spec: {
-				name: "pl7.app/antibodyVariantDesigner/objective",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Objective",
-					"pl7.app/description": "Always 'liability' — the objective this variant was designed against.",
-					"pl7.app/isDiscreteFilter": "true",
-					"pl7.app/table/visibility": "hidden"
-				}
-			}
-		},
-		{
 			column: "addressedTarget",
 			csvHeader: "addressedTarget",
 			spec: {
@@ -242,9 +224,9 @@ variantColumns := func(blockId) {
 				valueType: "String",
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
-					"pl7.app/label": "Addressed liability",
+					"pl7.app/label": "Addressed targets",
 					"pl7.app/isDiscreteFilter": "true",
-					"pl7.app/description": "The one liability this variant was designed to clear — one variant always targets exactly one liability."
+					"pl7.app/description": "Every target this variant was designed to address, comma-joined — a cleared liability, a humanised framework position, or both."
 				}
 			}
 		},
@@ -368,8 +350,7 @@ variantColumns := func(blockId) {
 			column: "status",
 			csvHeader: "status",
 			// The constant `unvalidated-hypothesis`. A column rather than a
-			// domain key, like `objective`, because the synthesis CSV must
-			// carry the word.
+			// domain key, because the synthesis CSV must carry the word.
 			spec: {
 				name: "pl7.app/antibodyVariantDesigner/status",
 				valueType: "String",

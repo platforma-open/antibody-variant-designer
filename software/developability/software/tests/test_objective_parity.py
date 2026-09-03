@@ -23,7 +23,6 @@ from engine import (
     rejection_store,
     residue_index,
     residue_store,
-    run_mode,
     tolerance_store,
     variant_store,
 )
@@ -183,14 +182,6 @@ class TestObjectiveSeamParity:
             ("clone-1", "", "", "parent"), ("clone-2", "", "", "parent"),
         ]
 
-    def test_every_variant_row_names_the_objective_that_ran(self, batch):
-        definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
-        out_variants, _, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
-
-        rows = _rows_of(out_variants)
-        assert len(rows) > 0
-        assert {row["objective"] for row in rows} == {"liability"}
-
     def test_the_parents_columns_hold_the_verdict_and_the_summary_the_right_way_round(
         self, batch
     ):
@@ -241,9 +232,9 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
         _check_or_capture(out_variants_rejected, "variants-rejected.tsv")
 
     def test_liabilities_and_humanization_mode_reproduces_every_golden_byte_for_byte(self, batch):
-        # `variants.tsv`'s own `objective` column names the objectives that ran, so this
-        # mode's capture holds both objectives' names while every other byte matches the two
-        # modes above: its own golden file, not the shared `variants.tsv`.
+        # This mode also runs humanization, so its capture holds a measured `humannessScore`
+        # where the two modes above hold an empty cell: its own golden file, not the shared
+        # `variants.tsv`.
         definitions, residues_dir, triaged_dir, out_liabilities, out_scan_rejected = _run_scan(
             batch
         )
@@ -328,26 +319,6 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
         rejected = rejection_store.read_rejections(out_variants_rejected)
         assert pdb_dir_stem in {ck for ck, _, _, _ in rejected}
         assert pdb_dir_stem in {row["clonotypeKey"] for row in _rows_of(out_humanness)}
-
-    def test_every_run_names_the_objectives_it_ran(self, batch):
-        definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
-        for stem in ("clone-1", "clone-2"):
-            self._stage_prior(batch.dir("tolerance"), stem)
-
-        for extra_args, expected in (
-            (None, run_mode.LIABILITY),
-            (["--run-mode", "liabilities"], run_mode.LIABILITY),
-            (
-                ["--run-mode", "liabilities + humanization"],
-                f"{run_mode.LIABILITY} + {run_mode.HUMANNESS}",
-            ),
-        ):
-            out_variants, _, _ = _run_variants(
-                batch, definitions, residues_dir, triaged_dir, extra_args=extra_args
-            )
-            rows = _rows_of(out_variants)
-            assert len(rows) > 0
-            assert {row["objective"] for row in rows} == {expected}
 
     def test_an_unrecognised_mode_exits_non_zero_and_leaves_a_header_only_variants_tsv(
         self, batch
@@ -504,7 +475,6 @@ class TestHumannessScoreAtTheRealEntrypoint:
         out_variants, _, _ = self._run_liability_and_humanization(batch, monkeypatch)
 
         [row] = _rows_of(out_variants)
-        assert row["objective"] == f"{run_mode.LIABILITY} + {run_mode.HUMANNESS}"
         humanness = float(row["humannessScore"])
         tolerance = float(row["structuralTolerance"])
         assert humanness >= 70.0

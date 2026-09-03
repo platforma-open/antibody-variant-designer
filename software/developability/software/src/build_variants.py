@@ -68,10 +68,6 @@ class ParentDesignResult:
     humanness_targets: list[residue_index.Residue] | None
     humanness_cleared: list[variant_candidates.Candidate]
     humanness_parent_scores: dict[str, float | None]
-    # The objectives `mode` actually ran, in `run_mode.objectives_for`'s own order — what
-    # `variant_store.append_variants_tsv`'s `objective` column reports, so a single-objective
-    # run still writes that objective's own name rather than the mode's.
-    objective_names: tuple[str, ...]
 
 
 def process_one(
@@ -212,7 +208,6 @@ def process_one(
         # it ran and cleared nothing from — matching `humanness_targets`.
         humanness_cleared=cleared if run_mode.HUMANNESS in objectives else [],
         humanness_parent_scores=humanness_parent_scores,
-        objective_names=tuple(objectives.keys()),
     )
 
 
@@ -373,12 +368,9 @@ def main(argv: list[str] | None = None) -> int:
             args.max_new_liabilities,
             ignored_liability_ids,
         )
-        # `result.objective_names` names which objectives ran; a variant's own edits name which
-        # objective contributed each one.
         variant_store.append_variants_tsv(
             args.out_variants,
             entry.clonotype_key,
-            " + ".join(result.objective_names),
             result.variants,
         )
         # One row for every parent this step attempts, pass or rejection alike — the

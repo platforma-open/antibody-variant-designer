@@ -62,7 +62,7 @@ TestVariantColumns := func() {
 	// a Variants-page-only view the vendor's contract never carried, because the
 	// page needs a rank that survives the global re-rank's second pass, and
 	// `parentHumannessScore`, the baseline joined in beside the variant's own.
-	test.isEqual(18, len(settings.columns))
+	test.isEqual(17, len(settings.columns))
 	for c in settings.columns {
 		test.isTrue(c.column != "variantId")
 	}
@@ -129,7 +129,12 @@ TestVariantColumns := func() {
 	test.isEqual("pl7.app/antibodyVariantDesigner/status", byColumn.status.spec.name)
 
 	test.isEqual("pl7.app/antibodyVariantDesigner/chain", byColumn.chain.spec.name)
-	test.isEqual("pl7.app/antibodyVariantDesigner/objective", byColumn.objective.spec.name)
+
+	// No column carries the removed objective spec — one variant now
+	// addresses every target its edit caps allow, not one objective's own.
+	for c in settings.columns {
+		test.isTrue(c.spec.name != "pl7.app/antibodyVariantDesigner/objective")
+	}
 
 	// Both metrics declare their scale, because both are backend-specific and
 	// a consumer cannot infer either from the number.
@@ -353,7 +358,7 @@ TestSynthesisCsvColumnOrder := func() {
 	// The columns that declare a `csvHeader` are the full vendor set, which now
 	// includes `humannessScore`. The four identity columns declare none, so the
 	// table can reorder around them without the vendor's set changing.
-	test.isEqual(13, len(order))
+	test.isEqual(12, len(order))
 
 	headers := []
 	columns := []
@@ -363,7 +368,7 @@ TestSynthesisCsvColumnOrder := func() {
 	}
 	test.isEqual([
 		"variantId", "rank", "variantSequence", "chain", "changedPositions",
-		"objective", "addressedTarget", "structuralTolerance", "humannessScore",
+		"addressedTarget", "structuralTolerance", "humannessScore",
 		"worstConfidence", "bindingRisk", "lowConfidenceWarning", "status"
 	], headers)
 	// Every header here equals its flat column name — no CSV spelling drifts
@@ -401,8 +406,8 @@ TestOrderPriorityFollowsListPosition := func() {
 
 	// The first column of each group takes one step per column, the last takes
 	// one step.
-	test.isEqual("18000", variants.columns[0].spec.annotations["pl7.app/table/orderPriority"])
-	test.isEqual("1000", variants.columns[17].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("17000", variants.columns[0].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("1000", variants.columns[16].spec.annotations["pl7.app/table/orderPriority"])
 	test.isEqual("7000", parents.columns[0].spec.annotations["pl7.app/table/orderPriority"])
 	test.isEqual("1000", parents.columns[6].spec.annotations["pl7.app/table/orderPriority"])
 }

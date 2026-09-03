@@ -216,10 +216,10 @@ class TestHumanizationObjectiveAgainstTheRealMetric:
             f"H: {humanness_objective.DID_NOT_RISE_REASON} ("
         )
         assert rises == ("rises", "", "", rejection_store.PARENT_REJECTED)
-        assert [key for key, _, _, _ in written] == ["rises"]
+        assert [key for key, _, _ in written] == ["rises"]
         rise_wild_type = VH_SEQUENCE[_RISE_OFFSET]
         assert (
-            written[0][3].changed_positions
+            written[0][2].changed_positions
             == f"H:{rise_wild_type}{_RISE_OFFSET + 1}{_RISE_AA}"
         )
 
@@ -235,7 +235,7 @@ class TestHumanizationObjectiveAgainstTheRealMetric:
             ("falls", "", "", rejection_store.PARENT_REJECTED),
             ("rises", "", "", rejection_store.PARENT_REJECTED),
         ]
-        assert {key for key, _, _, _ in written} == {"rises", "falls"}
+        assert {key for key, _, _ in written} == {"rises", "falls"}
 
     def test_a_tie_does_not_meet_the_goal_through_the_real_metric(self, batch, monkeypatch):
         _stage(batch, "ties", _TIE_OFFSET, _TIE_AA)

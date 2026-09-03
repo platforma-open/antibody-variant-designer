@@ -27,7 +27,7 @@ const edits = computed(() => parseChangedPositions(props.changedPositions));
       <dd>{{ rank ?? "—" }}</dd>
       <dt>Rank per parent</dt>
       <dd>{{ parentRank ?? "—" }}</dd>
-      <dt>Addressed liability</dt>
+      <dt>Addressed targets</dt>
       <dd>{{ addressedTarget }}</dd>
       <dt>Structural tolerance</dt>
       <dd>{{ structuralTolerance !== null ? structuralTolerance.toFixed(2) : "—" }}</dd>

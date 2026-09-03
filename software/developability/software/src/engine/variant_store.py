@@ -20,7 +20,6 @@ TSV_COLUMNS = [
     "variantKey",
     "rank",
     "parentRank",
-    "objective",
     "chain",
     "addressedTarget",
     "changedPositions",
@@ -60,9 +59,7 @@ def write_variants_header(path: str) -> None:
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
 
 
-def _row(
-    clonotype_key: str, variant_key_str: str, objective: str, v: variant_ranking.Variant
-) -> list:
+def _row(clonotype_key: str, variant_key_str: str, v: variant_ranking.Variant) -> list:
     """Returns one TSV row, in `TSV_COLUMNS` order.
 
     `append_variants_tsv` and `rewrite_global_rank` both call this to write
@@ -77,7 +74,6 @@ def _row(
         variant_key_str,
         v.rank,
         v.parent_rank,
-        objective,
         v.chain,
         v.addressed_target,
         v.changed_positions,
@@ -92,7 +88,7 @@ def _row(
 
 
 def append_variants_tsv(
-    path: str, clonotype_key: str, objective: str, variants: list[variant_ranking.Variant]
+    path: str, clonotype_key: str, variants: list[variant_ranking.Variant]
 ) -> None:
     """Appends one parent's ranked variants to path.
 
@@ -103,16 +99,13 @@ def append_variants_tsv(
     row_buffer = io.StringIO()
     writer = csv.writer(row_buffer, delimiter="\t", lineterminator="\n")
     for v in variants:
-        writer.writerow(_row(clonotype_key, variant_key(v.parent_rank), objective, v))
+        writer.writerow(_row(clonotype_key, variant_key(v.parent_rank), v))
     with Path(path).open("a") as out_file:
         out_file.write(row_buffer.getvalue())
 
 
-def read_variants_tsv(path: str) -> list[tuple[str, str, str, variant_ranking.Variant]]:
-    """`(clonotype_key, variant_key, objective, variant)` per row, in file
-    order. `objective` round-trips through the file but not through
-    `Variant` — it is the objective that produced the row, carried
-    alongside it rather than on it."""
+def read_variants_tsv(path: str) -> list[tuple[str, str, variant_ranking.Variant]]:
+    """`(clonotype_key, variant_key, variant)` per row, in file order."""
     variants = []
     with Path(path).open(newline="") as out_file:
         for row in csv.DictReader(out_file, delimiter="\t"):
@@ -120,7 +113,6 @@ def read_variants_tsv(path: str) -> list[tuple[str, str, str, variant_ranking.Va
                 (
                     row["clonotypeKey"],
                     row["variantKey"],
-                    row["objective"],
                     variant_ranking.Variant(
                         rank=int(row["rank"]),
                         parent_rank=int(row["parentRank"]),
@@ -165,9 +157,9 @@ def rewrite_global_rank(
     rows.sort(
         key=lambda row: (
             -variant_ranking.rerank_score(
-                row[3], rerank_structural_weight, rerank_humanness_weight
+                row[2], rerank_structural_weight, rerank_humanness_weight
             ),
-            row[3].changed_positions,
+            row[2].changed_positions,
             row[0],
             row[1],
         )
@@ -175,8 +167,6 @@ def rewrite_global_rank(
 
     row_buffer = io.StringIO()
     writer = csv.writer(row_buffer, delimiter="\t", lineterminator="\n")
-    for global_rank, (clonotype_key, variant_key_str, objective, v) in enumerate(rows, start=1):
-        writer.writerow(
-            _row(clonotype_key, variant_key_str, objective, replace(v, rank=global_rank))
-        )
+    for global_rank, (clonotype_key, variant_key_str, v) in enumerate(rows, start=1):
+        writer.writerow(_row(clonotype_key, variant_key_str, replace(v, rank=global_rank)))
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n" + row_buffer.getvalue())
