@@ -23,10 +23,14 @@ TAXONOMY = [
      "motif": None, "riskLevel": "High", "fixability": "hard_to_fix"},
 ]
 
+_LIABILITY = "liability"
+_HUMANNESS = "humanness"
+
 _OBJECTIVE = liability_objective.OBJECTIVE
+_CAPS = design_objective.EditCaps(liability=10, framework=20)
 
 
-def _residue(chain, offset, wild_type, imgt=None):
+def _residue(chain, offset, wild_type, imgt=None, region="CDR1"):
     return residue_index.Residue(
         chain=chain,
         offset=offset,
@@ -34,7 +38,7 @@ def _residue(chain, offset, wild_type, imgt=None):
         wild_type=wild_type,
         res_name=wild_type,
         b_factor=20.0,
-        region="CDR1",
+        region=region,
         chain_role="H",
     )
 
@@ -60,6 +64,7 @@ def _liability_target(site, definition_id="deamidation_ng", low_confidence=False
         region=site[0].region,
         is_low_confidence=low_confidence,
         confidence_angstroms=confidence_angstroms,
+        objective=_LIABILITY,
     )
 
 
@@ -70,6 +75,7 @@ def _humanization_target(site):
         region=site[0].region,
         is_low_confidence=False,
         confidence_angstroms=None,
+        objective=_HUMANNESS,
     )
 
 
@@ -114,13 +120,201 @@ def _humanness_objective(identity):
     )
 
 
+def _build(targets, tolerance_lookup, residues, objectives, caps=_CAPS, set_limit=10,
+           candidate_residues_per_position=3):
+    return variant_candidates.build_candidates(
+        targets, tolerance_lookup, residues, TAXONOMY, objectives, caps,
+        candidate_residues_per_position, structural_weight=1.0, objective_weight=1.0,
+        set_limit=set_limit,
+    )
+
+
+def _build_and_declines(targets, tolerance_lookup, residues, objectives, caps=_CAPS, set_limit=10,
+                         candidate_residues_per_position=3):
+    return variant_candidates.build_candidates_and_declines(
+        targets, tolerance_lookup, residues, TAXONOMY, objectives, caps,
+        candidate_residues_per_position, structural_weight=1.0, objective_weight=1.0,
+        set_limit=set_limit,
+    )
+
+
+class TestOneCandidateCarriesEveryAdmittedTarget:
+    """A variant carries every design target the caps admit, best-covering set first."""
+
+    def test_three_clearable_liability_targets_ship_as_one_candidate_covering_all_three(self):
+        targets = [
+            _liability_target(_ng_site(), definition_id="deamidation_ng"),
+            _liability_target(
+                [_residue("H", 20, "N", imgt="200"), _residue("H", 21, "G", imgt="201")],
+                definition_id="deamidation_ng",
+            ),
+            _liability_target(
+                [_residue("H", 30, "N", imgt="300"), _residue("H", 31, "G", imgt="301")],
+                definition_id="deamidation_ng",
+            ),
+        ]
+        lookup = {
+            **_ng_tolerance_lookup(),
+            ("H", "200"): _row(["D", "Q", "A"], wild_type="N"),
+            ("H", "201"): _row(["P", "S", "A"], wild_type="G"),
+            ("H", "300"): _row(["D", "Q", "A"], wild_type="N"),
+            ("H", "301"): _row(["P", "S", "A"], wild_type="G"),
+        }
+        residues = _ng_site()
+
+        [candidate] = _build(targets, lookup, residues, {_LIABILITY: _OBJECTIVE}, set_limit=1)
+
+        assert candidate.coverage == 3
+        assert len(candidate.edits) == 6
+
+    def test_more_liability_targets_than_the_cap_admits_carries_exactly_the_cap(self):
+        targets = [
+            _liability_target(
+                [_residue("H", i * 10, "N", imgt=str(i * 10)),
+                 _residue("H", i * 10 + 1, "G", imgt=str(i * 10 + 1))],
+                definition_id="deamidation_ng",
+            )
+            for i in range(6)  # 6 targets * 2 residues each = 12 positions
+        ]
+        lookup = {
+            (r.chain, r.imgt): _row(["D" if r.wild_type == "N" else "P", "Q", "A"],
+                                     wild_type=r.wild_type)
+            for target in targets
+            for r in target.site
+        }
+        caps = design_objective.EditCaps(liability=5, framework=20)
+
+        [candidate] = _build(targets, lookup, [], {_LIABILITY: _OBJECTIVE}, caps=caps, set_limit=1)
+
+        assert len(candidate.edits) == 5
+
+    def test_a_framework_target_set_wider_than_its_cap_is_truncated_liability_edits_untouched(
+        self,
+    ):
+        liability = _liability_target(_ng_site())
+        framework = _humanization_target(_wide_site())
+        lookup = {**_ng_tolerance_lookup(), **_wide_tolerance_lookup()}
+        caps = design_objective.EditCaps(liability=10, framework=2)
+
+        [candidate] = _build(
+            [liability, framework], lookup, _wide_site(),
+            {_LIABILITY: _OBJECTIVE, _HUMANNESS: _humanness_objective(80.0)}, caps=caps,
+            set_limit=1,
+        )
+
+        framework_edits = [e for e in candidate.edits if e.objective == _HUMANNESS]
+        liability_edits = [e for e in candidate.edits if e.objective == _LIABILITY]
+        assert len(framework_edits) == 2
+        assert len(liability_edits) == 2
+
+    def test_combined_framework_and_cdr_liability_ship_as_one_candidate_tagged_both(self):
+        liability = _liability_target(_ng_site())
+        framework = _humanization_target(_wide_site())
+        lookup = {**_ng_tolerance_lookup(), **_wide_tolerance_lookup()}
+
+        [candidate] = _build(
+            [liability, framework], lookup, _wide_site(),
+            {_LIABILITY: _OBJECTIVE, _HUMANNESS: _humanness_objective(80.0)}, set_limit=1,
+        )
+
+        assert candidate.coverage == 2
+        assert {e.objective for e in candidate.edits} == {_LIABILITY, _HUMANNESS}
+
+    def test_a_goal_check_blocking_one_framework_position_drops_only_that_position(self):
+        blocked_imgt = {"151"}
+
+        def score_candidate(mutated_site, taxonomy, tolerance_lookup):
+            del taxonomy, tolerance_lookup
+            blocking = tuple(
+                (r.chain, r.imgt) for r in mutated_site if r.imgt in blocked_imgt
+            )
+            if blocking:
+                return design_objective.GoalCheck(
+                    meets_goal=False, score=0.0, reason="adds a liability",
+                    blocking_positions=blocking,
+                )
+            return design_objective.GoalCheck(meets_goal=True, score=80.0)
+
+        objective = design_objective.Objective(
+            select_target_positions=lambda residues, taxonomy: [],
+            position_prior=None,
+            score_candidate=score_candidate,
+        )
+        framework = _humanization_target(_wide_site())
+
+        [candidate] = _build(
+            [framework], _wide_tolerance_lookup(), _wide_site(), {_HUMANNESS: objective},
+            set_limit=1,
+        )
+
+        assert tuple(e.imgt for e in candidate.edits) == ("150", "152")
+
+    def test_the_humanness_gate_refusing_the_whole_framework_contribution_ships_nothing(self):
+        objective = design_objective.Objective(
+            select_target_positions=lambda residues, taxonomy: [],
+            position_prior=None,
+            score_candidate=lambda mutated_site, taxonomy, tolerance_lookup: (
+                design_objective.GoalCheck(
+                    meets_goal=False, score=0.0, reason="humanness did not rise"
+                )
+            ),
+        )
+        framework = _humanization_target(_wide_site())
+
+        candidates, declines = _build_and_declines(
+            [framework], _wide_tolerance_lookup(), _wide_site(), {_HUMANNESS: objective},
+        )
+
+        assert candidates == []
+        [decline] = declines
+        assert decline.objective == _HUMANNESS
+
+    def test_two_candidates_off_the_same_target_set_differ_at_exactly_one_position(self):
+        framework = _humanization_target(_wide_site())
+
+        candidates = _build(
+            [framework], _wide_tolerance_lookup(), _wide_site(),
+            {_HUMANNESS: _humanness_objective(80.0)}, set_limit=2,
+        )
+
+        assert len(candidates) == 2
+        first, second = candidates
+        assert first.edits[0].to == "D"
+        assert first.edits[1].to == "E"
+        assert first.edits[2].to == "F"
+        differences = [
+            i for i in range(3) if first.edits[i].to != second.edits[i].to
+        ]
+        assert len(differences) == 1  # the least-lossy single swap off the seed
+
+    def test_set_limit_of_one_yields_exactly_one_candidate(self):
+        framework = _humanization_target(_wide_site())
+
+        candidates = _build(
+            [framework], _wide_tolerance_lookup(), _wide_site(),
+            {_HUMANNESS: _humanness_objective(80.0)}, set_limit=1,
+        )
+
+        assert len(candidates) == 1
+
+
+class TestAdmittedTargets:
+    def test_a_target_no_tolerance_row_covers_is_dropped_whole(self):
+        site = _ng_site()
+        lookup = {("H", "107"): _ng_tolerance_lookup()[("H", "107")]}  # "108" absent
+
+        admitted = variant_candidates.admitted_targets(
+            [_liability_target(site)], lookup, _CAPS
+        )
+
+        assert admitted == []
+
+
 class TestBuildCandidatesRescanGate:
     def test_a_combination_that_clears_the_target_and_creates_nothing_survives(self):
-        candidates_out = variant_candidates.build_candidates(
-            [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
-            objective=_OBJECTIVE,
-            max_edits_per_variant=5, candidate_residues_per_position=3,
-            structural_weight=1.0, objective_weight=1.0,
+        candidates_out = _build(
+            [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(),
+            {_LIABILITY: _OBJECTIVE},
         )
 
         survivors = {tuple(e.to for e in c.edits) for c in candidates_out}
@@ -129,11 +323,9 @@ class TestBuildCandidatesRescanGate:
     def test_a_combination_that_clears_the_target_but_creates_a_new_liability_is_discarded(self):
         # D then P spells `fragmentation_dp`'s own motif — clearing the
         # NG target this way must not survive the re-scan.
-        candidates_out = variant_candidates.build_candidates(
-            [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
-            objective=_OBJECTIVE,
-            max_edits_per_variant=5, candidate_residues_per_position=3,
-            structural_weight=1.0, objective_weight=1.0,
+        candidates_out = _build(
+            [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(),
+            {_LIABILITY: _OBJECTIVE}, set_limit=6,
         )
 
         survivors = {tuple(e.to for e in c.edits) for c in candidates_out}
@@ -142,25 +334,21 @@ class TestBuildCandidatesRescanGate:
     def test_every_surviving_candidate_targets_the_triaged_liability(self):
         [candidate] = [
             c
-            for c in variant_candidates.build_candidates(
-                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
-                objective=_OBJECTIVE,
-                max_edits_per_variant=5, candidate_residues_per_position=3,
-                structural_weight=1.0, objective_weight=1.0,
+            for c in _build(
+                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(),
+                {_LIABILITY: _OBJECTIVE}, set_limit=6,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
 
-        assert candidate.target_definition_id == "deamidation_ng"
+        assert candidate.target_definition_ids == ("deamidation_ng",)
 
     def test_tolerance_is_the_mean_perplexity_over_the_edited_positions(self):
         [candidate] = [
             c
-            for c in variant_candidates.build_candidates(
-                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
-                objective=_OBJECTIVE,
-                max_edits_per_variant=5, candidate_residues_per_position=3,
-                structural_weight=1.0, objective_weight=1.0,
+            for c in _build(
+                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(),
+                {_LIABILITY: _OBJECTIVE}, set_limit=6,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -177,63 +365,31 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
             ("H", "107"): _row(["D", "Q", "A"], wild_type="N", perplexity=4.0),
             ("H", "108"): _row(["P", "S", "A"], wild_type="G", perplexity=6.0),
         }
-        [candidate] = [
-            c
-            for c in variant_candidates.build_candidates(
-                [_liability_target(_ng_site())], lookup, _ng_site(), TAXONOMY,
-                objective=_humanness_objective(identity=80.0),
-                max_edits_per_variant=5, candidate_residues_per_position=3,
-                structural_weight=1.0, objective_weight=1.0,
-            )
-            if tuple(e.to for e in c.edits) == ("D", "S")
-        ]
+        [candidate] = _build(
+            [_liability_target(_ng_site())], lookup, _ng_site(),
+            {_LIABILITY: _humanness_objective(identity=80.0)}, set_limit=1,
+        )
 
         # Tolerance is the mean perplexity the table gives, never the goal check's OASis
         # identity. This module carries no humanness number at all: `variant_ranking`
         # measures it on the variants it keeps.
         assert candidate.tolerance == pytest.approx(5.0)
 
-    def test_a_liability_candidates_tolerance_is_unaffected_by_the_extraction(self):
-        [candidate] = [
-            c
-            for c in variant_candidates.build_candidates(
-                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
-                objective=_OBJECTIVE,
-                max_edits_per_variant=5, candidate_residues_per_position=3,
-                structural_weight=1.0, objective_weight=1.0,
-            )
-            if tuple(e.to for e in c.edits) == ("D", "S")
-        ]
+    def test_low_confidence_and_worst_confidence_carry_forward_from_the_target(self):
+        [candidate] = _build(
+            [_liability_target(_ng_site(), low_confidence=True, confidence_angstroms=7.5)],
+            _ng_tolerance_lookup(), _ng_site(), {_LIABILITY: _OBJECTIVE}, set_limit=1,
+        )
 
-        # Sharing the mean-perplexity computation with the humanization
-        # path changes no liability candidate's value.
-        assert candidate.tolerance == pytest.approx(3.5)
-
-    def test_region_low_confidence_and_worst_confidence_carry_forward_from_the_target(self):
-        [candidate] = [
-            c
-            for c in variant_candidates.build_candidates(
-                [_liability_target(_ng_site(), low_confidence=True, confidence_angstroms=7.5)],
-                _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
-                objective=_OBJECTIVE,
-                max_edits_per_variant=5, candidate_residues_per_position=3,
-                structural_weight=1.0, objective_weight=1.0,
-            )
-            if tuple(e.to for e in c.edits) == ("D", "S")
-        ]
-
-        assert candidate.region == "CDR1"
         assert candidate.low_confidence is True
         assert candidate.worst_confidence_angstroms == 7.5
 
     def test_changed_positions_is_the_fixed_csv_contract_spelling(self):
         [candidate] = [
             c
-            for c in variant_candidates.build_candidates(
-                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
-                objective=_OBJECTIVE,
-                max_edits_per_variant=5, candidate_residues_per_position=3,
-                structural_weight=1.0, objective_weight=1.0,
+            for c in _build(
+                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(),
+                {_LIABILITY: _OBJECTIVE}, set_limit=6,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -243,11 +399,9 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
     def test_addressed_target_names_the_taxonomy_entry_and_where_it_sits(self):
         [candidate] = [
             c
-            for c in variant_candidates.build_candidates(
-                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
-                objective=_OBJECTIVE,
-                max_edits_per_variant=5, candidate_residues_per_position=3,
-                structural_weight=1.0, objective_weight=1.0,
+            for c in _build(
+                [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(),
+                {_LIABILITY: _OBJECTIVE}, set_limit=6,
             )
             if tuple(e.to for e in c.edits) == ("D", "S")
         ]
@@ -256,54 +410,43 @@ class TestHumanizationCandidateKeepsToleranceAndHumannessDistinct:
 
 
 class TestBuildCandidatesHumanizationTarget:
-    """A target with no `definition_id`: one whole-set candidate, uncapped — R7, R8, R9."""
+    """A target with no `definition_id`: one full-set candidate seeded first."""
 
-    def test_one_candidate_carries_one_edit_per_selected_position_whatever_max_edits(self):
+    def test_the_best_candidate_carries_one_edit_per_selected_position(self):
         site = _wide_site()
-        candidates_out = variant_candidates.build_candidates(
-            [_humanization_target(site)], _wide_tolerance_lookup(), site, TAXONOMY,
-            objective=_humanness_objective(identity=80.0),
-            max_edits_per_variant=1, candidate_residues_per_position=3,
-            structural_weight=1.0, objective_weight=1.0,
+        [candidate] = _build(
+            [_humanization_target(site)], _wide_tolerance_lookup(), site,
+            {_HUMANNESS: _humanness_objective(identity=80.0)}, set_limit=1,
         )
 
-        assert len(candidates_out) == 1
-        assert len(candidates_out[0].edits) == 3
+        assert len(candidate.edits) == 3
 
-    def test_the_candidate_substitutes_each_position_to_its_own_top_scoring_residue(self):
+    def test_the_best_candidate_substitutes_each_position_to_its_own_top_scoring_residue(self):
         site = _wide_site()
-        [candidate] = variant_candidates.build_candidates(
-            [_humanization_target(site)], _wide_tolerance_lookup(), site, TAXONOMY,
-            objective=_humanness_objective(identity=80.0),
-            max_edits_per_variant=5, candidate_residues_per_position=3,
-            structural_weight=1.0, objective_weight=1.0,
+        [candidate] = _build(
+            [_humanization_target(site)], _wide_tolerance_lookup(), site,
+            {_HUMANNESS: _humanness_objective(identity=80.0)}, set_limit=1,
         )
 
-        # Never a product: exactly one combo, the top-ranked residue at
-        # each of the three positions.
         assert tuple(e.to for e in candidate.edits) == ("D", "E", "F")
 
     def test_the_addressed_target_names_the_fixed_label_and_the_chain(self):
         site = _wide_site()
-        [candidate] = variant_candidates.build_candidates(
-            [_humanization_target(site)], _wide_tolerance_lookup(), site, TAXONOMY,
-            objective=_humanness_objective(identity=80.0),
-            max_edits_per_variant=5, candidate_residues_per_position=3,
-            structural_weight=1.0, objective_weight=1.0,
+        [candidate] = _build(
+            [_humanization_target(site)], _wide_tolerance_lookup(), site,
+            {_HUMANNESS: _humanness_objective(identity=80.0)}, set_limit=1,
         )
 
-        assert candidate.target_definition_id is None
+        assert candidate.target_definition_ids == ()
         assert candidate.addressed_target == "Humanization @ H"
 
     def test_a_position_with_no_admissible_substitution_skips_the_whole_target(self):
         site = _wide_site()
         lookup = {("H", "150"): _wide_tolerance_lookup()[("H", "150")]}  # "151", "152" absent
 
-        candidates_out = variant_candidates.build_candidates(
-            [_humanization_target(site)], lookup, site, TAXONOMY,
-            objective=_humanness_objective(identity=80.0),
-            max_edits_per_variant=5, candidate_residues_per_position=3,
-            structural_weight=1.0, objective_weight=1.0,
+        candidates_out = _build(
+            [_humanization_target(site)], lookup, site,
+            {_HUMANNESS: _humanness_objective(identity=80.0)},
         )
 
         assert candidates_out == []
@@ -438,24 +581,11 @@ class TestCombinedScoresWeighting:
 
 
 class TestBuildCandidatesEditBudget:
-    def test_a_site_longer_than_the_edit_budget_produces_no_candidate(self):
-        candidates_out = variant_candidates.build_candidates(
-            [_liability_target(_ng_site())], _ng_tolerance_lookup(), _ng_site(), TAXONOMY,
-            objective=_OBJECTIVE,
-            max_edits_per_variant=1, candidate_residues_per_position=3,
-            structural_weight=1.0, objective_weight=1.0,
-        )
-
-        assert candidates_out == []
-
-    def test_a_position_missing_from_the_tolerance_table_produces_no_candidate(self):
+    def test_a_target_no_tolerance_row_fully_covers_produces_no_candidate(self):
         lookup = {("H", "107"): _ng_tolerance_lookup()[("H", "107")]}  # "108" absent
 
-        candidates_out = variant_candidates.build_candidates(
-            [_liability_target(_ng_site())], lookup, _ng_site(), TAXONOMY,
-            objective=_OBJECTIVE,
-            max_edits_per_variant=5, candidate_residues_per_position=3,
-            structural_weight=1.0, objective_weight=1.0,
+        candidates_out = _build(
+            [_liability_target(_ng_site())], lookup, _ng_site(), {_LIABILITY: _OBJECTIVE},
         )
 
         assert candidates_out == []
@@ -492,12 +622,10 @@ class TestABlockedPositionIsDroppedRatherThanSinkingTheSet:
     down with it. The humanization objective edits its full non-human framework set, and an
     all-or-nothing drop over a single spoiled position ships nothing at all."""
 
-    def _build(self, objective):
-        return variant_candidates.build_candidates_and_declines(
+    def _build(self, objective, set_limit=1):
+        return _build_and_declines(
             [_humanization_target(_wide_site())], _wide_tolerance_lookup(), _wide_site(),
-            TAXONOMY, objective=objective,
-            max_edits_per_variant=5, candidate_residues_per_position=3,
-            structural_weight=1.0, objective_weight=1.0,
+            {_HUMANNESS: objective}, set_limit=set_limit,
         )
 
     def test_the_other_positions_still_ship(self):
@@ -512,28 +640,35 @@ class TestABlockedPositionIsDroppedRatherThanSinkingTheSet:
 
         assert candidates == []
         [decline] = declines
-        assert (decline.chain, decline.reason) == ("H", "adds a liability")
+        assert (decline.chain, decline.reason, decline.objective) == (
+            "H", "adds a liability", _HUMANNESS,
+        )
 
     def test_a_check_that_blocks_nothing_still_drops_the_whole_target(self):
         # No blocking position means dropping a part changes nothing, so the retry stops
-        # rather than shrinking the site one residue at a time to no purpose.
-        seen = []
+        # rather than shrinking the site one residue at a time to no purpose. Exercised
+        # directly against the retry helper: the walk itself keeps trying nearby residue
+        # choices once the seed fails, which is its whole point.
+        target = _humanization_target(_wide_site())
+        positions = [(target, residue) for residue in target.site]
+        combo = ("D", "E", "F")  # each position's top-scoring residue
 
         def score_candidate(mutated_site, taxonomy, tolerance_lookup):
             del taxonomy, tolerance_lookup
-            seen.append(tuple(r.imgt for r in mutated_site))
             return design_objective.GoalCheck(
                 meets_goal=False, score=0.0, reason="humanness did not rise"
             )
 
-        candidates, declines = self._build(
-            design_objective.Objective(
-                select_target_positions=lambda residues, taxonomy: [],
-                position_prior=None,
-                score_candidate=score_candidate,
-            )
+        objective = design_objective.Objective(
+            select_target_positions=lambda residues, taxonomy: [],
+            position_prior=None,
+            score_candidate=score_candidate,
         )
 
-        assert candidates == []
-        assert seen == [("150", "151", "152")]
-        assert declines[0].reason == "humanness did not rise"
+        candidate, refused_by, checks = variant_candidates._scored_dropping_blockers(
+            positions, combo, TAXONOMY, _wide_tolerance_lookup(), {_HUMANNESS: objective}, {},
+        )
+
+        assert candidate is None
+        assert refused_by == _HUMANNESS
+        assert checks[_HUMANNESS].reason == "humanness did not rise"

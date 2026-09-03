@@ -135,6 +135,7 @@ def _as_design_target(triaged):
         region=triaged.site[0].region,
         is_low_confidence=triaged.low_confidence,
         confidence_angstroms=triaged.confidence_angstroms,
+        objective=run_mode.HUMANNESS,
     )
 
 
@@ -163,7 +164,7 @@ def _run_humanness_only(batch, monkeypatch, extra_args=None):
     monkeypatch.setattr(
         build_variants.run_mode,
         "targets_for",
-        lambda name, mode, triaged_list, objective, residues: [
+        lambda mode, triaged_list, objectives, residues: [
             _as_design_target(t) for t in triaged_list
         ],
     )

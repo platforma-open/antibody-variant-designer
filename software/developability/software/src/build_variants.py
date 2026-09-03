@@ -9,11 +9,12 @@ stay separate modules — only the exec is merged.
 
 import argparse
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from engine import (
     antibody_batch,
+    design_objective,
     humanness_gate,
     humanness_objective,
     humanness_store,
@@ -54,18 +55,23 @@ def _decline_detail(declines: list) -> str:
 
 @dataclass(frozen=True)
 class ParentDesignResult:
-    """One parent's whole design outcome: the rejection reason and its detail, each objective's
-    ranked variants, and the humanization objective's own target set and gate-cleared
-    candidates — reached by field so the two lists can never be read as each other's
-    contents."""
+    """One parent's whole design outcome: the rejection reason and its detail, the parent's
+    ranked variants — one edit set per candidate, carrying every admitted repair every
+    objective `mode` runs contributed — and the humanization objective's own target set and
+    gate-cleared candidates, reached by field so the two lists can never be read as each
+    other's contents."""
 
     rejection_reason: str
     rejection_detail: str
     rejected_type: str
-    per_objective: list[tuple[str, list[variant_ranking.Variant]]]
+    variants: list[variant_ranking.Variant]
     humanness_targets: list[residue_index.Residue] | None
     humanness_cleared: list[variant_candidates.Candidate]
     humanness_parent_scores: dict[str, float | None]
+    # The objectives `mode` actually ran, in `run_mode.objectives_for`'s own order — what
+    # `variant_store.append_variants_tsv`'s `objective` column reports, so a single-objective
+    # run still writes that objective's own name rather than the mode's.
+    objective_names: tuple[str, ...]
 
 
 def process_one(
@@ -75,7 +81,8 @@ def process_one(
     taxonomy: list[dict],
     mode: str,
     prior_path: str,
-    max_edits_per_variant: int,
+    max_liability_edits: int,
+    max_framework_edits: int,
     candidate_residues_per_position: int,
     structural_weight: float,
     objective_weight: float,
@@ -87,33 +94,25 @@ def process_one(
     max_new_liabilities: int = humanness_objective.DEFAULT_MAX_NEW_LIABILITIES,
     ignored_liability_ids: frozenset[str] = humanness_objective.DEFAULT_IGNORED_LIABILITY_IDS,
 ) -> ParentDesignResult:
-    """Gate then rank one antibody against every objective `mode` runs.
+    """Gate then rank one antibody against every objective `mode` runs, together, as one edit
+    set per candidate.
 
     The result's rejection reason is `""` on pass, `NO_TARGET_REASON` when the humanization
-    objective ran and selected nothing and nothing else emitted a variant either,
+    objective ran and selected nothing and nothing else shipped a variant either,
     `NO_TOLERANCE_REASON` when it selected a position no tolerance row covers,
-    `NO_HUMANIZATION_REASON` when its gate turned every candidate away, and
-    `NO_CANDIDATE_REASON` otherwise. `NO_HUMANIZATION_REASON` is raised even when the
-    liability objective shipped variants, and its detail names the check that turned the
-    parent away. Its ranked variants come as `(objective_name, variants)`
-    pairs, in run order, for the caller to append to the run's one `variants.tsv` under that
-    name.
+    `NO_HUMANIZATION_REASON` when the humanness objective's own check refused every edit set
+    the walk tried, and `NO_CANDIDATE_REASON` otherwise.
 
-    Its humanness fields are the humanization objective's own selected residues and
-    gate-cleared candidates — `None` targets when `mode` never runs that objective — for the
-    caller to reduce into this parent's one `humanness.tsv` row. Neither is influenced by the
-    liability objective's own targets or candidates. Its parent scores are measured in every
-    mode, so the score every variant carries has a baseline to be read against."""
+    Its humanness fields are the humanization objective's own selected residues and every
+    gate-cleared candidate — `None` targets when `mode` never runs that objective — for the
+    caller to reduce into this parent's one `humanness.tsv` row: a candidate that also carries
+    liability edits still counts a framework position as humanised. Its parent scores are
+    measured in every mode, so the score every variant carries has a baseline to be read
+    against."""
     tolerance_lookup = tolerance_store.read_tolerance_tsv(tolerance_path)
     residues = residue_store.read_residues(residues_path)
     triaged = liability_store.read_triaged(triaged_path)
 
-    per_objective: list[tuple[str, list[variant_ranking.Variant]]] = []
-    humanness_targets: list | None = None
-    humanness_unscored: list = []
-    humanness_cleared: list = []
-    humanness_declines: list = []
-    liability_declines: list = []
     # The parent's own baseline, one score per in-scope chain, through the same gate a
     # candidate is judged by. Measured in every mode, before any objective runs: a liability
     # variant is scored too, and a score it cannot be compared against says nothing.
@@ -121,51 +120,55 @@ def process_one(
         chain.chain_role: humanness_gate.identity(chain.sequence)
         for chain in residue_index.in_scope_chains(residues)
     }
-    emitted = 0  # the second objective numbers on from the first, never from v01
-    for name, build_objective in run_mode.objectives_for(
-        mode,
-        prior_path,
-        non_human_prior_margin,
-        fr_confidence_threshold,
-        max_new_liabilities,
-        ignored_liability_ids,
-    ):
-        objective = build_objective(residues)
-        targets = run_mode.targets_for(name, mode, triaged, objective, residues)
-        if name == run_mode.HUMANNESS:
-            # Every selected residue of every target, not one per target — `humanness_store`
-            # reduces over the framework position itself, and a humanization target can carry
-            # more than one.
-            humanness_targets = [residue for target in targets for residue in target.site]
-            humanness_unscored = [
-                residue
-                for target in targets
-                for residue in variant_candidates.unscored_positions(
-                    target.site, tolerance_lookup
-                )
-            ]
-        if not targets:
-            continue
+
+    objectives = {
+        name: build_objective(residues)
+        for name, build_objective in run_mode.objectives_for(
+            mode,
+            prior_path,
+            non_human_prior_margin,
+            fr_confidence_threshold,
+            max_new_liabilities,
+            ignored_liability_ids,
+        )
+    }
+    targets = run_mode.targets_for(mode, triaged, objectives, residues)
+
+    humanness_targets: list | None = None
+    humanness_unscored: list = []
+    if run_mode.HUMANNESS in objectives:
+        humanness_own = [t for t in targets if t.objective == run_mode.HUMANNESS]
+        # Every selected residue of every target, not one per target — `humanness_store`
+        # reduces over the framework position itself, and a humanization target can carry
+        # more than one.
+        humanness_targets = [residue for target in humanness_own for residue in target.site]
+        humanness_unscored = [
+            residue
+            for target in humanness_own
+            for residue in variant_candidates.unscored_positions(target.site, tolerance_lookup)
+        ]
+
+    cleared: list[variant_candidates.Candidate] = []
+    declines: list[variant_candidates.Decline] = []
+    if targets:
+        caps = design_objective.EditCaps(
+            liability=max_liability_edits, framework=max_framework_edits
+        )
         cleared, declines = variant_candidates.build_candidates_and_declines(
             targets,
             tolerance_lookup,
             residues,
             taxonomy,
-            objective,
-            max_edits_per_variant,
+            objectives,
+            caps,
             candidate_residues_per_position,
             structural_weight,
             objective_weight,
+            variants_per_parent,
         )
-        if name == run_mode.HUMANNESS:
-            humanness_cleared = cleared
-            humanness_declines = declines
-        else:
-            liability_declines = declines
-        if not cleared:
-            continue
 
-        ranked = variant_ranking.rank_variants(
+    variants = (
+        variant_ranking.rank_variants(
             cleared,
             residues,
             tolerance_lookup,
@@ -173,40 +176,43 @@ def process_one(
             low_tolerance_floor,
             epistasis_rescore_top_k,
         )
-        ranked = [replace(v, parent_rank=v.parent_rank + emitted) for v in ranked]
-        emitted += len(ranked)
-        per_objective.append((name, ranked))
+        if cleared
+        else []
+    )
 
     ran_humanness_and_selected_nothing = humanness_targets is not None and not humanness_targets
     rejection_reason = ""
     rejection_detail = ""
     rejected_type = rejection_store.PARENT_REJECTED
-    if ran_humanness_and_selected_nothing and emitted == 0:
+    if ran_humanness_and_selected_nothing and not variants:
         rejection_reason = NO_TARGET_REASON
-    elif humanness_unscored and emitted == 0:
+    elif humanness_unscored and not variants:
         rejection_reason = NO_TOLERANCE_REASON
-    elif humanness_declines:
+    elif declines and declines[0].objective == run_mode.HUMANNESS:
         # Raised whether or not the liability objective shipped anything, and always against
-        # the variant: a candidate was built and the gate turned it away. That the parent then
+        # the variant: an edit set was built and the gate turned it away. That the parent then
         # has nothing left to ship is a consequence, not what this row records.
         rejection_reason = NO_HUMANIZATION_REASON
-        rejection_detail = _decline_detail(humanness_declines)
+        rejection_detail = _decline_detail(declines)
         rejected_type = rejection_store.VARIANT_REJECTED
-    elif liability_declines:
+    elif declines:
         rejection_reason = NO_CANDIDATE_REASON
-        rejection_detail = _decline_detail(liability_declines)
+        rejection_detail = _decline_detail(declines)
         rejected_type = rejection_store.VARIANT_REJECTED
-    elif emitted == 0:
+    elif not variants:
         rejection_reason = NO_CANDIDATE_REASON
 
     return ParentDesignResult(
         rejection_reason=rejection_reason,
         rejection_detail=rejection_detail,
         rejected_type=rejected_type,
-        per_objective=per_objective,
+        variants=variants,
         humanness_targets=humanness_targets,
-        humanness_cleared=humanness_cleared,
+        # `[]` when the humanness objective never ran at all, distinct from a candidate list
+        # it ran and cleared nothing from — matching `humanness_targets`.
+        humanness_cleared=cleared if run_mode.HUMANNESS in objectives else [],
         humanness_parent_scores=humanness_parent_scores,
+        objective_names=tuple(objectives.keys()),
     )
 
 
@@ -237,11 +243,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Predicted error, in angstrom, above which a humanization target warns. The "
         "same threshold index_and_scan.py triages a framework liability against.",
     )
-    # The gate reads these two flags. Nothing else does.
+    # The workflow lib still sends this flag; kept accepted but unread until the two edit
+    # caps replace it on the command line. The caps take their module defaults here.
     parser.add_argument(
         "--max-edits-per-variant",
         type=int,
-        default=variant_candidates.DEFAULT_MAX_EDITS_PER_VARIANT,
+        default=variant_candidates.DEFAULT_MAX_LIABILITY_EDITS,
     )
     parser.add_argument(
         "--candidate-residues-per-position",
@@ -348,7 +355,8 @@ def main(argv: list[str] | None = None) -> int:
             taxonomy,
             args.run_mode,
             str(prior_path),
-            args.max_edits_per_variant,
+            variant_candidates.DEFAULT_MAX_LIABILITY_EDITS,
+            variant_candidates.DEFAULT_MAX_FRAMEWORK_EDITS,
             args.candidate_residues_per_position,
             args.structural_weight,
             args.objective_weight,
@@ -360,10 +368,14 @@ def main(argv: list[str] | None = None) -> int:
             args.max_new_liabilities,
             ignored_liability_ids,
         )
-        for objective_name, variants in result.per_objective:
-            variant_store.append_variants_tsv(
-                args.out_variants, entry.clonotype_key, objective_name, variants
-            )
+        # `result.objective_names` names which objectives ran; a variant's own edits name which
+        # objective contributed each one.
+        variant_store.append_variants_tsv(
+            args.out_variants,
+            entry.clonotype_key,
+            " + ".join(result.objective_names),
+            result.variants,
+        )
         # One row for every parent this step attempts, pass or rejection alike — the
         # invisibility `humanness_store.py` exists to remove is a parent with no
         # row anywhere, not a parent with an empty one.

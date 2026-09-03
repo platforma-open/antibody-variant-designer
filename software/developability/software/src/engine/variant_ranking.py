@@ -23,7 +23,7 @@ DEFAULT_RERANK_HUMANNESS_WEIGHT = 1.0
 STRUCTURAL_TOLERANCE_SCALE = (1.0, 20.0)
 HUMANNESS_SCALE = (0.0, 100.0)
 
-DEFAULT_VARIANTS_PER_PARENT = 10
+DEFAULT_VARIANTS_PER_PARENT = 100
 DEFAULT_LOW_TOLERANCE_FLOOR = 3.0
 DEFAULT_EPISTASIS_RESCORE_TOP_K = 20
 
@@ -71,12 +71,15 @@ def _low_tolerance_positions(tolerance_lookup: dict, floor: float) -> set:
 
 
 def binding_risk(candidate: variant_candidates.Candidate, low_tolerance_positions: set) -> str:
-    """Bands `candidate`'s binding risk from its region, its edited
+    """Bands `candidate`'s binding risk from its edits' own regions, its edited
     positions' tolerance, and its low-confidence flag.
 
-    This package has no paratope model and no binding-affinity predictor.
-    The band is a heuristic proxy for risk, not a computed score."""
-    is_cdr = candidate.region is not None and candidate.region.startswith("CDR")
+    A candidate carries no single region of its own — an edit set can span both — so this
+    reads every edit's own `region` rather than a candidate-level one: a set that touches any
+    CDR position is treated the way the shipped code treats a CDR candidate. This package has
+    no paratope model and no binding-affinity predictor. The band is a heuristic proxy for
+    risk, not a computed score."""
+    is_cdr = any(e.region is not None and e.region.startswith("CDR") for e in candidate.edits)
     is_low_tolerance = any((e.chain, e.imgt) in low_tolerance_positions for e in candidate.edits)
     if is_cdr:
         return "High" if (is_low_tolerance or candidate.low_confidence) else "Medium"

@@ -37,6 +37,11 @@ DEFAULT_IGNORED_LIABILITY_IDS: frozenset[str] = frozenset()
 
 HUMANIZATION_LABEL = "Humanization"
 
+# The tag `select_non_human_positions` stamps onto every `DesignTarget` it selects — the same
+# spelling `run_mode.HUMANNESS` uses. A literal, not an import of `run_mode`, because `run_mode`
+# imports this module to build the objective in the first place.
+HUMANNESS_OBJECTIVE_TAG = "humanness"
+
 # What `score_candidate` writes into `GoalCheck.reason`. `build_variants` renders these into
 # one rejection row's detail, so the rejection page names the check a parent failed rather than only
 # reporting that nothing survived.
@@ -161,6 +166,7 @@ def select_non_human_positions(
                     for residue in picked
                 ),
                 confidence_angstroms=confidence_angstroms,
+                objective=HUMANNESS_OBJECTIVE_TAG,
             )
         )
     return targets

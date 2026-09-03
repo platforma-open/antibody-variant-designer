@@ -1,4 +1,5 @@
-"""Resolves a run mode into the ordered objectives it runs, and each objective's design targets.
+"""Resolves a run mode into the ordered objectives it runs, and the one tagged target union
+those objectives design against.
 
 `liabilities` runs the liability objective alone, targeting every triaged liability, highest
 risk level first. `humanization` runs the humanness objective alone, targeting every non-human
@@ -35,15 +36,15 @@ def _risk_level_order(triaged: liability_triage.Triaged) -> int:
 
 def _as_design_target(triaged: liability_triage.Triaged) -> design_objective.DesignTarget:
     """Converts one triaged liability to the one design-target shape every objective's
-    selection returns. `triaged.site[0].region` is the same region a liability candidate is
-    already labelled with — `variant_candidates.py`'s own `Candidate.region` reads it the
-    same way."""
+    selection returns, tagged `LIABILITY`. `triaged.site[0].region` is the same region a
+    liability candidate is already labelled with."""
     return design_objective.DesignTarget(
         site=tuple(triaged.site),
         definition_id=triaged.definition_id,
         region=triaged.site[0].region,
         is_low_confidence=triaged.low_confidence,
         confidence_angstroms=triaged.confidence_angstroms,
+        objective=LIABILITY,
     )
 
 
@@ -91,25 +92,33 @@ def _in_cdr(triaged: liability_triage.Triaged) -> bool:
 
 
 def targets_for(
-    name: str,
     mode: str,
     triaged_list: list[liability_triage.Triaged],
-    objective: design_objective.Objective,
+    objectives: dict[str, design_objective.Objective],
     residues: list,
 ) -> list[design_objective.DesignTarget]:
-    """Returns which design targets `name` designs against, in `mode` — the one place that
-    decides which targets an objective receives.
+    """Returns the one tagged target union every objective `objectives` names designs
+    against, liability targets first — the one place that decides which targets an objective
+    receives.
 
-    The humanness objective's targets are its own selection over the parent's residues. The
-    liability objective targets every triaged liability, highest risk level first, except in
-    `humanization` mode, where it runs no design at all and gets none, and in
-    `liabilities + humanization` mode, where a target must also lie entirely inside a CDR — a
-    framework liability is still scanned, triaged and reported, but never designed against
-    while humanization runs beside it."""
-    if name == HUMANNESS:
-        return objective.select_target_positions(residues, [])
-    if mode == HUMANIZATION:
-        return []
-    if mode == LIABILITIES_AND_HUMANIZATION:
-        triaged_list = [t for t in triaged_list if _in_cdr(t)]
-    return [_as_design_target(t) for t in sorted(triaged_list, key=_risk_level_order)]
+    The liability objective's presence in `objectives` is what gates its targets, not `mode`
+    directly: it is absent in `humanization` mode, where the liability objective does not run
+    and gets none. In `liabilities + humanization` mode a liability target must also lie
+    entirely inside a CDR — a framework liability is still scanned, triaged and reported, but
+    never designed against while humanization runs beside it. The humanness objective's
+    targets are its own selection over the parent's residues, tagged `HUMANNESS`."""
+    liability_targets: list[design_objective.DesignTarget] = []
+    if LIABILITY in objectives:
+        triage_source = triaged_list
+        if mode == LIABILITIES_AND_HUMANIZATION:
+            triage_source = [t for t in triage_source if _in_cdr(t)]
+        liability_targets = [
+            _as_design_target(t) for t in sorted(triage_source, key=_risk_level_order)
+        ]
+
+    humanness_targets: list[design_objective.DesignTarget] = []
+    if HUMANNESS in objectives:
+        selected = objectives[HUMANNESS].select_target_positions(residues, [])
+        humanness_targets = list(selected)
+
+    return liability_targets + humanness_targets

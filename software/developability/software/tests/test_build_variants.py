@@ -69,7 +69,7 @@ def _triaged(site):
     )
 
 
-def _target_from_triaged(triaged):
+def _target_from_triaged(triaged, objective=run_mode.LIABILITY):
     """The same conversion `run_mode._as_design_target` does — used here to stand a stub
     `targets_for` in for the real one without reaching into that private helper."""
     return design_objective.DesignTarget(
@@ -78,6 +78,7 @@ def _target_from_triaged(triaged):
         region=triaged.site[0].region,
         is_low_confidence=triaged.low_confidence,
         confidence_angstroms=triaged.confidence_angstroms,
+        objective=objective,
     )
 
 
@@ -255,25 +256,34 @@ class TestGateAndRankInOnePass:
         assert "H:N107D, H:G108P" not in [v.changed_positions for _, _, _, v in written]
         assert "H:N107D, H:G108S" in [v.changed_positions for _, _, _, v in written]
 
-    def test_no_surviving_candidate_writes_the_named_rejection_and_no_rows(self, batch):
+    def test_no_surviving_candidate_writes_the_named_rejection_and_no_rows(
+        self, batch, monkeypatch
+    ):
+        # The two edit caps are module defaults in this row, not CLI flags — lowering the
+        # liability cap below the target's own site size (2 residues) is what forces the
+        # rejection `--max-edits-per-variant 1` used to.
+        # A liability cap of 0 admits nothing at all — the whole target is dropped, matching
+        # what `--max-edits-per-variant 1` used to force before caps became truncating.
+        monkeypatch.setattr(build_variants.variant_candidates, "DEFAULT_MAX_LIABILITY_EDITS", 0)
         _stage(batch, "clone-1")
 
-        rejections, written = _run(batch, ["--max-edits-per-variant", "1"])
+        rejections, written = _run(batch)
 
         assert rejections == [("clone-1", "no-candidate-cleared-the-gate", "", "parent")]
         assert written == []
 
-    def test_the_default_mode_still_names_the_same_rejection_reason(self, batch):
+    def test_the_default_mode_still_names_the_same_rejection_reason(self, batch, monkeypatch):
         # `--run-mode` omitted and `--run-mode liabilities` given explicitly
         # must resolve to the identical rejection reason — proving the mode
         # selector's own wiring left the default path's rejection-reason string
         # untouched.
+        # A liability cap of 0 admits nothing at all — the whole target is dropped, matching
+        # what `--max-edits-per-variant 1` used to force before caps became truncating.
+        monkeypatch.setattr(build_variants.variant_candidates, "DEFAULT_MAX_LIABILITY_EDITS", 0)
         _stage(batch, "clone-1")
 
-        default_rejections, default_written = _run(batch, ["--max-edits-per-variant", "1"])
-        explicit_rejections, explicit_written = _run(
-            batch, ["--max-edits-per-variant", "1", "--run-mode", "liabilities"]
-        )
+        default_rejections, default_written = _run(batch)
+        explicit_rejections, explicit_written = _run(batch, ["--run-mode", "liabilities"])
 
         assert (
             default_rejections
@@ -400,11 +410,15 @@ class TestRunModeSelectsObjectives:
         )
 
         assert mode_1_skips == mode_2_skips
-        assert [(ck, obj, v.structural_tolerance, v.changed_positions)
-                for ck, _, obj, v in mode_1_written] == [
-            (ck, obj, v.structural_tolerance, v.changed_positions)
-            for ck, _, obj, v in mode_2_written
+        # `objective` names the objectives that ran, which the two calls above deliberately
+        # differ on — every other column is what must stay identical.
+        assert [(ck, v.structural_tolerance, v.changed_positions)
+                for ck, _, _obj, v in mode_1_written] == [
+            (ck, v.structural_tolerance, v.changed_positions)
+            for ck, _, _obj, v in mode_2_written
         ]
+        assert {obj for _, _, obj, _ in mode_1_written} == {"liability"}
+        assert {obj for _, _, obj, _ in mode_2_written} == {"liability + humanness"}
 
     def test_an_unrecognised_mode_exits_non_zero_and_writes_no_rows(self, batch):
         _stage(batch, "clone-1")
@@ -449,7 +463,7 @@ class TestRunModeSelectsObjectives:
         monkeypatch.setattr(
             build_variants.run_mode,
             "targets_for",
-            lambda name, mode, triaged_list, objective, residues: [
+            lambda mode, triaged_list, objectives, residues: [
                 _target_from_triaged(t) for t in triaged_list
             ],
         )
@@ -460,14 +474,81 @@ class TestRunModeSelectsObjectives:
         result = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
-            5, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
+            10, 20, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
 
-        keys = [v.parent_rank for _, variants in result.per_objective for v in variants]
+        keys = [v.parent_rank for v in result.variants]
         assert len(keys) == len(set(keys))
-        assert [name for name, _ in result.per_objective] == [
-            run_mode.LIABILITY, run_mode.HUMANNESS,
-        ]
+        assert len(result.variants) > 0
+
+    def test_one_variant_carries_a_cdr_liability_edit_and_a_framework_edit_together(
+        self, batch, monkeypatch
+    ):
+        # The golden fixture holds no non-human framework position, so its captures
+        # cannot show the two edit kinds on one molecule. A framework position with a
+        # tolerance row of its own, targeted beside the CDR liability, can.
+        entry = batch.add("clone-1")
+        cdr_site = _ng_site()
+        framework = _residue("H", 20, "K", imgt="21", region="FR1")
+        liability_store.write_triaged(
+            str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_triaged(cdr_site)]
+        )
+        tolerance_store.write_tolerance_tsv(
+            str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+            [*_tolerance_rows(), {"imgt": "21", **_row(["R", "T", "V"], "K", 4.0)}],
+        )
+        residue_store.write_residues(
+            str(Path(batch.dir("residues"), f"{entry.stem}.json")), [*cdr_site, framework]
+        )
+
+        clearing = design_objective.Objective(
+            select_target_positions=lambda residues, taxonomy: [],
+            position_prior=None,
+            score_candidate=lambda *_args: design_objective.GoalCheck(
+                meets_goal=True, score=0.0
+            ),
+        )
+        monkeypatch.setattr(
+            build_variants.run_mode,
+            "objectives_for",
+            lambda *_args: [
+                (run_mode.LIABILITY, lambda _residues: clearing),
+                (run_mode.HUMANNESS, lambda _residues: clearing),
+            ],
+        )
+        monkeypatch.setattr(
+            build_variants.run_mode,
+            "targets_for",
+            lambda mode, triaged_list, objectives, residues: [
+                *[_target_from_triaged(t) for t in triaged_list],
+                design_objective.DesignTarget(
+                    site=(framework,),
+                    definition_id=None,
+                    region="FR1",
+                    is_low_confidence=False,
+                    confidence_angstroms=3.0,
+                    objective=run_mode.HUMANNESS,
+                ),
+            ],
+        )
+
+        result = build_variants.process_one(
+            str(Path(batch.dir("triaged"), f"{entry.stem}.json")),
+            str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+            str(Path(batch.dir("residues"), f"{entry.stem}.json")),
+            TAXONOMY,
+            "liabilities + humanization",
+            "unused-prior-path",
+            10, 20, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
+        )
+
+        assert result.variants
+        best = result.variants[0]
+        # Both edit kinds on the one molecule, and both targets named beside each other.
+        assert "H:K21" in best.changed_positions
+        assert "H:N107" in best.changed_positions
+        assert "Deamidation" in best.addressed_target
+        assert "Humanization" in best.addressed_target
 
     def test_every_objectives_variants_carry_a_measured_humanness_score(
         self, batch, monkeypatch
@@ -495,7 +576,7 @@ class TestRunModeSelectsObjectives:
         monkeypatch.setattr(
             build_variants.run_mode,
             "targets_for",
-            lambda name, mode, triaged_list, objective, residues: [
+            lambda mode, triaged_list, objectives, residues: [
                 _target_from_triaged(t) for t in triaged_list
             ],
         )
@@ -506,23 +587,18 @@ class TestRunModeSelectsObjectives:
         result = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
-            5, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
+            10, 20, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
 
-        by_name = dict(result.per_objective)
-        # Measured on the variant's own heavy chain, for both objectives — never the goal
-        # check's score, which is what the humanization gate compares and this column is not.
-        scored = [v for variants in by_name.values() for v in variants]
+        # Measured on the variant's own heavy chain — never the goal check's score, which is
+        # what the humanization gate compares and this column is not.
+        scored = result.variants
         assert len(scored) > 0
         assert all(v.humanness_score is not None for v in scored)
         assert all(v.humanness_score != pytest.approx(80.0) for v in scored)
         # And the tolerance the stub's own score never reaches: this fixture's
         # two-position mean, never the stub's score.
-        assert all(
-            v.structural_tolerance == pytest.approx(3.5)
-            for variants in by_name.values()
-            for v in variants
-        )
+        assert all(v.structural_tolerance == pytest.approx(3.5) for v in scored)
 
     def test_the_design_result_names_its_two_lists(self, batch, monkeypatch):
         entry = _stage(batch, "clone-1", with_prior=True)
@@ -534,7 +610,7 @@ class TestRunModeSelectsObjectives:
             ),
         )
         fixed_site = _ng_site()[:1]
-        fixed_target = _target_from_triaged(_triaged(fixed_site))
+        fixed_target = _target_from_triaged(_triaged(fixed_site), objective=run_mode.HUMANNESS)
         monkeypatch.setattr(
             build_variants.run_mode,
             "objectives_for",
@@ -546,9 +622,8 @@ class TestRunModeSelectsObjectives:
         monkeypatch.setattr(
             build_variants.run_mode,
             "targets_for",
-            lambda name, mode, triaged_list, objective, residues: (
-                [fixed_target] if name == run_mode.HUMANNESS
-                else [_target_from_triaged(t) for t in triaged_list]
+            lambda mode, triaged_list, objectives, residues: (
+                [_target_from_triaged(t) for t in triaged_list] + [fixed_target]
             ),
         )
 
@@ -558,7 +633,7 @@ class TestRunModeSelectsObjectives:
         result = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
-            5, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
+            10, 20, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
 
         # `humanness_targets` is the objective's own selected framework
@@ -576,7 +651,7 @@ class TestRunModeSelectsObjectives:
         result = build_variants.process_one(
             triaged_path, tolerance_path, residues_path, TAXONOMY,
             "liabilities", "unused-prior-path",
-            5, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
+            10, 20, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
 
         # Mode 1 never runs the humanization objective at all — its targets
@@ -713,7 +788,7 @@ class TestModeTwoLiabilityTargetsCutToCdrs:
         _, written = _run(batch, ["--run-mode", "liabilities + humanization"])
 
         assert len(written) > 0
-        assert all(obj == "liability" for _, _, obj, _ in written)
+        assert all(obj == "liability + humanness" for _, _, obj, _ in written)
         assert all("H:N1D" not in v.changed_positions for _, _, _, v in written)
 
     def test_liabilities_mode_over_the_same_parent_still_designs_the_framework_liability(

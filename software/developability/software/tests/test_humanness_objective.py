@@ -984,20 +984,21 @@ def _framework_residue(chain, offset, imgt, wild_type):
 
 def _framework_candidate(edits):
     return variant_candidates.Candidate(
-        target_definition_id="framework_liability",
+        target_definition_ids=(),
         edits=tuple(edits),
         tolerance=3.0,
-        region="FR1",
         low_confidence=False,
         worst_confidence_angstroms=3.0,
-        addressed_target="Framework liability @ FR1 H:107",
+        addressed_target="Humanization @ H",
         changed_positions="H:N107D",
+        coverage=1,
     )
 
 
 def _framework_edit(chain, imgt, wild_type, to="D"):
     return variant_candidates.Edit(
-        chain=chain, offset=0, imgt=imgt, wild_type=wild_type, to=to
+        chain=chain, offset=0, imgt=imgt, wild_type=wild_type, to=to,
+        region="FR1", objective="humanness",
     )
 
 

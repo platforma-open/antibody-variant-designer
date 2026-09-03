@@ -21,19 +21,20 @@ def _candidate(
 ):
     edits = tuple(
         variant_candidates.Edit(
-            chain="H", offset=i, imgt=str(imgt_start + i), wild_type="N", to="D"
+            chain="H", offset=i, imgt=str(imgt_start + i), wild_type="N", to="D",
+            region=region, objective="liability",
         )
         for i in range(edits_count)
     )
     return variant_candidates.Candidate(
-        target_definition_id="deamidation_ng",
+        target_definition_ids=("deamidation_ng",),
         edits=edits,
         tolerance=tolerance,
-        region=region,
         low_confidence=low_confidence,
         worst_confidence_angstroms=worst_confidence_angstroms,
         addressed_target="Deamidation (N[GS]) @ FR1 H:107",
         changed_positions=changed_positions,
+        coverage=1,
     )
 
 
@@ -124,6 +125,32 @@ class TestBindingRisk:
 
         assert variant_ranking.binding_risk(candidate, low_tolerance_positions=set()) == "Low"
 
+    def test_an_edit_set_spanning_cdr_and_framework_bands_as_the_cdr_candidate_would(self):
+        # No candidate-level region exists any more — the band is read off each edit's own
+        # `region`, and a set that touches any CDR position reads High or Medium exactly as a
+        # CDR-only candidate would, whatever its other edits' regions are.
+        candidate = variant_candidates.Candidate(
+            target_definition_ids=("deamidation_ng",),
+            edits=(
+                variant_candidates.Edit(
+                    chain="H", offset=0, imgt="1", wild_type="N", to="D",
+                    region="CDR1", objective="liability",
+                ),
+                variant_candidates.Edit(
+                    chain="H", offset=1, imgt="20", wild_type="N", to="D",
+                    region="FR2", objective="humanness",
+                ),
+            ),
+            tolerance=5.0,
+            low_confidence=False,
+            worst_confidence_angstroms=3.0,
+            addressed_target="Deamidation (N[GS]) @ CDR1 H:1, Humanization @ H",
+            changed_positions="H:N1D, H:N20D",
+            coverage=2,
+        )
+
+        assert variant_ranking.binding_risk(candidate, low_tolerance_positions=set()) == "Medium"
+
 
 class TestBuildVariantSequence:
     def test_edited_position_is_replaced_unedited_ones_keep_their_wild_type(self):
@@ -132,7 +159,12 @@ class TestBuildVariantSequence:
             _residue("H", 1, "G", role="H"),
             _residue("L", 0, "E", role="L"),
         ]
-        edits = (variant_candidates.Edit(chain="H", offset=0, imgt="1", wild_type="N", to="D"),)
+        edits = (
+            variant_candidates.Edit(
+                chain="H", offset=0, imgt="1", wild_type="N", to="D",
+                region="FR1", objective="liability",
+            ),
+        )
 
         assert variant_ranking.build_variant_sequence(residues, edits) == "DGE"
 
@@ -321,7 +353,8 @@ class TestEveryVariantCarriesItsHeavyChainsHumanness:
             _residue("L", 0, "N", imgt="1", role="L", region="FR1"),
         ]
         light_edit = variant_candidates.Edit(
-            chain="L", offset=0, imgt="1", wild_type="N", to="D"
+            chain="L", offset=0, imgt="1", wild_type="N", to="D",
+            region="FR1", objective="liability",
         )
 
         [variant] = variant_ranking.rank_variants(

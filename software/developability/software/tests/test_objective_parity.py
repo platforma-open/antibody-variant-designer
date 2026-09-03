@@ -23,6 +23,7 @@ from engine import (
     rejection_store,
     residue_index,
     residue_store,
+    run_mode,
     tolerance_store,
     variant_store,
 )
@@ -182,7 +183,7 @@ class TestObjectiveSeamParity:
             ("clone-1", "", "", "parent"), ("clone-2", "", "", "parent"),
         ]
 
-    def test_every_variant_row_names_the_liability_objective(self, batch):
+    def test_every_variant_row_names_the_objective_that_ran(self, batch):
         definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
         out_variants, _, _ = _run_variants(batch, definitions, residues_dir, triaged_dir)
 
@@ -240,6 +241,9 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
         _check_or_capture(out_variants_rejected, "variants-rejected.tsv")
 
     def test_liabilities_and_humanization_mode_reproduces_every_golden_byte_for_byte(self, batch):
+        # `variants.tsv`'s own `objective` column names the objectives that ran, so this
+        # mode's capture holds both objectives' names while every other byte matches the two
+        # modes above: its own golden file, not the shared `variants.tsv`.
         definitions, residues_dir, triaged_dir, out_liabilities, out_scan_rejected = _run_scan(
             batch
         )
@@ -252,7 +256,7 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
 
         _check_or_capture(out_liabilities, "liabilities.tsv")
         _check_or_capture(out_scan_rejected, "scan-rejected.tsv")
-        _check_or_capture(out_variants, "variants.tsv")
+        _check_or_capture(out_variants, "variants-liabilities-and-humanization.tsv")
         _check_or_capture(out_variants_rejected, "variants-rejected.tsv")
         _check_or_capture(out_humanness, "humanness.tsv")
 
@@ -325,19 +329,25 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
         assert pdb_dir_stem in {ck for ck, _, _, _ in rejected}
         assert pdb_dir_stem in {row["clonotypeKey"] for row in _rows_of(out_humanness)}
 
-    def test_all_three_runs_variants_all_name_the_liability_objective(self, batch):
+    def test_every_run_names_the_objectives_it_ran(self, batch):
         definitions, residues_dir, triaged_dir, _, _ = _run_scan(batch)
         for stem in ("clone-1", "clone-2"):
             self._stage_prior(batch.dir("tolerance"), stem)
 
-        for extra_args in (None, ["--run-mode", "liabilities"],
-                           ["--run-mode", "liabilities + humanization"]):
+        for extra_args, expected in (
+            (None, run_mode.LIABILITY),
+            (["--run-mode", "liabilities"], run_mode.LIABILITY),
+            (
+                ["--run-mode", "liabilities + humanization"],
+                f"{run_mode.LIABILITY} + {run_mode.HUMANNESS}",
+            ),
+        ):
             out_variants, _, _ = _run_variants(
                 batch, definitions, residues_dir, triaged_dir, extra_args=extra_args
             )
             rows = _rows_of(out_variants)
             assert len(rows) > 0
-            assert {row["objective"] for row in rows} == {"liability"}
+            assert {row["objective"] for row in rows} == {expected}
 
     def test_an_unrecognised_mode_exits_non_zero_and_leaves_a_header_only_variants_tsv(
         self, batch
@@ -450,22 +460,24 @@ class TestHumannessScoreAtTheRealEntrypoint:
             "chain\timgt\n"
         )
         # Stand in for `run_mode.targets_for` exactly as the humanness
-        # objective's own e2e suite does, so both objectives target the one
-        # triaged site rather than the humanness objective's own selection
-        # over this fixture's near-empty prior.
+        # objective's own e2e suite does, so the triaged framework site
+        # reaches the humanization objective deterministically rather than
+        # through the objective's own selection over this fixture's
+        # near-empty prior.
         monkeypatch.setattr(
             build_variants.run_mode,
             "targets_for",
-            lambda name, mode, triaged_list, objective, residues: [
+            lambda mode, triaged_list, objectives, residues: [
                 design_objective.DesignTarget(
                     site=tuple(t.site),
-                    definition_id=t.definition_id,
+                    definition_id=None,
                     region=t.site[0].region,
                     is_low_confidence=t.low_confidence,
                     confidence_angstroms=t.confidence_angstroms,
+                    objective=build_variants.run_mode.HUMANNESS,
                 )
                 for t in triaged_list
-            ],
+            ] if build_variants.run_mode.HUMANNESS in objectives else [],
         )
 
         out_variants = batch.path("variants.tsv")
@@ -491,35 +503,13 @@ class TestHumannessScoreAtTheRealEntrypoint:
     ):
         out_variants, _, _ = self._run_liability_and_humanization(batch, monkeypatch)
 
-        rows = [row for row in _rows_of(out_variants) if row["objective"] == "humanness"]
-        assert len(rows) == 1
-        humanness = float(rows[0]["humannessScore"])
-        tolerance = float(rows[0]["structuralTolerance"])
+        [row] = _rows_of(out_variants)
+        assert row["objective"] == f"{run_mode.LIABILITY} + {run_mode.HUMANNESS}"
+        humanness = float(row["humannessScore"])
+        tolerance = float(row["structuralTolerance"])
         assert humanness >= 70.0
         assert tolerance <= 10.0
         assert humanness != tolerance
-
-    def test_the_liability_objectives_own_row_is_scored_too(self, batch, monkeypatch):
-        # A liability fix moves the same heavy chain the humanization objective measures, so
-        # the cell carries that chain's own identity rather than staying empty.
-        out_variants, _, _ = self._run_liability_and_humanization(batch, monkeypatch)
-
-        rows = [row for row in _rows_of(out_variants) if row["objective"] == "liability"]
-        assert len(rows) == 1
-        assert float(rows[0]["humannessScore"]) > 0.0
-
-    def test_both_objectives_rows_carry_the_same_measured_quantity(self, batch, monkeypatch):
-        # Both rows edit the same heavy chain, so both cells hold that chain's own identity
-        # on one scale. The blend that turns the two cells into a rank is pinned as a unit in
-        # `test_variant_store.py`; this fixture's two rows share a tolerance and cannot
-        # separate it end to end.
-        out_variants, _, _ = self._run_liability_and_humanization(batch, monkeypatch)
-
-        by_objective = {row["objective"]: row for row in _rows_of(out_variants)}
-        assert set(by_objective) == {"liability", "humanness"}
-        assert all(
-            0.0 <= float(row["humannessScore"]) <= 100.0 for row in by_objective.values()
-        )
 
     def test_the_considered_position_reads_present_and_names_its_own_verdict(
         self, batch, monkeypatch

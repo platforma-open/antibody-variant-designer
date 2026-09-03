@@ -27,20 +27,31 @@ class GoalCheck:
 
 
 @dataclass(frozen=True)
+class EditCaps:
+    """The two per-objective bounds a variant's edit set may not exceed. Neither cap
+    bounds the other, and no single cap bounds the whole edit set."""
+
+    liability: int
+    framework: int
+
+
+@dataclass(frozen=True)
 class DesignTarget:
     """One objective's unit of work for one antibody: the residues a single candidate
     substitutes together.
 
     `definition_id` names the scanned liability the target addresses, and is `None` when the
-    target addresses none — a humanization target has no taxonomy entry to point at. Every
-    other field rides forward onto the candidate built here, and the generator computes none
-    of them."""
+    target addresses none — a humanization target has no taxonomy entry to point at. `objective`
+    names which objective selected the target, and no consumer may re-derive it from
+    `definition_id` being `None` or from a residue's region. Every other field rides
+    forward onto the candidate built here, and the generator computes none of them."""
 
     site: tuple
     definition_id: str | None
     region: str | None
     is_low_confidence: bool
     confidence_angstroms: float | None
+    objective: str
 
 
 @dataclass(frozen=True)
