@@ -314,7 +314,7 @@ class TestMainWiresTheJoinAndWritesTheTsv:
 
         rejections, out_dir = _run(batch, _weights(batch))
 
-        assert rejections == [("clone-1", "", "", "parent")]
+        assert rejections == [("clone-1", "", "", "parent", "liability")]
         assert captured["chains"].heavy == "H"
         assert captured["chains"].light is None
         assert captured["chains"].nanobody is True
@@ -351,9 +351,9 @@ class TestBatchCli:
 
         assert len(loads) == 1
         assert rejections == [
-            ("clone-1", "", "", "parent"),
-            ("clone-2", "", "", "parent"),
-            ("clone-3", "", "", "parent"),
+            ("clone-1", "", "", "parent", "liability"),
+            ("clone-2", "", "", "parent", "liability"),
+            ("clone-3", "", "", "parent", "liability"),
         ]
 
     def test_a_middle_antibody_raising_is_named_and_the_others_still_finish(
@@ -379,9 +379,9 @@ class TestBatchCli:
         rejections, out_dir = _run(batch, _weights(batch))
 
         assert rejections == [
-            ("a-first", "", "", "parent"),
-            ("b-middle", "backend-failed", "torch exploded", "parent"),
-            ("c-last", "", "", "parent"),
+            ("a-first", "", "", "parent", "liability"),
+            ("b-middle", "backend-failed", "torch exploded", "parent", "liability"),
+            ("c-last", "", "", "parent", "liability"),
         ]
         assert Path(out_dir, "a-first.tsv").is_file()
         assert not Path(out_dir, "b-middle.tsv").exists()
@@ -407,7 +407,7 @@ class TestBatchCli:
 
         rejections, _ = _run(batch, _weights(batch))
 
-        assert rejections == [("indexed", "", "", "parent")]
+        assert rejections == [("indexed", "", "", "parent", "liability")]
         assert len(seen) == 1
 
     def test_an_antibody_with_nothing_actionable_is_gated_out_of_the_model_call(
@@ -430,7 +430,7 @@ class TestBatchCli:
 
         rejections, out_dir = _run(batch, _weights(batch))
 
-        assert rejections == [("actionable", "", "", "parent")]
+        assert rejections == [("actionable", "", "", "parent", "liability")]
         assert [Path(p).stem for p in seen] == ["actionable"]
         assert not Path(out_dir, "nothing-to-fix.tsv").exists()
 

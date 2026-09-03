@@ -179,7 +179,8 @@ class TestObjectiveSeamParity:
         _, _, _, _, out_scan_rejected = _run_scan(batch)
 
         assert rejection_store.read_rejections(out_scan_rejected) == [
-            ("clone-1", "", "", "parent"), ("clone-2", "", "", "parent"),
+            ("clone-1", "", "", "parent", "liability"),
+            ("clone-2", "", "", "parent", "liability"),
         ]
 
     def test_the_parents_columns_hold_the_verdict_and_the_summary_the_right_way_round(
@@ -233,8 +234,9 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
 
     def test_liabilities_and_humanization_mode_reproduces_every_golden_byte_for_byte(self, batch):
         # This mode also runs humanization, so its capture holds a measured `humannessScore`
-        # where the two modes above hold an empty cell: its own golden file, not the shared
-        # `variants.tsv`.
+        # where the two modes above hold an empty cell, and a rejected.tsv row naming the
+        # humanization objective the other two modes never ran: two golden files of its own,
+        # not the shared `variants.tsv` and `variants-rejected.tsv`.
         definitions, residues_dir, triaged_dir, out_liabilities, out_scan_rejected = _run_scan(
             batch
         )
@@ -248,7 +250,9 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
         _check_or_capture(out_liabilities, "liabilities.tsv")
         _check_or_capture(out_scan_rejected, "scan-rejected.tsv")
         _check_or_capture(out_variants, "variants-liabilities-and-humanization.tsv")
-        _check_or_capture(out_variants_rejected, "variants-rejected.tsv")
+        _check_or_capture(
+            out_variants_rejected, "variants-rejected-liabilities-and-humanization.tsv"
+        )
         _check_or_capture(out_humanness, "humanness.tsv")
 
     def test_a_parent_with_no_selected_target_is_still_visible_with_none_and_none(self, batch):
@@ -317,7 +321,7 @@ class TestRunModeReproducesTheGoldenCaptureByteForByte:
 
         assert pdb_dir_stem not in {row["clonotypeKey"] for row in _rows_of(out_variants)}
         rejected = rejection_store.read_rejections(out_variants_rejected)
-        assert pdb_dir_stem in {ck for ck, _, _, _ in rejected}
+        assert pdb_dir_stem in {ck for ck, _, _, _, _ in rejected}
         assert pdb_dir_stem in {row["clonotypeKey"] for row in _rows_of(out_humanness)}
 
     def test_an_unrecognised_mode_exits_non_zero_and_leaves_a_header_only_variants_tsv(

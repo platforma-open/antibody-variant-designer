@@ -32,12 +32,23 @@ const rows = computed(() => {
   );
 });
 
+// The objective a row is about, in the same wording `BlockSettings.vue`'s run-mode picker uses.
+function objectiveLabel(objective: string): string {
+  return objective === "humanness" ? "Humanization" : "Liability";
+}
+
 const columnDefs: ColDef<RejectedClonotype>[] = [
   {
     colId: "clonotype",
     headerName: "Clonotype",
     valueGetter: (p) => (p.data ? resolveLabel(p.data.clonotypeKey) : ""),
     width: 160,
+  },
+  {
+    colId: "objective",
+    headerName: "Objective",
+    valueGetter: (p) => (p.data ? objectiveLabel(p.data.objective) : ""),
+    width: 140,
   },
   {
     colId: "rejected",
@@ -60,8 +71,8 @@ const columnDefs: ColDef<RejectedClonotype>[] = [
 ];
 
 const gridOptions: GridOptions<RejectedClonotype> = {
-  getRowId: (row) => `${row.data.clonotypeKey}:${row.data.rejectedType}`,
-  // No filter button and no column menu: the page carries four fixed columns,
+  getRowId: (row) => `${row.data.clonotypeKey}:${row.data.objective}:${row.data.rejectedType}`,
+  // No filter button and no column menu: the page carries five fixed columns,
   // and every entry the menu offers either does nothing here or hides one of them.
   defaultColDef: {
     sortable: true,
@@ -81,14 +92,15 @@ const noRowsText = computed(() =>
 </script>
 
 <template>
-  <PlBlockPage title="Antibody Variant Designer — Rejected causes">
+  <PlBlockPage title="Antibody Variant Designer — Objective findings">
     <template #append>
       <BlockSettings />
     </template>
 
     <PlAlert v-if="rows && rows.length > 0" type="info" icon>
       A <strong>Parent</strong> row means the run designed nothing for that clonotype. A
-      <strong>Variant</strong> row means a candidate was built and a gate turned it away.
+      <strong>Variant</strong> row means a candidate was built and a gate turned it away, or the
+      clonotype shipped a variant carrying no edit from this row's objective.
     </PlAlert>
     <!-- The grid mounts in every state, so its own overlay is what carries the
          two empty readings — the same wiring the sibling blocks use. -->

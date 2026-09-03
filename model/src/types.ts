@@ -114,9 +114,12 @@ export type RejectionReason =
   | "no-tolerance-at-humanization-position"
   | "no-humanization-variant-cleared-the-gate";
 
-/** What a rejection row lost. `parent` means the run designed nothing for
- *  that clonotype — no structure, no target, no tolerance. `variant` means a
- *  candidate was built and an objective's goal check turned it away. */
+/** What was lost, over the two branches that write it. `parent` means the run
+ *  designed nothing for that clonotype — no candidate was ever built.
+ *  `variant` means either a candidate was built and a gate turned it away, or
+ *  the parent shipped a variant carrying no edit from this row's objective.
+ *  A refused candidate therefore writes `variant` even where the parent
+ *  shipped nothing. */
 export type RejectedType = "parent" | "variant";
 
 /** One rejected parent or variant, for the Rejection Causes page.
@@ -128,4 +131,7 @@ export type RejectedClonotype = {
   reason: RejectionReason;
   detail: string;
   rejectedType: RejectedType;
+  /** The objective whose check named `reason` — the liability objective's name on a row
+   *  written by read-tolerance, which never carried an objective column. */
+  objective: string;
 };

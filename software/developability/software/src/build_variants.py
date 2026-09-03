@@ -32,12 +32,19 @@ from engine import (
     variant_store,
 )
 
+# The objective ran, selected a target, but no edit set cleared its own gate.
 NO_CANDIDATE_REASON = "no-candidate-cleared-the-gate"
 
+# The liability objective had no triaged target to repair.
+NO_LIABILITY_TARGET_REASON = "no-liability-survived-triage"
+
+# The humanization objective ran and selected no nonhuman framework position.
 NO_TARGET_REASON = "no-nonhuman-framework-position"
 
+# The humanization objective selected a position no tolerance row covers.
 NO_TOLERANCE_REASON = "no-tolerance-at-humanization-position"
 
+# The humanness objective's own check refused every edit set the walk tried.
 NO_HUMANIZATION_REASON = "no-humanization-variant-cleared-the-gate"
 
 PRIOR_SUFFIX = ".prior.tsv"
@@ -61,9 +68,10 @@ class ParentDesignResult:
     gate-cleared candidates, reached by field so the two lists can never be read as each
     other's contents."""
 
-    rejection_reason: str
-    rejection_detail: str
-    rejected_type: str
+    # One row per objective that ran and put no edit on any variant this parent shipped —
+    # `(reason, detail, rejected_type, objective)`, whether or not the parent shipped something
+    # else. Empty when every objective that ran contributed.
+    contribution_rows: list[tuple[str, str, str, str]]
     variants: list[variant_ranking.Variant]
     humanness_targets: list[residue_index.Residue] | None
     humanness_cleared: list[variant_candidates.Candidate]
@@ -93,11 +101,8 @@ def process_one(
     """Gate then rank one antibody against every objective `mode` runs, together, as one edit
     set per candidate.
 
-    The result's rejection reason is `""` on pass, `NO_TARGET_REASON` when the humanization
-    objective ran and selected nothing and nothing else shipped a variant either,
-    `NO_TOLERANCE_REASON` when it selected a position no tolerance row covers,
-    `NO_HUMANIZATION_REASON` when the humanness objective's own check refused every edit set
-    the walk tried, and `NO_CANDIDATE_REASON` otherwise.
+    `contribution_rows` lists each objective that ran and contributed no edit. An objective
+    absent from `mode` raises no row at all.
 
     Its humanness fields are the humanization objective's own selected residues and every
     gate-cleared candidate — `None` targets when `mode` never runs that objective — for the
@@ -176,32 +181,39 @@ def process_one(
         else []
     )
 
-    ran_humanness_and_selected_nothing = humanness_targets is not None and not humanness_targets
-    rejection_reason = ""
-    rejection_detail = ""
-    rejected_type = rejection_store.PARENT_REJECTED
-    if ran_humanness_and_selected_nothing and not variants:
-        rejection_reason = NO_TARGET_REASON
-    elif humanness_unscored and not variants:
-        rejection_reason = NO_TOLERANCE_REASON
-    elif declines and declines[0].objective == run_mode.HUMANNESS:
-        # Raised whether or not the liability objective shipped anything, and always against
-        # the variant: an edit set was built and the gate turned it away. That the parent then
-        # has nothing left to ship is a consequence, not what this row records.
-        rejection_reason = NO_HUMANIZATION_REASON
-        rejection_detail = _decline_detail(declines)
-        rejected_type = rejection_store.VARIANT_REJECTED
-    elif declines:
-        rejection_reason = NO_CANDIDATE_REASON
-        rejection_detail = _decline_detail(declines)
-        rejected_type = rejection_store.VARIANT_REJECTED
-    elif not variants:
-        rejection_reason = NO_CANDIDATE_REASON
+    # `declines` names at most one objective — the one whose check refused every edit set the
+    # walk tried, when nothing cleared at all. An objective it does not name still contributed
+    # nothing whenever nothing cleared, but carries the generic reason instead of its own.
+    decline_by_objective = {decline.objective: decline for decline in declines}
+    target_objectives = {target.objective for target in targets}
+    shipped_objectives = {
+        edit.objective for candidate in cleared for edit in candidate.edits
+    }
+    contribution_rows: list[tuple[str, str, str, str]] = []
+    for name in objectives:
+        if name in shipped_objectives:
+            continue
+        if name not in target_objectives:
+            reason = NO_TARGET_REASON if name == run_mode.HUMANNESS else NO_LIABILITY_TARGET_REASON
+            detail = ""
+        elif name == run_mode.HUMANNESS and humanness_unscored:
+            reason = NO_TOLERANCE_REASON
+            detail = ""
+        elif name in decline_by_objective:
+            reason = NO_HUMANIZATION_REASON if name == run_mode.HUMANNESS else NO_CANDIDATE_REASON
+            detail = _decline_detail([decline_by_objective[name]])
+        else:
+            reason = NO_CANDIDATE_REASON
+            detail = ""
+        rejected_type = (
+            rejection_store.VARIANT_REJECTED
+            if name in decline_by_objective or variants
+            else rejection_store.PARENT_REJECTED
+        )
+        contribution_rows.append((reason, detail, rejected_type, name))
 
     return ParentDesignResult(
-        rejection_reason=rejection_reason,
-        rejection_detail=rejection_detail,
-        rejected_type=rejected_type,
+        contribution_rows=contribution_rows,
         variants=variants,
         humanness_targets=humanness_targets,
         # `[]` when the humanness objective never ran at all, distinct from a candidate list
@@ -332,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
     variant_store.write_variants_header(args.out_variants)
     humanness_store.write_humanness_header(args.out_humanness)
 
-    def one(entry: parent_clonotypes.ParentClonotype) -> tuple[str, str, str] | None:
+    def one(entry: parent_clonotypes.ParentClonotype) -> list[tuple[str, str, str, str]] | None:
         triaged_path = triaged_dir / f"{entry.stem}.json"
         tolerance_path = tolerance_dir / f"{entry.stem}.tsv"
         residues_path = residues_dir / f"{entry.stem}.json"
@@ -383,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
             result.humanness_cleared,
             result.humanness_parent_scores,
         )
-        return result.rejection_reason, result.rejection_detail, result.rejected_type
+        return result.contribution_rows
 
     # This step stages no PDBs, so `triaged` carries its parent clonotypes. It is also the
     # gate `one` reads: an antibody triage left out can produce no variant, and

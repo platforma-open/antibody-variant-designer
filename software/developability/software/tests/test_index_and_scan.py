@@ -74,7 +74,7 @@ def _run_scan(batch, pdb_text, extra_args=None):
     """The one-antibody case, which most of these tests are."""
     entry = _stage(batch, "clonotype-1", pdb_text)
     rejections, triaged_dir, out_liabilities = _run(batch, extra_args)
-    [(_, reason, _detail, _type)] = rejections
+    [(_, reason, _detail, _type, _objective)] = rejections
     return reason, Path(triaged_dir, f"{entry.stem}.json"), out_liabilities
 
 
@@ -127,14 +127,18 @@ class TestActionableOnlyReachesTriagedJson:
 
 
 class TestRejectionWhenNothingSurvivesTriage:
-    def test_declined_liability_still_writes_both_files(self, batch):
+    def test_declined_liability_still_writes_both_files_and_no_rejection_row(self, batch):
         # A canonical V domain except FR1's conserved cysteine is missing —
-        # one declined liability, no motif hit, nothing actionable.
-        pdb_text = remarks("H", "H") + "\n" + make_pdb(v_domain("H", cys_at=(104,)))
-        rejection, out_triaged, out_liabilities = _run_scan(batch, pdb_text)
+        # one declined liability, no motif hit, nothing actionable. The design
+        # step, not this one, decides whether the parent still ships a variant
+        # through another objective, so this step writes no rejection row.
+        entry = _stage(
+            batch, "clonotype-1", remarks("H", "H") + "\n" + make_pdb(v_domain("H", cys_at=(104,)))
+        )
+        rejections, triaged_dir, out_liabilities = _run(batch)
 
-        assert rejection == "no-liability-survived-triage"
-        assert liability_store.read_triaged(str(out_triaged)) == []
+        assert rejections == []
+        assert liability_store.read_triaged(str(Path(triaged_dir, f"{entry.stem}.json"))) == []
         [row] = _rows_of(out_liabilities)
         assert row["verdict"] == "present"
         assert row["summary"].startswith("cysteine@")
@@ -177,7 +181,7 @@ class TestLowConfidenceFallsBackToBFactor:
 
         rejections, triaged_dir, _ = _run(batch, ["--per-residue-confidence", confidence_tsv])
 
-        assert rejections == [("clonotype-1", "", "", "parent")]
+        assert rejections == [("clonotype-1", "", "", "parent", "liability")]
         [hit] = liability_store.read_triaged(str(Path(triaged_dir, f"{entry.stem}.json")))
         assert hit.low_confidence is False
 
@@ -192,7 +196,9 @@ class TestLowConfidenceFallsBackToBFactor:
 
         rejections, _, _ = _run(batch, ["--per-residue-confidence", confidence_tsv])
 
-        assert rejections == [("clonotype-1", "no-liability-survived-triage", "", "parent")]
+        # The design step, not this one, owns "no-liability-survived-triage" — it
+        # knows whether the parent still shipped a variant via another objective.
+        assert rejections == []
 
 
 class TestActOnFixabilityIsWired:
@@ -227,7 +233,10 @@ class TestClonotypeFilter:
 
         # The filtered-out clonotype gets no rejection row at all — it was never
         # in scope, which is not the same as having failed.
-        assert rejections == [("clone-1", "", "", "parent"), ("clone-2", "", "", "parent")]
+        assert rejections == [
+            ("clone-1", "", "", "parent", "liability"),
+            ("clone-2", "", "", "parent", "liability"),
+        ]
         assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"clone-1", "clone-2"}
 
     def test_an_absent_filter_attempts_the_whole_index(self, batch):
@@ -236,7 +245,10 @@ class TestClonotypeFilter:
 
         rejections, _, _ = _run(batch)
 
-        assert rejections == [("clone-1", "", "", "parent"), ("clone-2", "", "", "parent")]
+        assert rejections == [
+            ("clone-1", "", "", "parent", "liability"),
+            ("clone-2", "", "", "parent", "liability"),
+        ]
 
 
 class TestBatchCli:
@@ -252,7 +264,10 @@ class TestBatchCli:
 
         rejections, _, out_liabilities = _run(batch)
 
-        assert rejections == [("clone-1", "", "", "parent"), ("clone-2", "", "", "parent")]
+        assert rejections == [
+            ("clone-1", "", "", "parent", "liability"),
+            ("clone-2", "", "", "parent", "liability"),
+        ]
         assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"clone-1", "clone-2"}
 
     def test_clonotype_key_alone_identifies_a_row_across_the_file(self, batch):
@@ -281,10 +296,10 @@ class TestBatchCli:
         rejections, _, out_liabilities = _run(batch)
 
         assert rejections == [
-            ("indexed", "", "", "parent"),
-            ("not-imgt", "structure-not-imgt", "", "parent"),
+            ("indexed", "", "", "parent", "liability"),
+            ("not-imgt", "structure-not-imgt", "", "parent", "liability"),
         ]
-        reasons = [reason for _, reason, _detail, _type in rejections]
+        reasons = [reason for _, reason, _detail, _type, _objective in rejections]
         assert reasons.count("no-liability-survived-triage") == 0
         # It never reached triage, so it contributes no Parents-page rows
         # either — the liabilities TSV holds only what was actually scanned.

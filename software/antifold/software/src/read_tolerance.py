@@ -47,6 +47,7 @@ from engine import (
     rejection_store,
     residue_index,
     residue_store,
+    run_mode,
     tolerance_store,
 )
 
@@ -312,15 +313,16 @@ def main(argv: list[str] | None = None) -> int:
     # would buy a model no antibody uses.
     model = load_model(str(weights_path)) if runnable else None
 
-    def one(entry: parent_clonotypes.ParentClonotype) -> tuple[str, str, str]:
-        return process_one(
+    def one(entry: parent_clonotypes.ParentClonotype) -> list[tuple[str, str, str, str]]:
+        reason = process_one(
             model,
             str(pdb_dir / entry.filename),
             str(residues_dir / f"{entry.stem}.json"),
             str(out_dir / f"{entry.stem}.tsv"),
             args.sapiens_weights,
             str(out_dir / f"{entry.stem}{sapiens_prior.PRIOR_SUFFIX}"),
-        ), "", rejection_store.PARENT_REJECTED
+        )
+        return [(reason, "", rejection_store.PARENT_REJECTED, run_mode.LIABILITY)]
 
     # `error_reason` is passed here and nowhere else: AntiFold swallows its
     # own exceptions and exits 0, so this loop is the only place a backend

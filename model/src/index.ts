@@ -85,44 +85,52 @@ function isStructuresDataset(spec: PObjectSpec): boolean {
   );
 }
 
-/** One step's rejection TSV: `clonotypeKey \t reason \t detail`, header row
- *  first, reason and detail empty when that clonotype passed. Absent and
- *  empty are equivalent to the reduce below, so only non-empty-reason rows
- *  are kept. */
-type RejectionRow = { reason: RejectionReason; detail: string; rejectedType: RejectedType };
+/** One step's rejection TSV: `clonotypeKey \t reason \t detail \t rejectedType \t objective`,
+ *  header row first, reason and detail empty when that (clonotype, objective) pair passed. */
+type RejectionRow = {
+  reason: RejectionReason;
+  detail: string;
+  rejectedType: RejectedType;
+  objective: string;
+};
+
+const DEFAULT_REJECTION_OBJECTIVE = "liability";
 
 function parseRejectionRows(tsv: string): Map<string, RejectionRow> {
   const rows = new Map<string, RejectionRow>();
   for (const line of tsv.split("\n").slice(1)) {
     if (line.length === 0) continue;
-    const [clonotypeKey, reason, detail, rejectedType] = line.split("\t");
+    const [clonotypeKey, reason, detail, rejectedType, objective] = line.split("\t");
+    // Falls back to the liability objective's name: read-tolerance never gained the
+    // `objective` column, so a pre-change file and every row it writes today still parses.
     if (reason)
-      rows.set(clonotypeKey, {
+      rows.set(`${clonotypeKey}\t${objective || DEFAULT_REJECTION_OBJECTIVE}`, {
         reason: reason as RejectionReason,
         detail: detail ?? "",
         rejectedType: (rejectedType as RejectedType) || "parent",
+        objective: objective || DEFAULT_REJECTION_OBJECTIVE,
       });
   }
   return rows;
 }
 
-/** Per clonotype, the first non-empty reason (and its detail) in step
- *  order: index-and-scan, then read-tolerance, then build-variants. A
- *  clonotype named in more than one file is kept once, at its earliest
- *  step. */
+/** Per (clonotype, objective) pair, the first non-empty reason (and its detail) in step
+ *  order: index-and-scan, then read-tolerance, then build-variants. A pair named in more than
+ *  one file is kept once, at its earliest step — a parent named by two objectives keeps both
+ *  rows, and one named twice by the same objective keeps only its earliest. */
 function reduceRejections(stepRejectionTsvs: readonly string[]): Map<string, RejectionRow> {
-  const byClonotype = new Map<string, RejectionRow>();
+  const byPair = new Map<string, RejectionRow>();
   for (const tsv of stepRejectionTsvs) {
-    for (const [clonotypeKey, row] of parseRejectionRows(tsv)) {
-      if (!byClonotype.has(clonotypeKey)) byClonotype.set(clonotypeKey, row);
+    for (const [pairKey, row] of parseRejectionRows(tsv)) {
+      if (!byPair.has(pairKey)) byPair.set(pairKey, row);
     }
   }
-  return byClonotype;
+  return byPair;
 }
 
 function reduceRejectedClonotypes(stepRejectionTsvs: readonly string[]): RejectedClonotype[] {
-  return [...reduceRejections(stepRejectionTsvs)].map(([clonotypeKey, row]) => ({
-    clonotypeKey,
+  return [...reduceRejections(stepRejectionTsvs)].map(([pairKey, row]) => ({
+    clonotypeKey: pairKey.slice(0, pairKey.lastIndexOf("\t")),
     ...row,
   }));
 }
@@ -361,7 +369,7 @@ export const platforma = BlockModelV3.create(dataModel)
   .sections(() => [
     { type: "link", href: "/parents", label: "Parents" },
     { type: "link", href: "/", label: "Variants" },
-    { type: "link", href: "/rejection-causes", label: "Rejection Causes" },
+    { type: "link", href: "/rejection-causes", label: "Objective Findings" },
   ])
   .done();
 

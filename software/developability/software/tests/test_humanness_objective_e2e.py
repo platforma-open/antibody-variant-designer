@@ -204,10 +204,11 @@ class TestHumanizationObjectiveAgainstTheRealMetric:
 
         rejections, written = _run_humanness_only(batch, monkeypatch)
 
-        # Key order, not staging order — the parent clonotypes come from a sorted listing.
         # The reason names the humanization gate, and the detail names the check and the
-        # measurement behind it — a fall, not a motif.
-        [(falls_key, falls_reason, falls_detail, _falls_type), rises] = rejections
+        # measurement behind it — a fall, not a motif. "rises" shipped its variant, so the
+        # humanness objective contributed and carries no row. "falls" built a candidate the
+        # gate refused, so the row is a variant rejection, not a parent one.
+        [(falls_key, falls_reason, falls_detail, falls_type, _falls_objective)] = rejections
         assert (falls_key, falls_reason) == (
             "falls",
             build_variants.NO_HUMANIZATION_REASON,
@@ -215,7 +216,7 @@ class TestHumanizationObjectiveAgainstTheRealMetric:
         assert falls_detail.startswith(
             f"H: {humanness_objective.DID_NOT_RISE_REASON} ("
         )
-        assert rises == ("rises", "", "", rejection_store.PARENT_REJECTED)
+        assert falls_type == rejection_store.VARIANT_REJECTED
         assert [key for key, _, _ in written] == ["rises"]
         rise_wild_type = VH_SEQUENCE[_RISE_OFFSET]
         assert (
@@ -231,10 +232,7 @@ class TestHumanizationObjectiveAgainstTheRealMetric:
 
         rejections, written = _run(batch)
 
-        assert rejections == [
-            ("falls", "", "", rejection_store.PARENT_REJECTED),
-            ("rises", "", "", rejection_store.PARENT_REJECTED),
-        ]
+        assert rejections == []
         assert {key for key, _, _ in written} == {"rises", "falls"}
 
     def test_a_tie_does_not_meet_the_goal_through_the_real_metric(self, batch, monkeypatch):
@@ -244,7 +242,7 @@ class TestHumanizationObjectiveAgainstTheRealMetric:
 
         # A tie is a fall for the gate, and the detail shows the two equal scores rather
         # than leaving the operator to guess why nothing shipped.
-        [(key, reason, detail, _rejected_type)] = rejections
+        [(key, reason, detail, _rejected_type, _objective)] = rejections
         assert (key, reason) == ("ties", build_variants.NO_HUMANIZATION_REASON)
         assert humanness_objective.DID_NOT_RISE_REASON in detail
         assert written == []

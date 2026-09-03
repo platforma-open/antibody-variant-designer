@@ -11,10 +11,17 @@ from collections.abc import Callable
 
 from engine import parent_clonotypes, rejection_store
 
+# The objective an exception, or a step with no per-objective concept, is attributed to — the
+# same spelling `run_mode.LIABILITY` uses. Every step this loop runs today designs against the
+# liability objective at least, so an untagged row still names one.
+_LIABILITY = "liability"
+
 
 def process_every_parent(
     parents: list[parent_clonotypes.ParentClonotype],
-    process_one: Callable[[parent_clonotypes.ParentClonotype], tuple[str, str, str] | None],
+    process_one: Callable[
+        [parent_clonotypes.ParentClonotype], list[tuple[str, str, str, str]] | None
+    ],
     out_rejected: str,
     error_reason: str | None = None,
 ) -> int:
@@ -22,14 +29,14 @@ def process_every_parent(
     antibody's clonotype, instead of raising. Only the tolerance step passes it, because AntiFold
     exits 0 on its own swallowed exceptions.
 
-    `process_one` returns `(reason, detail, rejected_type)`, reason and detail `""` on a pass.
-    `detail` carries the measurement behind the reason where a step has one, and
-    `rejected_type` is one of `rejection_store`'s two values. Every step writes all three, so no
-    caller has to remember which reasons come with a detail.
+    `process_one` returns a list of `(reason, detail, rejected_type, objective)` rows for its
+    clonotype — zero, one, or more — reason and detail `""` on a pass. `detail` carries the
+    measurement behind the reason where a step has one, and `rejected_type` is one of
+    `rejection_store`'s two values.
 
     `process_one` returning `None` means an earlier step already named this antibody's rejection
     reason. The loop then writes no row, so the rejection files count the antibody once."""
-    rejection_rows: list[tuple[str, str, str, str]] = []
+    rejection_rows: list[tuple[str, str, str, str, str]] = []
     for parent in parents:
         try:
             outcome = process_one(parent)
@@ -38,11 +45,19 @@ def process_every_parent(
                 raise
             print(f"{parent.clonotype_key}: {exc}", file=sys.stderr)
             rejection_rows.append(
-                (parent.clonotype_key, error_reason, str(exc), rejection_store.PARENT_REJECTED)
+                (
+                    parent.clonotype_key,
+                    error_reason,
+                    str(exc),
+                    rejection_store.PARENT_REJECTED,
+                    _LIABILITY,
+                )
             )
             continue
         if outcome is not None:
-            reason, detail, rejected_type = outcome
-            rejection_rows.append((parent.clonotype_key, reason, detail, rejected_type))
+            for reason, detail, rejected_type, objective in outcome:
+                rejection_rows.append(
+                    (parent.clonotype_key, reason, detail, rejected_type, objective)
+                )
     rejection_store.write_rejections(out_rejected, rejection_rows)
     return 0

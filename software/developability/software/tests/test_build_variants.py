@@ -182,17 +182,21 @@ def _stage_paired(batch, clonotype_key, non_human_prior_score):
     return entry
 
 
-def _stage_mixed(batch, clonotype_key, non_human_prior_score, score_framework_position=True):
-    """One parent carrying both a liability (the `_ng_site` deamidation
-    motif, on CDR1) and a non-human framework position (`_framework_residue`,
-    on FR1) — the fixture `TestHumanizationModeEndToEnd` runs against.
+def _stage_mixed(
+    batch, clonotype_key, non_human_prior_score, score_framework_position=True, with_liability=True
+):
+    """One parent carrying a non-human framework position (`_framework_residue`, on FR1) and,
+    by default, a liability (the `_ng_site` deamidation motif, on CDR1) — the fixture
+    `TestHumanizationModeEndToEnd` runs against.
 
     `score_framework_position=False` withholds that position's tolerance row, leaving the
-    humanization objective a target AntiFold never scored."""
+    humanization objective a target AntiFold never scored. `with_liability=False` stages no
+    triaged liability at all, leaving the liability objective nothing to design against."""
     entry = batch.add(clonotype_key)
     residues = [_framework_residue(), *_ng_site()]
     liability_store.write_triaged(
-        str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_triaged(_ng_site())]
+        str(Path(batch.dir("triaged"), f"{entry.stem}.json")),
+        [_triaged(_ng_site())] if with_liability else [],
     )
     framework_rows = (
         [{"imgt": "1", **_row(["D", "Q", "A"], "N", 3.0)}] if score_framework_position else []
@@ -242,7 +246,8 @@ class TestGateAndRankInOnePass:
 
         rejections, written = _run(batch)
 
-        assert rejections == [("clone-1", "", "", "parent")]
+        # The one objective this mode runs contributed an edit, so it carries no row.
+        assert rejections == []
         assert len(written) > 0
         assert [v.status for _, _, v in written] == ["unvalidated-hypothesis"] * len(written)
 
@@ -266,7 +271,9 @@ class TestGateAndRankInOnePass:
 
         rejections, written = _run(batch)
 
-        assert rejections == [("clone-1", "no-candidate-cleared-the-gate", "", "parent")]
+        assert rejections == [
+            ("clone-1", "no-candidate-cleared-the-gate", "", "parent", "liability")
+        ]
         assert written == []
 
     def test_the_default_mode_still_names_the_same_rejection_reason(self, batch, monkeypatch):
@@ -285,7 +292,7 @@ class TestGateAndRankInOnePass:
         assert (
             default_rejections
             == explicit_rejections
-            == [("clone-1", "no-candidate-cleared-the-gate", "", "parent")]
+            == [("clone-1", "no-candidate-cleared-the-gate", "", "parent", "liability")]
         )
         assert default_written == explicit_written == []
 
@@ -462,7 +469,7 @@ class TestDatasetWideVariantsTsv:
 
         rejections, written = _run(batch, ["--variants-per-parent", "2"])
 
-        assert rejections == [("clone-1", "", "", "parent"), ("clone-2", "", "", "parent")]
+        assert rejections == []
         assert [(key, v.rank) for key, _, v in written] == [
             ("clone-1", 1), ("clone-2", 2), ("clone-1", 3), ("clone-2", 4),
         ]
@@ -508,7 +515,7 @@ class TestNoReReportingAcrossPredecessors:
 
         rejections, written = _run(batch)
 
-        assert rejections == [("complete", "", "", "parent")]
+        assert rejections == []
         assert {key for key, _, _ in written} == {"complete"}
 
 
@@ -534,8 +541,10 @@ class TestRunModeSelectsObjectives:
     def test_mode_2_over_the_same_fixture_matches_mode_1_since_humanization_proposes_nothing(
         self, batch
     ):
-        # Selecting the second objective changes nothing while it proposes
-        # nothing: no target of its own means no candidate, no variant.
+        # Selecting the second objective changes nothing it ships while it proposes
+        # nothing: no target of its own means no candidate, no variant — but the
+        # parent still shipped the liability objective's variant, so mode 2 now
+        # carries the row mode 1 has no second objective to raise.
         _stage(batch, "clone-1", with_prior=True)
 
         mode_1_skips, mode_1_written = _run(batch, ["--run-mode", "liabilities"])
@@ -543,7 +552,10 @@ class TestRunModeSelectsObjectives:
             batch, ["--run-mode", "liabilities + humanization"]
         )
 
-        assert mode_1_skips == mode_2_skips
+        assert mode_1_skips == []
+        assert mode_2_skips == [
+            ("clone-1", "no-nonhuman-framework-position", "", "variant", "humanness")
+        ]
         assert [(ck, v.structural_tolerance, v.changed_positions)
                 for ck, _, v in mode_1_written] == [
             (ck, v.structural_tolerance, v.changed_positions)
@@ -833,7 +845,9 @@ class TestHumanizationModeEndToEnd:
             batch, ["--run-mode", "humanization", "--non-human-prior-margin", "0.0"]
         )
 
-        assert rejections == [("clone-1", "no-nonhuman-framework-position", "", "parent")]
+        assert rejections == [
+            ("clone-1", "no-nonhuman-framework-position", "", "parent", "humanness")
+        ]
         assert written == []
         [row] = humanness_rows
         assert row["humannessVerdict"] == "none"
@@ -848,7 +862,9 @@ class TestHumanizationModeEndToEnd:
 
         rejections, written, humanness_rows = _run_mixed(batch, ["--run-mode", "humanization"])
 
-        assert rejections == [("clone-1", "no-tolerance-at-humanization-position", "", "parent")]
+        assert rejections == [
+            ("clone-1", "no-tolerance-at-humanization-position", "", "parent", "humanness")
+        ]
         assert written == []
         # The position was selected, so the parent's own row still reports it —
         # `declined`, because no candidate was ever built at it.
@@ -875,7 +891,7 @@ class TestHumanizationModeEndToEnd:
             by_key[clonotype_key].append(
                 (variant.structural_tolerance, variant.changed_positions)
             )
-        assert {reason for _, reason, _detail, _type in rejections} == {""}
+        assert rejections == []
         assert by_key["mixed"] == by_key["plain"]
 
     def test_combined_mode_writes_both_targets_on_one_row(self, batch, monkeypatch):
@@ -890,6 +906,30 @@ class TestHumanizationModeEndToEnd:
             "Deamidation" in v.addressed_target and "Humanization" in v.addressed_target
             for _, _, v in written
         )
+
+    def test_a_shipped_humanization_variant_still_names_the_liability_objective_that_found_nothing(
+        self, batch, monkeypatch
+    ):
+        # No triaged liability at all: the parent ships the framework edit, and the
+        # liability objective — which ran and had nothing to design against — still gets
+        # its own row rather than reading as never having examined the parent.
+        _stub_rising_on_d(monkeypatch)
+        _stage_mixed(batch, "clone-1", non_human_prior_score=0.01, with_liability=False)
+
+        rejections, written, _ = _run_mixed(batch, ["--run-mode", "liabilities + humanization"])
+
+        assert len(written) > 0
+        assert rejections == [
+            ("clone-1", "no-liability-survived-triage", "", "variant", "liability")
+        ]
+
+    def test_liabilities_mode_names_no_humanization_row_for_any_parent(self, batch, monkeypatch):
+        _stub_rising_on_d(monkeypatch)
+        _stage_mixed(batch, "clone-1", non_human_prior_score=0.01)
+
+        rejections, _, _ = _run_mixed(batch, ["--run-mode", "liabilities"])
+
+        assert all(objective != "humanness" for _, _, _, _, objective in rejections)
 
 
 def _stage_liability_mix(batch, clonotype_key, triaged):
@@ -944,14 +984,19 @@ class TestModeTwoLiabilityTargetsCutToCdrs:
         assert any("H:N1D" in v.changed_positions for _, _, v in written)
 
     def test_a_framework_only_parent_in_mode_2_gets_no_variant_and_a_named_skip(self, batch):
+        # The lone triaged liability lies outside every CDR, so mode 2 cuts it from the
+        # liability objective's targets, and the prior scores every position too high for
+        # humanization to select one either — both objectives that ran contributed nothing.
         _stage_liability_mix(batch, "clone-1", [_triaged([_framework_residue()])])
 
         rejections, written = _run(batch, ["--run-mode", "liabilities + humanization"])
 
         assert written == []
-        [(clonotype_key, reason, _detail, _type)] = rejections
-        assert clonotype_key == "clone-1"
-        assert reason != ""
+        assert {(clonotype_key, objective) for clonotype_key, _, _, _, objective in rejections} == {
+            ("clone-1", "liability"),
+            ("clone-1", "humanness"),
+        }
+        assert all(reason != "" for _, reason, _detail, _type, _objective in rejections)
 
 
 class TestParentHumannessScoresEndToEnd:

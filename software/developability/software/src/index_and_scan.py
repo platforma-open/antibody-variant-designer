@@ -27,6 +27,7 @@ from engine import (
     residue_exposure,
     residue_index,
     residue_store,
+    run_mode,
     taxonomy_store,
 )
 
@@ -266,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     liability_store.write_liabilities_header(args.out_liabilities)
 
-    def one(entry: parent_clonotypes.ParentClonotype) -> tuple[str, str, str] | None:
+    def one(entry: parent_clonotypes.ParentClonotype) -> list[tuple[str, str, str, str]] | None:
         # A picked filter narrows which parents this step attempts. A
         # filtered-out clonotype was never in scope, so it gets no rejection
         # row at all.
@@ -294,7 +295,13 @@ def main(argv: list[str] | None = None) -> int:
             liability_store.append_liabilities_tsv(
                 args.out_liabilities, entry.clonotype_key, triaged
             )
-        return reason, "", rejection_store.PARENT_REJECTED
+        # The design step, not this one, decides whether a parent with no triaged
+        # liability still ships a variant — it owns this reason's row, and only when
+        # `mode` actually runs the liability objective (a `humanization`-only run never
+        # reaches this reason with a row worth writing).
+        if reason == "no-liability-survived-triage":
+            return []
+        return [(reason, "", rejection_store.PARENT_REJECTED, run_mode.LIABILITY)]
 
     parents = parent_clonotypes.scan_parent_clonotypes(args.pdb_dir, parent_clonotypes.PDB_SUFFIX)
     return antibody_batch.process_every_parent(parents, one, args.out_rejected)

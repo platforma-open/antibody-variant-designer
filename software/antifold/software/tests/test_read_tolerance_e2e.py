@@ -236,8 +236,8 @@ class TestRealEntrypointWithTheHumanPrior:
         # Every parent completed inside `_forbid_network_access()` with no exception —
         # a `backend-failed` row here would mean the model call raised.
         assert rejection_store.read_rejections(str(out_rejected)) == [
-            ("parent-1", "", "", rejection_store.PARENT_REJECTED),
-            ("parent-2", "", "", rejection_store.PARENT_REJECTED),
+            ("parent-1", "", "", rejection_store.PARENT_REJECTED, "liability"),
+            ("parent-2", "", "", rejection_store.PARENT_REJECTED, "liability"),
         ]
         for stem in ("parent-1", "parent-2"):
             assert (out_dir / f"{stem}.tsv").is_file()

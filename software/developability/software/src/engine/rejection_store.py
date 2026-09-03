@@ -1,8 +1,9 @@
-"""Rejection log: one row per clonotype the step attempted. The reason is empty on pass.
+"""Rejection log: one row per (clonotype, objective) pair a step attempted. The reason is empty
+on pass.
 
-A clonotype that an earlier step already rejected gets no row here. The reduce in
-`main.tpl.tengo` takes the first non-empty reason in step order. A second row for
-that clonotype would count it twice.
+A pair that an earlier step already rejected gets no row here. The reduce in `main.tpl.tengo` takes
+the first non-empty reason per (clonotype, objective) pair, in step order. A second row for that
+pair would count it twice.
 """
 
 import csv
@@ -18,21 +19,21 @@ from pathlib import Path
 PARENT_REJECTED = "parent"
 VARIANT_REJECTED = "variant"
 
-COLUMNS = ["clonotypeKey", "reason", "detail", "rejectedType"]
+COLUMNS = ["clonotypeKey", "reason", "detail", "rejectedType", "objective"]
 
 
-def write_rejections(path: str, rows: list[tuple[str, str, str, str]]) -> None:
-    """`rows` is `(clonotype_key, reason, detail, rejected_type)`, reason and detail `""` on a
-    pass."""
+def write_rejections(path: str, rows: list[tuple[str, str, str, str, str]]) -> None:
+    """`rows` is `(clonotype_key, reason, detail, rejected_type, objective)`, reason and detail
+    `""` on a pass."""
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
     writer.writerow(COLUMNS)
-    for clonotype_key, reason, detail, rejected_type in rows:
-        writer.writerow([clonotype_key, reason, detail, rejected_type])
+    for clonotype_key, reason, detail, rejected_type, objective in rows:
+        writer.writerow([clonotype_key, reason, detail, rejected_type, objective])
     Path(path).write_text(buf.getvalue())
 
 
-def read_rejections(path: str) -> list[tuple[str, str, str, str]]:
+def read_rejections(path: str) -> list[tuple[str, str, str, str, str]]:
     with Path(path).open(newline="") as fh:
         return [
             (
@@ -40,6 +41,7 @@ def read_rejections(path: str) -> list[tuple[str, str, str, str]]:
                 row["reason"],
                 row["detail"],
                 row.get("rejectedType") or PARENT_REJECTED,
+                row.get("objective") or "",
             )
             for row in csv.DictReader(fh, delimiter="\t")
         ]
