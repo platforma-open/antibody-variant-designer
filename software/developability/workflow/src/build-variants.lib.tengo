@@ -81,7 +81,8 @@ ARGS := {
 	params: {
 		"__options__,closed": "",
 		runMode: "string",
-		maxEditsPerVariant: "number",
+		maxLiabilityEdits: "number",
+		maxFrameworkEdits: "number",
 		candidateResiduesPerPosition: "number",
 		structuralWeight: "number",
 		objectiveWeight: "number",
@@ -97,6 +98,42 @@ ARGS := {
 	// and DEFAULT_CPU the cores for whichever dimension the caller leaves out.
 	"cpu,?": "number",
 	"ram,?": "string"
+}
+
+/**
+ * The `--flag value` pairs `run` derives from `args.params`, in the order the
+ * command line carries them. Exported so `resources.test.tengo` can pin the
+ * rendered command line without an exec run, the way `ramFor` already lets it
+ * pin the RAM formula.
+ *
+ * @param params: map — `ARGS.params`'s own shape
+ *
+ * @return [string]
+ */
+paramArgsFor := func(params) {
+	args := [
+		"--run-mode", params.runMode,
+		"--max-liability-edits", string(params.maxLiabilityEdits),
+		"--max-framework-edits", string(params.maxFrameworkEdits),
+		"--candidate-residues-per-position", string(params.candidateResiduesPerPosition),
+		"--structural-weight", string(params.structuralWeight),
+		"--objective-weight", string(params.objectiveWeight),
+		"--non-human-prior-margin", string(params.nonHumanPriorMargin),
+		"--max-new-liabilities", string(params.maxNewLiabilities),
+		"--fr-confidence-threshold", string(params.frConfidenceThreshold),
+		"--variants-per-parent", string(params.variantsPerParent),
+		"--low-tolerance-floor", string(params.lowToleranceFloor),
+		"--epistasis-rescore-top-k", string(params.epistasisRescoreTopK)
+	]
+	// The flag is omitted when the operator ignores nothing, the way the sidecar
+	// flags in `index-and-scan.lib.tengo` are. An empty argv element would leave
+	// the next flag standing where the value belongs.
+	if params.humanizationIgnoredLiabilities != "" {
+		args = append(
+			args, "--humanization-ignored-liabilities", params.humanizationIgnoredLiabilities
+		)
+	}
+	return args
 }
 
 /**
@@ -127,27 +164,10 @@ run := func(args) {
 		arg("--definitions").arg("definitions.json").
 		arg("--out-variants").arg(VARIANTS_FILE).
 		arg("--out-rejected").arg(REJECTED_FILE).
-		arg("--out-humanness").arg(HUMANNESS_FILE).
-		arg("--run-mode").arg(args.params.runMode).
-		arg("--max-edits-per-variant").arg(string(args.params.maxEditsPerVariant)).
-		arg("--candidate-residues-per-position").
-		arg(string(args.params.candidateResiduesPerPosition)).
-		arg("--structural-weight").arg(string(args.params.structuralWeight)).
-		arg("--objective-weight").arg(string(args.params.objectiveWeight)).
-		arg("--non-human-prior-margin").arg(string(args.params.nonHumanPriorMargin)).
-		arg("--max-new-liabilities").arg(string(args.params.maxNewLiabilities)).
-		arg("--fr-confidence-threshold").arg(string(args.params.frConfidenceThreshold)).
-		arg("--variants-per-parent").arg(string(args.params.variantsPerParent)).
-		arg("--low-tolerance-floor").arg(string(args.params.lowToleranceFloor)).
-		arg("--epistasis-rescore-top-k").arg(string(args.params.epistasisRescoreTopK))
+		arg("--out-humanness").arg(HUMANNESS_FILE)
 
-	// The flag is omitted when the operator ignores nothing, the way the sidecar
-	// flags in `index-and-scan.lib.tengo` are. An empty argv element would leave
-	// the next flag standing where the value belongs.
-	if args.params.humanizationIgnoredLiabilities != "" {
-		cmd = cmd.
-			arg("--humanization-ignored-liabilities").
-			arg(args.params.humanizationIgnoredLiabilities)
+	for a in paramArgsFor(args.params) {
+		cmd = cmd.arg(a)
 	}
 
 	result := cmd.
@@ -169,5 +189,8 @@ export ll.toStrict({
 	run: run,
 	// Exported for `resources.test.tengo`, which pins what it computes. A caller
 	// never needs it: `run` applies it unless the caller overrides `ram`.
-	ramFor: ramFor
+	ramFor: ramFor,
+	// Exported for the same reason: `resources.test.tengo` pins the rendered
+	// command line without running the exec.
+	paramArgsFor: paramArgsFor
 })

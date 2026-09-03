@@ -7,6 +7,7 @@
 
 test := import("@platforma-sdk/workflow-tengo:test")
 exec := import("@platforma-sdk/workflow-tengo:exec")
+text := import("text")
 
 indexAndScan := import(":index-and-scan")
 buildVariants := import(":build-variants")
@@ -110,4 +111,36 @@ TestBothRecipesCarryAStaticFallback := func() {
 	// than falling back to a fixed request.
 	test.isEqual("4GiB", f.fallbackOf(indexAndScan.ramFor(4)))
 	test.isEqual("4GiB", f.fallbackOf(buildVariants.ramFor(4)))
+}
+
+_buildVariantsParams := {
+	runMode: "liabilities",
+	maxLiabilityEdits: 7,
+	maxFrameworkEdits: 12,
+	candidateResiduesPerPosition: 3,
+	structuralWeight: 1.0,
+	objectiveWeight: 1.0,
+	nonHumanPriorMargin: 0.05,
+	maxNewLiabilities: 0,
+	humanizationIgnoredLiabilities: "",
+	frConfidenceThreshold: 4.0,
+	variantsPerParent: 10,
+	lowToleranceFloor: 3,
+	epistasisRescoreTopK: 20
+}
+
+TestBuildVariantsCommandLineCarriesBothEditCapFlags := func() {
+	args := buildVariants.paramArgsFor(_buildVariantsParams)
+	test.isTrue(
+		text.contains(text.join(args, " "), "--max-liability-edits 7"),
+		"expected --max-liability-edits 7 in " + text.join(args, " ")
+	)
+	test.isTrue(
+		text.contains(text.join(args, " "), "--max-framework-edits 12"),
+		"expected --max-framework-edits 12 in " + text.join(args, " ")
+	)
+	test.isFalse(
+		text.contains(text.join(args, " "), "--max-edits-per-variant"),
+		"the old flag must not survive: " + text.join(args, " ")
+	)
 }

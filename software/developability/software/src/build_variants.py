@@ -243,12 +243,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Predicted error, in angstrom, above which a humanization target warns. The "
         "same threshold index_and_scan.py triages a framework liability against.",
     )
-    # The workflow lib still sends this flag; kept accepted but unread until the two edit
-    # caps replace it on the command line. The caps take their module defaults here.
     parser.add_argument(
-        "--max-edits-per-variant",
+        "--max-liability-edits",
         type=int,
         default=variant_candidates.DEFAULT_MAX_LIABILITY_EDITS,
+        help="how many liability-motivated residues one variant may change",
+    )
+    parser.add_argument(
+        "--max-framework-edits",
+        type=int,
+        default=variant_candidates.DEFAULT_MAX_FRAMEWORK_EDITS,
+        help="how many non-human framework residues one variant may change",
     )
     parser.add_argument(
         "--candidate-residues-per-position",
@@ -355,8 +360,8 @@ def main(argv: list[str] | None = None) -> int:
             taxonomy,
             args.run_mode,
             str(prior_path),
-            variant_candidates.DEFAULT_MAX_LIABILITY_EDITS,
-            variant_candidates.DEFAULT_MAX_FRAMEWORK_EDITS,
+            args.max_liability_edits,
+            args.max_framework_edits,
             args.candidate_residues_per_position,
             args.structural_weight,
             args.objective_weight,

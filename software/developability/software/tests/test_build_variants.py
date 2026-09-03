@@ -259,11 +259,8 @@ class TestGateAndRankInOnePass:
     def test_no_surviving_candidate_writes_the_named_rejection_and_no_rows(
         self, batch, monkeypatch
     ):
-        # The two edit caps are module defaults in this row, not CLI flags — lowering the
-        # liability cap below the target's own site size (2 residues) is what forces the
-        # rejection `--max-edits-per-variant 1` used to.
-        # A liability cap of 0 admits nothing at all — the whole target is dropped, matching
-        # what `--max-edits-per-variant 1` used to force before caps became truncating.
+        # A liability cap of 0 admits nothing at all — the whole target is dropped and the
+        # gate clears no candidate.
         monkeypatch.setattr(build_variants.variant_candidates, "DEFAULT_MAX_LIABILITY_EDITS", 0)
         _stage(batch, "clone-1")
 
@@ -277,8 +274,8 @@ class TestGateAndRankInOnePass:
         # must resolve to the identical rejection reason — proving the mode
         # selector's own wiring left the default path's rejection-reason string
         # untouched.
-        # A liability cap of 0 admits nothing at all — the whole target is dropped, matching
-        # what `--max-edits-per-variant 1` used to force before caps became truncating.
+        # A liability cap of 0 admits nothing at all — the whole target is dropped and the
+        # gate clears no candidate.
         monkeypatch.setattr(build_variants.variant_candidates, "DEFAULT_MAX_LIABILITY_EDITS", 0)
         _stage(batch, "clone-1")
 
@@ -313,6 +310,143 @@ class TestGateAndRankInOnePass:
         _, explicit = _run(batch, ["--structural-weight", "1.0", "--objective-weight", "1.0"])
 
         assert explicit == omitted
+
+
+class TestTheTwoEditCapFlags:
+    def test_both_cap_flags_reach_process_one_in_their_own_fields(self, batch, monkeypatch):
+        _stage(batch, "clone-1")
+        calls = []
+        real_process_one = build_variants.process_one
+
+        def capture(*args, **kwargs):
+            calls.append((args[6], args[7]))
+            return real_process_one(*args, **kwargs)
+
+        monkeypatch.setattr(build_variants, "process_one", capture)
+
+        _run(batch, ["--max-liability-edits", "3", "--max-framework-edits", "7"])
+
+        assert calls == [(3, 7)]
+
+    def test_neither_cap_flag_given_carries_the_module_defaults(self, batch, monkeypatch):
+        _stage(batch, "clone-1")
+        calls = []
+        real_process_one = build_variants.process_one
+
+        def capture(*args, **kwargs):
+            calls.append((args[6], args[7]))
+            return real_process_one(*args, **kwargs)
+
+        monkeypatch.setattr(build_variants, "process_one", capture)
+
+        _run(batch)
+
+        assert calls == [
+            (
+                variant_candidates.DEFAULT_MAX_LIABILITY_EDITS,
+                variant_candidates.DEFAULT_MAX_FRAMEWORK_EDITS,
+            )
+        ]
+
+    def _stage_capped(self, batch, clonotype_key):
+        """Three clearable liability targets and three non-human framework targets, each its
+        own single residue, over one parent — enough positions for a cap of 1 to visibly
+        truncate one kind and leave the other whole."""
+        entry = batch.add(clonotype_key)
+        liability_residues = [
+            _residue("H", 10, "N", imgt="10"),
+            _residue("H", 11, "S", imgt="11"),
+            _residue("H", 12, "T", imgt="12"),
+        ]
+        framework_residues = [
+            _residue("H", 21, "K", imgt="21", region="FR1"),
+            _residue("H", 22, "R", imgt="22", region="FR1"),
+            _residue("H", 23, "H", imgt="23", region="FR1"),
+        ]
+        all_residues = [*liability_residues, *framework_residues]
+        liability_store.write_triaged(str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [])
+        tolerance_store.write_tolerance_tsv(
+            str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+            [{"imgt": r.imgt, **_row(["D", "Q", "A"], r.wild_type, 3.0)} for r in all_residues],
+        )
+        residue_store.write_residues(
+            str(Path(batch.dir("residues"), f"{entry.stem}.json")), all_residues
+        )
+        _write_prior_tsv(
+            Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"), 0.9
+        )
+        return liability_residues, framework_residues
+
+    def _stub_clearing_targets(self, monkeypatch, liability_residues, framework_residues):
+        """Every target clears at once — the walk's own seed always passes — so what survives
+        onto the emitted variant is exactly what `admitted_targets` let through each cap."""
+        clearing = design_objective.Objective(
+            select_target_positions=lambda residues, taxonomy: [],
+            position_prior=None,
+            score_candidate=lambda *_args: design_objective.GoalCheck(
+                meets_goal=True, score=0.0
+            ),
+        )
+        monkeypatch.setattr(
+            build_variants.run_mode,
+            "objectives_for",
+            lambda *_args: [
+                (run_mode.LIABILITY, lambda _residues: clearing),
+                (run_mode.HUMANNESS, lambda _residues: clearing),
+            ],
+        )
+        targets = [
+            design_objective.DesignTarget(
+                site=(r,), definition_id="stub-liability", region="CDR1",
+                is_low_confidence=False, confidence_angstroms=3.0, objective=run_mode.LIABILITY,
+            )
+            for r in liability_residues
+        ] + [
+            design_objective.DesignTarget(
+                site=(r,), definition_id=None, region="FR1",
+                is_low_confidence=False, confidence_angstroms=3.0, objective=run_mode.HUMANNESS,
+            )
+            for r in framework_residues
+        ]
+        monkeypatch.setattr(
+            build_variants.run_mode,
+            "targets_for",
+            lambda mode, triaged_list, objectives, residues: targets,
+        )
+
+    def test_the_liability_cap_truncates_only_the_liability_edits(self, batch, monkeypatch):
+        liability_residues, framework_residues = self._stage_capped(batch, "clone-1")
+        self._stub_clearing_targets(monkeypatch, liability_residues, framework_residues)
+
+        _, written = _run(
+            batch, ["--run-mode", "liabilities + humanization", "--max-liability-edits", "1"]
+        )
+
+        assert len(written) > 0
+        best = written[0][3]
+        liability_hits = [f"H:{r.wild_type}{r.imgt}" for r in liability_residues]
+        framework_hits = [f"H:{r.wild_type}{r.imgt}" for r in framework_residues]
+        assert sum(best.changed_positions.count(p) for p in liability_hits) == 1
+        assert sum(best.changed_positions.count(p) for p in framework_hits) == len(
+            framework_residues
+        )
+
+    def test_the_framework_cap_truncates_only_the_framework_edits(self, batch, monkeypatch):
+        liability_residues, framework_residues = self._stage_capped(batch, "clone-1")
+        self._stub_clearing_targets(monkeypatch, liability_residues, framework_residues)
+
+        _, written = _run(
+            batch, ["--run-mode", "liabilities + humanization", "--max-framework-edits", "1"]
+        )
+
+        assert len(written) > 0
+        best = written[0][3]
+        liability_hits = [f"H:{r.wild_type}{r.imgt}" for r in liability_residues]
+        framework_hits = [f"H:{r.wild_type}{r.imgt}" for r in framework_residues]
+        assert sum(best.changed_positions.count(p) for p in liability_hits) == len(
+            liability_residues
+        )
+        assert sum(best.changed_positions.count(p) for p in framework_hits) == 1
 
 
 class TestDatasetWideVariantsTsv:

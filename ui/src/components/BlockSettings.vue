@@ -98,7 +98,19 @@ function defaulted<K extends DefaultedField>(field: K) {
 const rsasaBuriedCutoff = defaulted("rsasaBuriedCutoff");
 const frConfidenceThreshold = defaulted("frConfidenceThreshold");
 const cdrConfidenceThreshold = defaulted("cdrConfidenceThreshold");
-const maxEditsPerVariant = defaulted("maxEditsPerVariant");
+// Reads the pre-rename key too, mirroring `.args()`: a project persisted with
+// `maxEditsPerVariant` and no `maxLiabilityEdits` must show its old number
+// here, not the default `defaulted()` would show for an absent new key.
+const maxLiabilityEdits = computed({
+  get: () =>
+    app.model.data.maxLiabilityEdits ??
+    app.model.data.maxEditsPerVariant ??
+    BLOCK_DATA_DEFAULTS.maxLiabilityEdits,
+  set: (value: number) => {
+    app.model.data.maxLiabilityEdits = value;
+  },
+});
+const maxFrameworkEdits = defaulted("maxFrameworkEdits");
 const candidateResiduesPerPosition = defaulted("candidateResiduesPerPosition");
 const structuralWeight = defaulted("structuralWeight");
 const objectiveWeight = defaulted("objectiveWeight");
@@ -248,15 +260,29 @@ function toggleBlockingLiability(value: string) {
     <PlAccordionSection label="Candidate generation">
       <div class="field-grid">
         <PlNumberField
-          v-model="maxEditsPerVariant"
-          label="Max edits per variant"
+          v-model="maxLiabilityEdits"
+          label="Max liability edits per variant"
           :minValue="1"
-          :maxValue="20"
+          :maxValue="40"
           :step="1"
         >
           <template #tooltip>
-            Caps how many residues one variant may change at once. Higher allows bigger repairs in a
-            single molecule; lower keeps each variant closer to the parent. Default 5.
+            Caps how many liability-motivated residues one variant may change. It never bounds
+            framework edits. Higher allows bigger repairs in a single molecule; lower keeps each
+            variant closer to the parent. Default 10.
+          </template>
+        </PlNumberField>
+        <PlNumberField
+          v-model="maxFrameworkEdits"
+          label="Max framework edits per variant"
+          :minValue="1"
+          :maxValue="40"
+          :step="1"
+        >
+          <template #tooltip>
+            Caps how many non-human framework residues one humanization variant may change. It never
+            bounds liability edits. Higher allows a fuller humanization in a single molecule; lower
+            keeps each variant closer to the parent. Default 20.
           </template>
         </PlNumberField>
         <PlNumberField

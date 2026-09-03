@@ -45,7 +45,8 @@ export const BLOCK_DATA_DEFAULTS = {
   runMode: "liabilities" as RunMode,
   rsasaBuriedCutoff: 0.075,
   actOnFixability: ["fixable", "easily_fixable"],
-  maxEditsPerVariant: 5,
+  maxLiabilityEdits: 10,
+  maxFrameworkEdits: 20,
   frConfidenceThreshold: 4.0,
   cdrConfidenceThreshold: 6.0,
   variantsPerParent: 10,
@@ -206,7 +207,13 @@ export const platforma = BlockModelV3.create(dataModel)
       // the AntiFold pass. Sorted and uniqued here because `.args()` is where
       // the key is authored.
       actOnFixability: [...new Set(data.actOnFixability)].sort(),
-      maxEditsPerVariant: data.maxEditsPerVariant,
+      // The liability cap falls back to the one number a project persisted
+      // before the two caps split apart, then to the default — a project that
+      // already ran keeps that number as its liability cap. The framework cap
+      // has no old spelling to fall back to: it is bounded for the first time.
+      maxLiabilityEdits:
+        data.maxLiabilityEdits ?? data.maxEditsPerVariant ?? BLOCK_DATA_DEFAULTS.maxLiabilityEdits,
+      maxFrameworkEdits: data.maxFrameworkEdits ?? BLOCK_DATA_DEFAULTS.maxFrameworkEdits,
       // These four fall back to the spelling a project persisted before the
       // rename, then to the default. Reading the old key keeps a project that
       // already ran on its own settings instead of silently resetting it.

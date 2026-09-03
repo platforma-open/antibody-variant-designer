@@ -39,7 +39,8 @@ self.validateInputs({
 	params: {
 		"__options__,closed": "",
 		runMode: "string",
-		maxEditsPerVariant: "number",
+		maxLiabilityEdits: "number",
+		maxFrameworkEdits: "number",
 		candidateResiduesPerPosition: "number",
 		structuralWeight: "number",
 		objectiveWeight: "number",

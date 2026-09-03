@@ -18,7 +18,8 @@ export type BlockData = {
   runMode: RunMode;
   rsasaBuriedCutoff: number;
   actOnFixability: string[];
-  maxEditsPerVariant: number;
+  maxLiabilityEdits: number;
+  maxFrameworkEdits: number;
   frConfidenceThreshold: number;
   cdrConfidenceThreshold: number;
   variantsPerParent: number;
@@ -41,6 +42,11 @@ export type BlockData = {
   cdrConfThresh?: number;
   wStruct?: number;
   wObj?: number;
+  /** The one cap a project persisted before it split into `maxLiabilityEdits`
+   *  and `maxFrameworkEdits`. `.args()` reads it as the liability cap when the
+   *  new key is absent; the framework cap has no old spelling to fall back to.
+   *  Nothing writes it. */
+  maxEditsPerVariant?: number;
   /** Results-table sort / filter / column state, one per page. */
   variantsTableState: PlDataTableStateV2;
   liabilitiesTableState: PlDataTableStateV2;
@@ -68,7 +74,8 @@ export type BlockArgs = {
   runMode: RunMode;
   rsasaBuriedCutoff: number;
   actOnFixability: string[];
-  maxEditsPerVariant: number;
+  maxLiabilityEdits: number;
+  maxFrameworkEdits: number;
   frConfidenceThreshold: number;
   cdrConfidenceThreshold: number;
   variantsPerParent: number;

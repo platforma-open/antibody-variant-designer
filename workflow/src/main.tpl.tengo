@@ -111,7 +111,8 @@ _buildVariants := func(triaged, tolerance, residues, definitions, args) {
 		definitions: definitions,
 		params: {
 			runMode: args.runMode,
-			maxEditsPerVariant: args.maxEditsPerVariant,
+			maxLiabilityEdits: args.maxLiabilityEdits,
+			maxFrameworkEdits: args.maxFrameworkEdits,
 			candidateResiduesPerPosition: args.candidateResiduesPerPosition,
 			structuralWeight: args.structuralWeight,
 			objectiveWeight: args.objectiveWeight,
