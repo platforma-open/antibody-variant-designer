@@ -320,7 +320,7 @@ export const platforma = BlockModelV3.create(dataModel)
   // handle directly — but the handle stays a named output for that to work.
   .output("synthesisCsv", (ctx) => ctx.outputs?.resolve("synthesisCsv")?.getRemoteFileHandle())
   // Per-parent rejection reason and detail for the Rejection Causes page.
-  .output("rejectedClonotypes", (ctx): RejectedClonotype[] | undefined => {
+  .outputWithStatus("rejectedClonotypes", (ctx): RejectedClonotype[] | undefined => {
     // `allowPermanentAbsence` because a result computed by an earlier build of this block
     // carries whatever output names that build wrote. A bare `resolve` throws "Service or
     // input field not found" on one of them and takes the whole render down with it; this

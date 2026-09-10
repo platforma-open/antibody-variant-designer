@@ -7,6 +7,7 @@ import {
   PlAlert,
   PlBlockPage,
 } from "@platforma-sdk/ui-vue";
+import type { PlAgOverlayLoadingParams } from "@platforma-sdk/ui-vue";
 import type { ColDef, GridOptions } from "ag-grid-enterprise";
 import { AgGridVue } from "ag-grid-vue3";
 import { computed } from "vue";
@@ -25,7 +26,8 @@ const rejected = computed(() => app.model.outputs.rejectedClonotypes);
 // Sorted by the resolved label rather than left in reduce order, so the
 // same run's list reads the same way every time it is opened.
 const rows = computed(() => {
-  const list = rejected.value;
+  const output = rejected.value;
+  const list = output?.ok ? output.value : undefined;
   if (!list) return undefined;
   return [...list].sort((a, b) =>
     resolveLabel(a.clonotypeKey).localeCompare(resolveLabel(b.clonotypeKey)),
@@ -82,13 +84,23 @@ const gridOptions: GridOptions<RejectedClonotype> = {
   },
 };
 
-// A run that has not produced this output yet and a run that rejected nothing both
-// reach the grid with no rows, and they mean different things to a reader.
-const noRowsText = computed(() =>
-  rows.value === undefined
-    ? "Run on a 3D structures dataset to see what was rejected and why"
-    : "Nothing was rejected",
-);
+// A block that has never run and a block still running both reach the grid with
+// nothing to show. `stable` is what tells them apart: the render marks this
+// output unstable while the step that fills it is still in flight, the same
+// signal the two table pages read through `pending`. Without it the page shows
+// the never-computed cat for the whole run.
+const overlay = computed<PlAgOverlayLoadingParams>(() => {
+  const output = rejected.value;
+  return output?.ok && output.stable === false
+    ? {
+        variant: "running",
+        runningText: "Building variants and recording every candidate a gate turns away.",
+      }
+    : {
+        variant: "not-ready",
+        notReadyText: "Run on a 3D structures dataset to see what was rejected and why",
+      };
+});
 </script>
 
 <template>
@@ -103,17 +115,18 @@ const noRowsText = computed(() =>
       clonotype shipped a variant carrying no edit from this row's objective.
     </PlAlert>
     <!-- The grid mounts in every state, so its own overlay is what carries the
-         two empty readings — the same wiring the sibling blocks use. -->
+         three empty readings — the same wiring the sibling blocks use. -->
     <AgGridVue
       class="rejection-causes-grid"
       :theme="AgGridTheme"
       :rowData="rows ?? []"
       :columnDefs="columnDefs"
       :gridOptions="gridOptions"
+      :loading="rows === undefined"
       :loadingOverlayComponent="PlAgOverlayLoading"
-      :loadingOverlayComponentParams="{ notReady: true }"
+      :loadingOverlayComponentParams="overlay"
       :noRowsOverlayComponent="PlAgOverlayNoRows"
-      :noRowsOverlayComponentParams="{ text: noRowsText }"
+      :noRowsOverlayComponentParams="{ text: 'Nothing was rejected' }"
     />
   </PlBlockPage>
 </template>
