@@ -61,25 +61,6 @@ const RUN_MODE_OPTIONS = [
   { value: "liabilities + humanization", label: "Liabilities + humanization" },
 ] as const;
 
-// One row per liability the humanization gate can count, under the taxonomy's own
-// id. A liability this table does not list still blocks the gate: the run ignores
-// exactly the ids the operator unticks here, never "the ids this table knows".
-const HUMANIZATION_LIABILITY_OPTIONS = [
-  { value: "deamidation_ng", label: "Deamidation (N[GS])" },
-  { value: "fragmentation_dp", label: "Fragmentation (DP)" },
-  { value: "isomerization_ddghst", label: "Isomerization (D[DGHST])" },
-  { value: "n_linked_glycosylation", label: "N-linked glycosylation (N[^P][ST])" },
-  { value: "deamidation_nahnt", label: "Deamidation (N[AHNT])" },
-  { value: "hydrolysis_np", label: "Hydrolysis (NP)" },
-  { value: "fragmentation_ts", label: "Fragmentation (TS)" },
-  { value: "tryptophan_oxidation", label: "Tryptophan oxidation (W)" },
-  { value: "methionine_oxidation", label: "Methionine oxidation (M)" },
-  { value: "deamidation_stkn", label: "Deamidation ([STK]N)" },
-  { value: "integrin_binding", label: "Integrin binding" },
-  { value: "missing_cysteines", label: "Missing cysteines" },
-  { value: "extra_cysteines", label: "Extra cysteines" },
-] as const;
-
 type DefaultedField = keyof typeof BLOCK_DATA_DEFAULTS;
 
 // A project created before a field existed carries no value for it, and the
@@ -122,12 +103,7 @@ const epistasisRescoreTopK = defaulted("epistasisRescoreTopK");
 
 const runModeModel = defaulted("runMode");
 
-// `liabilities` is the one mode that builds no humanization objective, so the gate
-// these ids feed never runs there and the list would decide nothing.
-const runsHumanization = computed(() => runModeModel.value !== "liabilities");
-
 const actOnFixability = defaulted("actOnFixability");
-const humanizationIgnoredLiabilities = defaulted("humanizationIgnoredLiabilities");
 
 function isFixabilityChecked(value: string): boolean {
   return actOnFixability.value.includes(value);
@@ -136,18 +112,6 @@ function isFixabilityChecked(value: string): boolean {
 function toggleFixability(value: string) {
   const current = actOnFixability.value;
   actOnFixability.value = current.includes(value)
-    ? current.filter((v) => v !== value)
-    : [...current, value];
-}
-
-// The model holds the ids the gate ignores, so a ticked box is an id absent from it.
-function blocksHumanization(value: string): boolean {
-  return !humanizationIgnoredLiabilities.value.includes(value);
-}
-
-function toggleBlockingLiability(value: string) {
-  const current = humanizationIgnoredLiabilities.value;
-  humanizationIgnoredLiabilities.value = current.includes(value)
     ? current.filter((v) => v !== value)
     : [...current, value];
 }
@@ -351,25 +315,6 @@ function toggleBlockingLiability(value: string) {
             Default 0.
           </template>
         </PlNumberField>
-      </div>
-      <div v-if="runsHumanization" class="checkbox-group">
-        <span class="checkbox-group-label">
-          Liabilities that block humanization
-          <PlTooltip class="info" position="top">
-            <template #tooltip>
-              Which liabilities a humanization edit is not allowed to introduce. Unticking one lets
-              the gate spell it freely, on top of the allowance above. Default: every one of them.
-            </template>
-          </PlTooltip>
-        </span>
-        <PlCheckbox
-          v-for="opt in HUMANIZATION_LIABILITY_OPTIONS"
-          :key="opt.value"
-          :model-value="blocksHumanization(opt.value)"
-          @update:model-value="() => toggleBlockingLiability(opt.value)"
-        >
-          {{ opt.label }}
-        </PlCheckbox>
       </div>
     </PlAccordionSection>
 
