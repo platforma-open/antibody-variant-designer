@@ -32,16 +32,24 @@ PER_ANTIBODY_TAG := "per-antibody"
 // while loading it understates it as "<256 MB".
 BASE_RAM := f.gib(2)
 
-// What one antibody costs, per byte of the three files it arrives as: the parsed
-// tolerance matrix, and the candidates and variants built from it. The variant
-// count is bounded by the params rather than by the data, so it needs no term of
-// its own. An upper-bound estimate, not a measurement.
+// What one antibody costs the design loop, per byte of the three files it
+// arrives as: the parsed tolerance matrix, and the candidates and variants built
+// from it while that antibody is the one in hand. What the run keeps past it is
+// RAM_PER_RANKED_VARIANT below. An upper-bound estimate, not a measurement.
 RAM_PER_ANTIBODY_BYTE := 64
 
-// The most this recipe ever asks for. The multiplier above is deliberately
-// generous, so an unusually large antibody must be able to raise the request
-// without pushing it past what a machine running this block has.
-RAM_CEILING := f.gib(8)
+// What one surviving variant costs the global re-rank, which holds every one of
+// them at once: 3542 bytes measured over 100k paired-Fv rows — the parsed
+// `Variant` objects, the rewritten row buffer and the joined output text
+// together — rounded up. The headroom also covers the rejection rows the batch
+// loop accumulates beside them.
+RAM_PER_RANKED_VARIANT := 4096
+
+// The most this recipe ever asks for. The multipliers above are deliberately
+// generous, so an unusually large dataset must be able to raise the request
+// without pushing it past what a machine running this block has. It matches
+// `index-and-scan.lib.tengo` and stays inside what the medium queue grants.
+RAM_CEILING := f.gib(12)
 
 // What a backend that cannot evaluate a formula at run time gets instead. It is
 // also the amount this recipe asked for unconditionally before it could measure.
@@ -52,14 +60,19 @@ FALLBACK_RAM := "4GiB"
 DEFAULT_CPU := 2
 
 /**
- * The RAM to ask for, given how many antibodies the staged files hold.
+ * The RAM to ask for, given how many antibodies the staged files hold and how
+ * many variants each is allowed to keep.
  *
- * `antibody_batch.py` runs one antibody at a time and releases it before the next one
- * starts, and every row it produces is appended rather than accumulated, so the
- * peak is BASE_RAM plus the largest single antibody. The average stands in for
- * the largest — see the same note in `index-and-scan.lib.tengo`.
+ * Two terms, because the step has two peaks. `antibody_batch.py` runs one
+ * antibody at a time and releases it before the next one starts, so the design
+ * loop costs one antibody — the average stands in for the largest, the same way
+ * `index-and-scan.lib.tengo` does it. Then `variant_store.rewrite_global_rank`
+ * reads every surviving variant of every antibody back to number them against
+ * each other, and a dataset-wide ordinal cannot be derived from any smaller set.
+ * That second term is what a run with many parents, or a raised
+ * `variantsPerParent`, actually grows.
  */
-ramFor := func(count) {
+ramFor := func(count, variantsPerParent) {
 	// An empty index would divide by zero, and leaves the base — which is all a
 	// run with nothing to design against needs.
 	divisor := count > 0 ? count : 1
@@ -67,6 +80,7 @@ ramFor := func(count) {
 		dividedBy(divisor).
 		times(RAM_PER_ANTIBODY_BYTE).
 		plus(BASE_RAM).
+		plus(count * variantsPerParent * RAM_PER_RANKED_VARIANT).
 		atMost(RAM_CEILING).
 		staticFallback(FALLBACK_RAM)
 }
@@ -147,13 +161,15 @@ paramArgsFor := func(params) {
 run := func(args) {
 	validation.assertType(args, ARGS, "build-variants: bad args")
 
+	recipeRam := ramFor(len(args.triaged), args.params.variantsPerParent)
+
 	cmd := exec.builder().
 		software(variantsSw).
 		resources({
 			queue: execConstants.MEDIUM_QUEUE,
 			onCPU: {
 				cpu: is_undefined(args.cpu) ? DEFAULT_CPU : args.cpu,
-				ram: is_undefined(args.ram) ? ramFor(len(args.triaged)) : args.ram
+				ram: is_undefined(args.ram) ? recipeRam : args.ram
 			}
 		}).
 		printErrStreamToStdout().
