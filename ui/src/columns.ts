@@ -19,6 +19,10 @@ export const VARIANT_VALUE_COLUMNS = {
   bindingRisk: "pl7.app/vdj/bindingRisk",
   lowConfidenceWarning: "pl7.app/liabilities/lowConfidence",
   status: "pl7.app/antibodyVariantDesigner/status",
+  developabilityScore: "pl7.app/developabilityScore",
+  parentDevelopabilityScore: "pl7.app/antibodyVariantDesigner/parentDevelopabilityScore",
+  humannessScore: "pl7.app/humannessScore",
+  parentHumannessScore: "pl7.app/antibodyVariantDesigner/parentHumannessScore",
   parentClonotypeId: "pl7.app/antibodyVariantDesigner/parentClonotypeId",
   parentClonotypeKey: "pl7.app/antibodyVariantDesigner/parentClonotypeKey",
 } as const;

@@ -240,6 +240,7 @@ wf.body(func(args) {
 	variantsBuilt := specHelpers.withIdentityAndCsv(
 		variants.output("variants"),
 		variants.output("humanness"),
+		liabilities.output("liabilities"),
 		parentLabels,
 		blockId)
 	variantsXsv := xsv.importFile(

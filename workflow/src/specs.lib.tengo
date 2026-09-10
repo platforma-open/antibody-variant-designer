@@ -292,6 +292,29 @@ variantColumns := func(blockId) {
 			}
 		},
 		{
+			// No `csvHeader`, for the same reason `parentHumannessScore` declares
+			// none: this is a reading aid on the page, not part of the vendor's set.
+			column: "parentDevelopabilityScore",
+			// The same value the Parents page shows, joined onto this row from
+			// `liabilities.tsv` so a reader sees what the edits bought without
+			// leaving the page. Filled in every run mode.
+			//
+			// NOT spelled `pl7.app/developabilityScore`, the name the variant's own
+			// burden carries: on this axis a row IS a variant, so that name must mean
+			// the variant's own value. A consumer joining on it would otherwise read
+			// the parent's number for a designed sequence.
+			spec: {
+				name: "pl7.app/antibodyVariantDesigner/parentDevelopabilityScore",
+				valueType: "Double",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Parent developability",
+					"pl7.app/description": "The engineering burden the parent carried before any edit - the baseline this variant had to beat. Measured the same way as \"Developability score\" beside it, so the two subtract. Lower is better.",
+					"pl7.app/format": ".2f"
+				}
+			}
+		},
+		{
 			// No `csvHeader`: the vendor's exported set is the fixed list
 			// `specs.test.tengo` pins, and this column is a reading aid on the
 			// page rather than part of that contract.

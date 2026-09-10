@@ -135,6 +135,9 @@ withParentIdOnLiabilities := func(liabilitiesFile, humannessFile, parentLabels) 
  *                   parentHumannessScore: the parent's own heavy-chain score,
  *                       joined from `humanness.tsv` as the baseline each row's
  *                       own score is read against
+ *                   parentDevelopabilityScore: the parent's own engineering
+ *                       burden, joined from `liabilities.tsv` as the baseline
+ *                       each row's own burden is read against
  *                 }
  *             parentLink: reference - one row per variant, holding the two keys
  *                 the linker's axes take and the sentinel `1` its value column
@@ -142,7 +145,7 @@ withParentIdOnLiabilities := func(liabilitiesFile, humannessFile, parentLabels) 
  *             synthesisCsv: reference - the vendor's fixed column set
  *           }
  */
-withIdentityAndCsv := func(variantsFile, humannessFile, parentLabels, blockId) {
+withIdentityAndCsv := func(variantsFile, humannessFile, liabilitiesFile, parentLabels, blockId) {
 	ptWf := pt.workflow().mem("1GiB").cpu(1)
 	rawDf := ptWf.frame(variantsFile, { xsvType: "tsv", inferSchema: false })
 
@@ -170,6 +173,18 @@ withIdentityAndCsv := func(variantsFile, humannessFile, parentLabels, blockId) {
 				pt.col("heavyHumannessScore").alias("parentHumannessScore")),
 		{ on: ["clonotypeKey"], how: "left" })
 	df = df.withColumns(pt.col("parentHumannessScore").fillNull(""))
+
+	// LEFT, and only the score: the verdict and the summary answer a question about
+	// the parent, which the Parents page asks. Aliased because the variant's own
+	// burden already occupies `developabilityScore` on this row — an unaliased join
+	// would collide the parent's number onto the designed sequence's column.
+	df = df.join(
+		ptWf.frame(liabilitiesFile, { xsvType: "tsv", inferSchema: false }).
+			select(
+				pt.col("clonotypeKey"),
+				pt.col("developabilityScore").alias("parentDevelopabilityScore")),
+		{ on: ["clonotypeKey"], how: "left" })
+	df = df.withColumns(pt.col("parentDevelopabilityScore").fillNull(""))
 	df.save("variants-with-id.tsv")
 
 	// The linker's own table: the two keys the edge runs between, and a sentinel

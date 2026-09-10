@@ -84,6 +84,15 @@ function handleComparisonVisibility(open: boolean) {
   if (!open) selectedRowKey.value = undefined;
 }
 
+// A cell absent from the row and a cell holding an empty string both mean "not
+// measured" here, and both must read as a dash rather than as 0 — the join that
+// fills the parent baselines writes "" for a parent the step never scored.
+function measuredNumber(cell: unknown): number | null {
+  if (cell === null || cell === undefined || cell === "") return null;
+  const parsed = Number(cell);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 const comparisonProps = computed(() => {
   const row = selectedRow.value;
   if (!row) return undefined;
@@ -114,6 +123,10 @@ const comparisonProps = computed(() => {
         : Number(v[VARIANT_VALUE_COLUMNS.worstConfidence]),
     bindingRisk: String(v[VARIANT_VALUE_COLUMNS.bindingRisk] ?? ""),
     lowConfidenceWarning: String(v[VARIANT_VALUE_COLUMNS.lowConfidenceWarning] ?? ""),
+    developabilityScore: measuredNumber(v[VARIANT_VALUE_COLUMNS.developabilityScore]),
+    parentDevelopabilityScore: measuredNumber(v[VARIANT_VALUE_COLUMNS.parentDevelopabilityScore]),
+    humannessScore: measuredNumber(v[VARIANT_VALUE_COLUMNS.humannessScore]),
+    parentHumannessScore: measuredNumber(v[VARIANT_VALUE_COLUMNS.parentHumannessScore]),
   };
 });
 </script>
