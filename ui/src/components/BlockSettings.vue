@@ -195,7 +195,7 @@ function toggleFixability(value: string) {
       </div>
     </PlAccordionSection>
 
-    <PlAccordionSection label="Fixability">
+    <PlAccordionSection label="Candidate generation">
       <div class="checkbox-group">
         <span class="checkbox-group-label">
           Act on fixability
@@ -219,9 +219,6 @@ function toggleFixability(value: string) {
           </PlTooltip>
         </PlCheckbox>
       </div>
-    </PlAccordionSection>
-
-    <PlAccordionSection label="Candidate generation">
       <div class="field-grid">
         <PlNumberField
           v-model="maxLiabilityEdits"
