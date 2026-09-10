@@ -49,7 +49,7 @@ export const BLOCK_DATA_DEFAULTS = {
   maxFrameworkEdits: 20,
   frConfidenceThreshold: 4.0,
   cdrConfidenceThreshold: 6.0,
-  variantsPerParent: 10,
+  variantsPerParent: 100,
   candidateResiduesPerPosition: 3,
   structuralWeight: 1.0,
   objectiveWeight: 1.0,

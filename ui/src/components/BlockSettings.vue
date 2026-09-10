@@ -321,12 +321,12 @@ function toggleFixability(value: string) {
           v-model="variantsPerParent"
           label="Variants per parent"
           :minValue="1"
-          :maxValue="50"
+          :maxValue="200"
           :step="1"
         >
           <template #tooltip>
             How many top-ranked variants survive per parent antibody. Higher shows more
-            alternatives; lower keeps only the strongest candidates. Default 10.
+            alternatives; lower keeps only the strongest candidates. Default 100.
           </template>
         </PlNumberField>
         <PlNumberField
