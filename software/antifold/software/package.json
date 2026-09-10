@@ -6,7 +6,6 @@
   "type": "module",
   "scripts": {
     "build": "bash scripts/stage-build.sh && block-tools software build",
-    "check": "uv run --group dev ruff check .",
     "deps:export": "bash scripts/deps-export.sh",
     "prepublishOnly": "pl-pkg prepublish"
   },
