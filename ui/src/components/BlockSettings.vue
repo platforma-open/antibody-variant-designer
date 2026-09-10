@@ -103,6 +103,10 @@ const epistasisRescoreTopK = defaulted("epistasisRescoreTopK");
 
 const runModeModel = defaulted("runMode");
 
+// `liabilities` is the one mode that builds no humanization objective, so a
+// setting only that objective reads decides nothing there.
+const runsHumanization = computed(() => runModeModel.value !== "liabilities");
+
 const actOnFixability = defaulted("actOnFixability");
 
 function isFixabilityChecked(value: string): boolean {
@@ -299,6 +303,7 @@ function toggleFixability(value: string) {
           </template>
         </PlNumberField>
         <PlNumberField
+          v-if="runsHumanization"
           v-model="maxNewLiabilities"
           label="New liabilities allowed"
           :minValue="0"
