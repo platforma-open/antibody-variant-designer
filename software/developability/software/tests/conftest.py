@@ -11,6 +11,16 @@ import pytest
 
 from engine import parent_clonotypes
 
+# The weights the shared taxonomy package publishes. A fixture that wrote none would
+# score every antibody zero and let a broken developability score capture as golden.
+FIXABILITY_WEIGHTS = {
+    "easily_fixable": 1.0,
+    "fixable": 3.0,
+    "hard_to_fix": 8.0,
+    "structural": 20.0,
+    "disqualifying": 0.0,
+}
+
 
 class StagedBatch:
     """One run's workdir, laid out the way `main.tpl.tengo` stages it: PDB blobs
@@ -54,7 +64,7 @@ class StagedBatch:
                 {
                     "schemaVersion": 1,
                     "liabilities": liabilities,
-                    "fixabilityWeights": {},
+                    "fixabilityWeights": FIXABILITY_WEIGHTS,
                 }
             )
         )

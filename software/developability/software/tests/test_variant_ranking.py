@@ -215,6 +215,7 @@ class TestRankVariantsOrderingAndTruncation:
             [high_risk, low_risk], residues=[],
             tolerance_lookup={("H", "108"): _tolerance_row(1.0)},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=20,
+            taxonomy=[], fixability_weights={},
         )
 
         assert [v.binding_risk for v in variants] == ["High", "Low"]
@@ -229,6 +230,7 @@ class TestRankVariantsOrderingAndTruncation:
         variants = variant_ranking.rank_variants(
             candidate_list, residues=[], tolerance_lookup={},
             variants_per_parent=2, low_tolerance_floor=3.0, epistasis_rescore_top_k=20,
+            taxonomy=[], fixability_weights={},
         )
 
         assert len(variants) == 2
@@ -248,12 +250,14 @@ class TestRankVariantsOrderingAndTruncation:
         rescored = variant_ranking.rank_variants(
             [three_edits, one_edit], residues=[], tolerance_lookup={},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=2,
+            taxonomy=[], fixability_weights={},
         )
         assert [v.changed_positions for v in rescored] == ["H:N107D", "H:N108D"]
 
         not_rescored = variant_ranking.rank_variants(
             [three_edits, one_edit], residues=[], tolerance_lookup={},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=0,
+            taxonomy=[], fixability_weights={},
         )
         assert [v.changed_positions for v in not_rescored] == ["H:N108D", "H:N107D"]
 
@@ -268,6 +272,7 @@ class TestRankVariantsOrderingAndTruncation:
         variants = variant_ranking.rank_variants(
             [*window, outside], residues=[], tolerance_lookup={},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=1,
+            taxonomy=[], fixability_weights={},
         )
 
         # `outside` ranks second regardless of the penalty the window's one
@@ -280,6 +285,7 @@ class TestRankVariantsOrderingAndTruncation:
         [variant] = variant_ranking.rank_variants(
             [three_edits], residues=[], tolerance_lookup={},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=1,
+            taxonomy=[], fixability_weights={},
         )
 
         assert variant.structural_tolerance == pytest.approx(5.5)
@@ -297,6 +303,7 @@ class TestRankVariantsOrderingAndTruncation:
             residues=[],
             tolerance_lookup={("H", "107"): _tolerance_row(1.0), ("H", "108"): _tolerance_row(9.0)},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=20,
+            taxonomy=[], fixability_weights={},
         )
 
         assert variants[0].changed_positions == "H:N107D"
@@ -318,6 +325,7 @@ class TestEveryVariantCarriesItsHeavyChainsHumanness:
         [variant] = variant_ranking.rank_variants(
             [_candidate()], residues=residues, tolerance_lookup={},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=20,
+            taxonomy=[], fixability_weights={},
         )
 
         assert variant.humanness_score == pytest.approx(1.0)
@@ -331,6 +339,7 @@ class TestEveryVariantCarriesItsHeavyChainsHumanness:
         [variant] = variant_ranking.rank_variants(
             [_candidate(changed_positions="H:N1D")], residues=residues, tolerance_lookup={},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=20,
+            taxonomy=[], fixability_weights={},
         )
 
         assert variant.humanness_score is not None
@@ -342,6 +351,7 @@ class TestEveryVariantCarriesItsHeavyChainsHumanness:
         [variant] = variant_ranking.rank_variants(
             [_candidate()], residues=residues, tolerance_lookup={},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=20,
+            taxonomy=[], fixability_weights={},
         )
 
         assert variant.humanness_score is None
@@ -361,6 +371,7 @@ class TestEveryVariantCarriesItsHeavyChainsHumanness:
             [replace(_candidate(), edits=(light_edit,))], residues=residues,
             tolerance_lookup={},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=20,
+            taxonomy=[], fixability_weights={},
         )
 
         assert variant.humanness_score == pytest.approx(0.0)
@@ -374,6 +385,7 @@ class TestRankVariantsVhhFlag:
         [variant] = variant_ranking.rank_variants(
             [candidate], residues=residues, tolerance_lookup={},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=20,
+            taxonomy=[], fixability_weights={},
         )
 
         assert variant.chain == "H"
@@ -385,6 +397,7 @@ class TestRankVariantsVhhFlag:
         [variant] = variant_ranking.rank_variants(
             [candidate], residues=residues, tolerance_lookup={},
             variants_per_parent=10, low_tolerance_floor=3.0, epistasis_rescore_top_k=20,
+            taxonomy=[], fixability_weights={},
         )
 
         assert variant.chain == "H,L"
@@ -399,6 +412,7 @@ def _emitted_variant(
     changed_positions="H:N107D, H:G108S",
     structural_tolerance=2.0,
     humanness_score=None,
+    developability_score=0.0,
 ):
     # `parent_rank` defaults to `rank` — the shape every caller sees before
     # `rewrite_global_rank` ever runs, when the two are still identical.
@@ -415,6 +429,7 @@ def _emitted_variant(
         binding_risk="Medium",
         low_confidence_warning=low_confidence_warning,
         status="unvalidated-hypothesis",
+        developability_score=developability_score,
     )
 
 

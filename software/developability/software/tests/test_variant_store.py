@@ -20,6 +20,7 @@ def _variant(
     structural_tolerance=2.0,
     humanness_score=None,
     addressed_target="Deamidation (N[GS]) @ CDR1 H:107",
+    developability_score=0.0,
 ):
     # `parent_rank` defaults to `rank` — the shape every caller sees before
     # `rewrite_global_rank` ever runs, when the two are still identical.
@@ -36,6 +37,7 @@ def _variant(
         binding_risk="Medium",
         low_confidence_warning=low_confidence_warning,
         status="unvalidated-hypothesis",
+        developability_score=developability_score,
     )
 
 

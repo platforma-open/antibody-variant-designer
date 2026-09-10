@@ -256,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     taxonomy = taxonomy_store.read_taxonomy(args.definitions)
+    fixability_weights = taxonomy_store.read_fixability_weights(args.definitions)
     act_on_fixability = [v for v in args.act_on_fixability.split(",") if v]
 
     pdb_dir = Path(args.pdb_dir)
@@ -293,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
         # absence here would read as a false "none" verdict.
         if reason in _REACHED_TRIAGE_REASONS:
             liability_store.append_liabilities_tsv(
-                args.out_liabilities, entry.clonotype_key, triaged
+                args.out_liabilities, entry.clonotype_key, triaged, fixability_weights
             )
         # The design step, not this one, decides whether a parent with no triaged
         # liability still ships a variant — it owns this reason's row, and only when

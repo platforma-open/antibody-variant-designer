@@ -12,7 +12,7 @@ Every candidate reaching this module already passed the re-scan gate in
 import math
 from dataclasses import dataclass, replace
 
-from engine import humanness_gate, residue_index, variant_candidates
+from engine import developability_score, humanness_gate, residue_index, variant_candidates
 
 DEFAULT_RERANK_STRUCTURAL_WEIGHT = 1.0
 DEFAULT_RERANK_HUMANNESS_WEIGHT = 1.0
@@ -47,6 +47,7 @@ class Variant:
     binding_risk: str  # "Low" | "Medium" | "High"
     low_confidence_warning: bool
     status: str
+    developability_score: float
 
 
 def _low_tolerance_positions(tolerance_lookup: dict, floor: float) -> set:
@@ -156,6 +157,8 @@ def rank_variants(
     variants_per_parent: int,
     low_tolerance_floor: float,
     epistasis_rescore_top_k: int,
+    taxonomy: list[dict],
+    fixability_weights: dict[str, float],
 ) -> list[Variant]:
     """Rank one parent's candidates and return the top variants.
 
@@ -204,6 +207,9 @@ def rank_variants(
                 low_confidence_warning=candidate.low_confidence,
                 humanness_score=heavy_humanness(residues, candidate.edits),
                 status=STATUS,
+                developability_score=developability_score.score_after_edits(
+                    residues, candidate.edits, taxonomy, fixability_weights
+                ),
             )
         )
     return variants

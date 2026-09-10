@@ -292,6 +292,24 @@ variantColumns := func(blockId) {
 			}
 		},
 		{
+			// No `csvHeader`: the vendor's exported set is the fixed list
+			// `specs.test.tengo` pins, and this column is a reading aid on the
+			// page rather than part of that contract.
+			column: "developabilityScore",
+			spec: {
+				name: "pl7.app/developabilityScore",
+				valueType: "Double",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Developability score",
+					"pl7.app/description": "The engineering burden this variant's own sequence still carries: every liability re-detected on it costs its fixability class weight times the weight of the region it sits in, and the costs sum. Lower is better, 0 means no liability left. The parent's own score on the Parents page is measured the same way, so the two subtract into what the edits bought. A disqualifying liability is not counted here - it is a verdict, not a cost.",
+					"pl7.app/format": ".2f",
+					"pl7.app/isScore": "true",
+					"pl7.app/score/rankingOrder": "increasing"
+				}
+			}
+		},
+		{
 			column: "worstConfidence",
 			csvHeader: "worstConfidence",
 			// Every member of the confidence family carries the metric
@@ -624,6 +642,21 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 						// Side panel, for the same reason as Summary above.
 						"pl7.app/table/visibility": "optional",
 						"pl7.app/description": "Every framework position humanization considered on this parent, comma-joined as <wild type>@<chain><IMGT position> (humanised|declined) — declined means no candidate at that position cleared the humanness gate. \"None\" when every framework position already read as human. Empty when the run did not include the humanization objective."
+					}
+				}
+			},
+			{
+				column: "developabilityScore",
+				spec: {
+					name: "pl7.app/developabilityScore",
+					valueType: "Double",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Developability score",
+						"pl7.app/description": "The engineering burden this parent carries before any edit: every triaged liability costs its fixability class weight times the weight of the region it sits in, and the costs sum. Buried and fixability-declined sites are counted too - the number measures what the antibody carries, not what this run chose to act on. Lower is better, 0 means none found.",
+						"pl7.app/format": ".2f",
+						"pl7.app/isScore": "true",
+						"pl7.app/score/rankingOrder": "increasing"
 					}
 				}
 			},

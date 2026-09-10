@@ -97,6 +97,7 @@ def process_one(
     fr_confidence_threshold: float = liability_triage.DEFAULT_FR_CONFIDENCE_THRESHOLD,
     max_new_liabilities: int = humanness_objective.DEFAULT_MAX_NEW_LIABILITIES,
     ignored_liability_ids: frozenset[str] = humanness_objective.DEFAULT_IGNORED_LIABILITY_IDS,
+    fixability_weights: dict[str, float] | None = None,
 ) -> ParentDesignResult:
     """Gate then rank one antibody against every objective `mode` runs, together, as one edit
     set per candidate.
@@ -176,6 +177,8 @@ def process_one(
             variants_per_parent,
             low_tolerance_floor,
             epistasis_rescore_top_k,
+            taxonomy,
+            fixability_weights or {},
         )
         if cleared
         else []
@@ -334,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
             f"{args.definitions} does not exist — expected the shared taxonomy package's output"
         )
     taxonomy = taxonomy_store.read_taxonomy(args.definitions)
+    fixability_weights = taxonomy_store.read_fixability_weights(args.definitions)
     ignored_liability_ids = frozenset(
         v for v in args.humanization_ignored_liabilities.split(",") if v
     )
@@ -379,6 +383,7 @@ def main(argv: list[str] | None = None) -> int:
             args.fr_confidence_threshold,
             args.max_new_liabilities,
             ignored_liability_ids,
+            fixability_weights,
         )
         variant_store.append_variants_tsv(
             args.out_variants,

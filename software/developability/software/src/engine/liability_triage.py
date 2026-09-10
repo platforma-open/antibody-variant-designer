@@ -40,7 +40,7 @@ def generates_for(triaged: Triaged) -> bool:
     return triaged.verdict == "exposed"
 
 
-def _relevant_residue(hit) -> residue_index.Residue:
+def relevant_residue(hit) -> residue_index.Residue:
     """The motif's own chemically-relevant residue, when the hit has one.
 
     A cysteine hit has no single residue whose chemistry changes. This
@@ -64,7 +64,7 @@ def _verdict_for_one(
     rsasa_buried_cutoff: float,
     act_on_fixability: list[str],
 ) -> tuple[str, float | None]:
-    relevant = _relevant_residue(hit)
+    relevant = relevant_residue(hit)
     rsasa = rsasa_lookup.get((relevant.chain, relevant.imgt))
 
     # `rsasa is None` means the residue's type is missing from the

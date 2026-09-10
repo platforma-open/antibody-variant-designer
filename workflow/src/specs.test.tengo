@@ -62,7 +62,7 @@ TestVariantColumns := func() {
 	// a Variants-page-only view the vendor's contract never carried, because the
 	// page needs a rank that survives the global re-rank's second pass, and
 	// `parentHumannessScore`, the baseline joined in beside the variant's own.
-	test.isEqual(17, len(settings.columns))
+	test.isEqual(18, len(settings.columns))
 	for c in settings.columns {
 		test.isTrue(c.column != "variantId")
 	}
@@ -216,7 +216,7 @@ TestParentsGroup := func() {
 	test.isEqual(1, len(settings.axes))
 	test.isEqual("pl7.app/vdj/scClonotypeKey", settings.axes[0].spec.name)
 
-	test.isEqual(7, len(settings.columns))
+	test.isEqual(8, len(settings.columns))
 	test.isEqual("pl7.app/liabilities/verdict", byColumn.verdict.spec.name)
 	test.isEqual("pl7.app/liabilities/summary", byColumn.summary.spec.name)
 	test.isEqual("String", byColumn.verdict.spec.valueType)
@@ -246,17 +246,18 @@ TestParentsGroup := func() {
 	test.isEqual("hidden", settings.axes[0].spec.annotations["pl7.app/table/visibility"])
 	test.isTrue(is_undefined(CLONOTYPE_AXIS.annotations["pl7.app/table/visibility"]))
 
-	// The parent leads, then both verdicts, then both summaries, then the
-	// parent's own humanness score, and the key last — the list order. The two
+	// The parent leads, then both verdicts, then both summaries, then the two
+	// numbers the parent is read by, and the key last — the list order. The two
 	// verdicts sit together so a reader compares them without crossing a
-	// free-text column.
+	// free-text column, and the two scores sit together for the same reason.
 	test.isEqual("parentClonotypeId", settings.columns[0].column)
 	test.isEqual("verdict", settings.columns[1].column)
 	test.isEqual("humannessVerdict", settings.columns[2].column)
 	test.isEqual("summary", settings.columns[3].column)
 	test.isEqual("humannessSummary", settings.columns[4].column)
-	test.isEqual("heavyHumannessScore", settings.columns[5].column)
-	test.isEqual("parentClonotypeKey", settings.columns[6].column)
+	test.isEqual("developabilityScore", settings.columns[5].column)
+	test.isEqual("heavyHumannessScore", settings.columns[6].column)
+	test.isEqual("parentClonotypeKey", settings.columns[7].column)
 }
 
 TestParentsHumannessPair := func() {
@@ -406,8 +407,8 @@ TestOrderPriorityFollowsListPosition := func() {
 
 	// The first column of each group takes one step per column, the last takes
 	// one step.
-	test.isEqual("17000", variants.columns[0].spec.annotations["pl7.app/table/orderPriority"])
-	test.isEqual("1000", variants.columns[16].spec.annotations["pl7.app/table/orderPriority"])
-	test.isEqual("7000", parents.columns[0].spec.annotations["pl7.app/table/orderPriority"])
-	test.isEqual("1000", parents.columns[6].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("18000", variants.columns[0].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("1000", variants.columns[17].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("8000", parents.columns[0].spec.annotations["pl7.app/table/orderPriority"])
+	test.isEqual("1000", parents.columns[7].spec.annotations["pl7.app/table/orderPriority"])
 }

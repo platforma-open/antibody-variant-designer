@@ -12,12 +12,13 @@ import io
 import json
 from pathlib import Path
 
-from engine import liability_triage, residue_store
+from engine import developability_score, liability_triage, residue_store
 
 TSV_COLUMNS = [
     "clonotypeKey",
     "verdict",
     "summary",
+    "developabilityScore",
 ]
 
 
@@ -70,16 +71,31 @@ def write_liabilities_header(path: str) -> None:
 
 
 def append_liabilities_tsv(
-    path: str, clonotype_key: str, triaged_list: list[liability_triage.Triaged]
+    path: str,
+    clonotype_key: str,
+    triaged_list: list[liability_triage.Triaged],
+    fixability_weights: dict[str, float],
 ) -> None:
-    """Append one row: coarse verdict plus summary of every triaged liability.
+    """Append one row: coarse verdict, summary of every triaged liability, and the burden
+    they add up to.
 
     The summary includes buried and fixability-declined sites — the Parents page has no
     other source for them. This function appends (not returns) because one file holds the
-    whole dataset and the pipeline streams one antibody at a time."""
+    whole dataset and the pipeline streams one antibody at a time.
+
+    The score covers that same whole list, buried and declined sites included: it measures
+    what the parent carries, not what this run chose to act on, so a variant scored after a
+    repair is compared against everything the parent started with."""
     summary = liability_triage.summarize_liabilities(triaged_list)
     row_buffer = io.StringIO()
     writer = csv.writer(row_buffer, delimiter="\t", lineterminator="\n")
-    writer.writerow([_tsv_value(clonotype_key), summary.verdict, summary.summary])
+    writer.writerow(
+        [
+            _tsv_value(clonotype_key),
+            summary.verdict,
+            summary.summary,
+            developability_score.score(triaged_list, fixability_weights),
+        ]
+    )
     with Path(path).open("a") as out_file:
         out_file.write(row_buffer.getvalue())

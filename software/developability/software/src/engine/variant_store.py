@@ -30,6 +30,7 @@ TSV_COLUMNS = [
     "bindingRisk",
     "lowConfidenceWarning",
     "status",
+    "developabilityScore",
 ]
 
 
@@ -84,6 +85,7 @@ def _row(clonotype_key: str, variant_key_str: str, v: variant_ranking.Variant) -
         v.binding_risk,
         _low_confidence_warning_str(v),
         v.status,
+        v.developability_score,
     ]
 
 
@@ -130,6 +132,7 @@ def read_variants_tsv(path: str) -> list[tuple[str, str, variant_ranking.Variant
                         binding_risk=row["bindingRisk"],
                         low_confidence_warning=row["lowConfidenceWarning"] == "yes",
                         status=row["status"],
+                        developability_score=float(row["developabilityScore"]),
                     ),
                 )
             )

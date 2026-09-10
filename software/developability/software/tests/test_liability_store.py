@@ -66,12 +66,15 @@ class TestTriagedJsonRoundTrips:
         assert liability_store.read_triaged(str(path)) == []
 
 
+WEIGHTS = {"fixable": 3.0}
+
+
 class TestLiabilitiesTsv:
     def test_a_clean_parent_writes_none_and_none(self, tmp_path):
         path = tmp_path / "liabilities.tsv"
 
         liability_store.write_liabilities_header(str(path))
-        liability_store.append_liabilities_tsv(str(path), "clone-1", [])
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [], WEIGHTS)
 
         [row] = _rows_of(path)
         assert row["verdict"] == "none"
@@ -85,7 +88,7 @@ class TestLiabilitiesTsv:
         path = tmp_path / "liabilities.tsv"
 
         liability_store.write_liabilities_header(str(path))
-        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, declined])
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, declined], WEIGHTS)
 
         [row] = _rows_of(path)
         assert row["verdict"] == "present"
@@ -99,10 +102,12 @@ class TestLiabilitiesTsv:
         path = tmp_path / "liabilities.tsv"
 
         liability_store.write_liabilities_header(str(path))
-        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, buried])
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, buried], WEIGHTS)
 
         [_, data_line] = path.read_text().splitlines()
-        [clonotype_key, verdict, summary] = next(csv.reader(io.StringIO(data_line), delimiter="\t"))
+        [clonotype_key, verdict, summary, _score] = next(
+            csv.reader(io.StringIO(data_line), delimiter="\t")
+        )
         assert clonotype_key == "clone-1"
         assert verdict == "present"
         assert summary == "deamidation@H107 (exposed), deamidation@H108 (buried)"
@@ -122,10 +127,10 @@ class TestOneFileHoldsEveryParent:
 
         liability_store.write_liabilities_header(str(path))
         liability_store.append_liabilities_tsv(
-            str(path), "clone-1", [_triaged([_residue("H", 0, imgt="107")])]
+            str(path), "clone-1", [_triaged([_residue("H", 0, imgt="107")])], WEIGHTS
         )
         liability_store.append_liabilities_tsv(
-            str(path), "clone-2", [_triaged([_residue("H", 1, imgt="108")])]
+            str(path), "clone-2", [_triaged([_residue("H", 1, imgt="108")])], WEIGHTS
         )
 
         assert [r["clonotypeKey"] for r in _rows_of(path)] == ["clone-1", "clone-2"]
@@ -138,6 +143,6 @@ class TestOneFileHoldsEveryParent:
         path = tmp_path / "liabilities.tsv"
 
         liability_store.write_liabilities_header(str(path))
-        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, buried])
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, buried], WEIGHTS)
 
         assert len(_rows_of(path)) == 1
