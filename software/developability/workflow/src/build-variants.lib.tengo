@@ -26,8 +26,11 @@ HUMANNESS_FILE := "humanness.tsv"
 PER_ANTIBODY_TAG := "per-antibody"
 
 // What the process holds before it reads any of the caller's data: the
-// interpreter and the liability taxonomy.
-BASE_RAM := f.gib(1)
+// interpreter, the liability taxonomy, and promb's human-OAS peptide set. That
+// set dominates the three — six million 9-mers in a python set measure 913 MiB
+// resident, whatever the run designs against — and the banner promb prints
+// while loading it understates it as "<256 MB".
+BASE_RAM := f.gib(2)
 
 // What one antibody costs, per byte of the three files it arrives as: the parsed
 // tolerance matrix, and the candidates and variants built from it. The variant

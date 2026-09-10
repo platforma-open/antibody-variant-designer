@@ -98,7 +98,7 @@ TestBuildVariantsCountsAllThreeOfAnAntibodysFiles := func() {
 	sizes := { "a.tsv": 50000, "a.json": 8000, "a.triaged.json": 2000 }
 	// One antibody, so the average is the whole tag: the tolerance matrix, the
 	// residue index and the triaged liabilities together.
-	test.isEqual((50000 + 8000 + 2000) * 64 + GIB, _ram(buildVariants.ramFor(1), tagMap, sizes))
+	test.isEqual((50000 + 8000 + 2000) * 64 + 2 * GIB, _ram(buildVariants.ramFor(1), tagMap, sizes))
 }
 
 TestBuildVariantsStaysInsideItsCeiling := func() {
