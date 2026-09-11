@@ -5,13 +5,16 @@ import {
   PlBtnGhost,
   PlCheckbox,
   PlDatasetSelector,
+  PlDropdown,
   PlMaskIcon24,
   PlNumberField,
   PlSectionSeparator,
   PlSlideModal,
   PlTooltip,
 } from "@platforma-sdk/ui-vue";
-import { ref } from "vue";
+import { computed, ref } from "vue";
+import { BLOCK_DATA_DEFAULTS } from "@platforma-open/milaboratories.antibody-variant-designer.model";
+import type { BlockData } from "@platforma-open/milaboratories.antibody-variant-designer.model";
 import { useApp } from "../app";
 
 // Settings, not any one page's — every page renders this same button and
@@ -52,13 +55,67 @@ const FIXABILITY_OPTIONS = [
   },
 ] as const;
 
+const RUN_MODE_OPTIONS = [
+  { value: "liabilities", label: "Liabilities" },
+  { value: "humanization", label: "Humanization" },
+  { value: "liabilities + humanization", label: "Liabilities + humanization" },
+] as const;
+
+type DefaultedField = keyof typeof BLOCK_DATA_DEFAULTS;
+
+// A project created before a field existed carries no value for it, and the
+// control it binds renders empty while the run uses the model's default. The
+// getter shows that default; nothing reaches persisted state until the
+// operator edits the field.
+function defaulted<K extends DefaultedField>(field: K) {
+  return computed({
+    get: () => (app.model.data[field] ?? BLOCK_DATA_DEFAULTS[field]) as BlockData[K],
+    set: (value: BlockData[K]) => {
+      app.model.data[field] = value;
+    },
+  });
+}
+
+const rsasaBuriedCutoff = defaulted("rsasaBuriedCutoff");
+const frConfidenceThreshold = defaulted("frConfidenceThreshold");
+const cdrConfidenceThreshold = defaulted("cdrConfidenceThreshold");
+// Reads the pre-rename key too, mirroring `.args()`: a project persisted with
+// `maxEditsPerVariant` and no `maxLiabilityEdits` must show its old number
+// here, not the default `defaulted()` would show for an absent new key.
+const maxLiabilityEdits = computed({
+  get: () =>
+    app.model.data.maxLiabilityEdits ??
+    app.model.data.maxEditsPerVariant ??
+    BLOCK_DATA_DEFAULTS.maxLiabilityEdits,
+  set: (value: number) => {
+    app.model.data.maxLiabilityEdits = value;
+  },
+});
+const maxFrameworkEdits = defaulted("maxFrameworkEdits");
+const candidateResiduesPerPosition = defaulted("candidateResiduesPerPosition");
+const structuralWeight = defaulted("structuralWeight");
+const objectiveWeight = defaulted("objectiveWeight");
+const nonHumanPriorMargin = defaulted("nonHumanPriorMargin");
+const maxNewLiabilities = defaulted("maxNewLiabilities");
+const variantsPerParent = defaulted("variantsPerParent");
+const lowToleranceFloor = defaulted("lowToleranceFloor");
+const epistasisRescoreTopK = defaulted("epistasisRescoreTopK");
+
+const runModeModel = defaulted("runMode");
+
+// `liabilities` is the one mode that builds no humanization objective, so a
+// setting only that objective reads decides nothing there.
+const runsHumanization = computed(() => runModeModel.value !== "liabilities");
+
+const actOnFixability = defaulted("actOnFixability");
+
 function isFixabilityChecked(value: string): boolean {
-  return app.model.data.actOnFixability.includes(value);
+  return actOnFixability.value.includes(value);
 }
 
 function toggleFixability(value: string) {
-  const current = app.model.data.actOnFixability;
-  app.model.data.actOnFixability = current.includes(value)
+  const current = actOnFixability.value;
+  actOnFixability.value = current.includes(value)
     ? current.filter((v) => v !== value)
     : [...current, value];
 }
@@ -86,10 +143,23 @@ function toggleFixability(value: string) {
       {{ app.model.outputs.infoMessage }}
     </PlAlert>
 
+    <PlAccordionSection label="Objectives">
+      <PlDropdown v-model="runModeModel" label="Design against" :options="RUN_MODE_OPTIONS">
+        <template #tooltip>
+          Which developability objectives this run designs against. Liabilities repairs detected
+          liability motifs, the default and the only behaviour before this option existed.
+          Humanization instead proposes framework substitutions that make the antibody read as more
+          human, over positions the liability objective never touches. Liabilities + humanization
+          runs both, and cuts the liability objective to the liabilities lying entirely inside a CDR
+          so the two never propose against the same residue. Default: Liabilities.
+        </template>
+      </PlDropdown>
+    </PlAccordionSection>
+
     <PlAccordionSection label="Exposure and confidence">
       <div class="field-grid">
         <PlNumberField
-          v-model="app.model.data.rsasaBuriedCutoff"
+          v-model="rsasaBuriedCutoff"
           label="Buried rSASA cutoff"
           :minValue="0"
           :maxValue="1"
@@ -102,7 +172,7 @@ function toggleFixability(value: string) {
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.frConfThresh"
+          v-model="frConfidenceThreshold"
           label="Framework confidence threshold (Å)"
           :minValue="1"
           :maxValue="10"
@@ -115,7 +185,7 @@ function toggleFixability(value: string) {
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.cdrConfThresh"
+          v-model="cdrConfidenceThreshold"
           label="CDR confidence threshold (Å)"
           :minValue="1"
           :maxValue="12"
@@ -129,9 +199,9 @@ function toggleFixability(value: string) {
       </div>
     </PlAccordionSection>
 
-    <PlAccordionSection label="Fixability">
-      <div class="fixability-group">
-        <span class="fixability-group-label">
+    <PlAccordionSection label="Candidate generation">
+      <div class="checkbox-group">
+        <span class="checkbox-group-label">
           Act on fixability
           <PlTooltip class="info" position="top">
             <template #tooltip>
@@ -153,24 +223,35 @@ function toggleFixability(value: string) {
           </PlTooltip>
         </PlCheckbox>
       </div>
-    </PlAccordionSection>
-
-    <PlAccordionSection label="Candidate generation">
       <div class="field-grid">
         <PlNumberField
-          v-model="app.model.data.maxEditsPerVariant"
-          label="Max edits per variant"
+          v-model="maxLiabilityEdits"
+          label="Max liability edits per variant"
           :minValue="1"
-          :maxValue="20"
+          :maxValue="40"
           :step="1"
         >
           <template #tooltip>
-            Caps how many residues one variant may change at once. Higher allows bigger repairs in a
-            single molecule; lower keeps each variant closer to the parent. Default 5.
+            Caps how many liability-motivated residues one variant may change. It never bounds
+            framework edits. Higher allows bigger repairs in a single molecule; lower keeps each
+            variant closer to the parent. Default 10.
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.candidateResiduesPerPosition"
+          v-model="maxFrameworkEdits"
+          label="Max framework edits per variant"
+          :minValue="1"
+          :maxValue="40"
+          :step="1"
+        >
+          <template #tooltip>
+            Caps how many non-human framework residues one humanization variant may change. It never
+            bounds liability edits. Higher allows a fuller humanization in a single molecule; lower
+            keeps each variant closer to the parent. Default 20.
+          </template>
+        </PlNumberField>
+        <PlNumberField
+          v-model="candidateResiduesPerPosition"
           label="Candidate residues per position"
           :minValue="1"
           :maxValue="19"
@@ -182,25 +263,79 @@ function toggleFixability(value: string) {
             it. Default 3.
           </template>
         </PlNumberField>
+        <PlNumberField
+          v-model="structuralWeight"
+          label="Fold tolerance weight"
+          :minValue="0"
+          :maxValue="5"
+          :step="0.1"
+        >
+          <template #tooltip>
+            How much a position's fold tolerance counts when ranking the substitutions offered
+            there. 0 ignores the fold entirely; higher favours residues the structure accepts.
+            Default 1.
+          </template>
+        </PlNumberField>
+        <PlNumberField
+          v-model="objectiveWeight"
+          label="Objective prior weight"
+          :minValue="0"
+          :maxValue="5"
+          :step="0.1"
+        >
+          <template #tooltip>
+            How much the objective's own per-residue preference counts against the fold tolerance. 0
+            ignores it; higher favours the residues the objective prefers. Default 1.
+          </template>
+        </PlNumberField>
+        <PlNumberField
+          v-model="nonHumanPriorMargin"
+          label="Non-human prior margin"
+          :minValue="0"
+          :maxValue="1"
+          :step="0.01"
+        >
+          <template #tooltip>
+            In humanization mode, a framework position is edited when human antibodies prefer some
+            other residue there by more than this. Lower humanizes more positions; higher humanizes
+            fewer. 0 edits every position whose most human residue is not the one carried. Default
+            0.05.
+          </template>
+        </PlNumberField>
+        <PlNumberField
+          v-if="runsHumanization"
+          v-model="maxNewLiabilities"
+          label="New liabilities allowed"
+          :minValue="0"
+          :maxValue="10"
+          :step="1"
+        >
+          <template #tooltip>
+            How many liabilities a humanization variant may introduce to raise its humanness. 0
+            rejects any edit that spells a new liability, and the edits beside it are kept and
+            scored on their own. Raise it to buy humanness at the cost of that many new liabilities.
+            Default 0.
+          </template>
+        </PlNumberField>
       </div>
     </PlAccordionSection>
 
     <PlAccordionSection label="Ranking">
       <div class="field-grid">
         <PlNumberField
-          v-model="app.model.data.variantsPerParent"
+          v-model="variantsPerParent"
           label="Variants per parent"
           :minValue="1"
-          :maxValue="50"
+          :maxValue="200"
           :step="1"
         >
           <template #tooltip>
             How many top-ranked variants survive per parent antibody. Higher shows more
-            alternatives; lower keeps only the strongest candidates. Default 10.
+            alternatives; lower keeps only the strongest candidates. Default 100.
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.lowToleranceFloor"
+          v-model="lowToleranceFloor"
           label="Low tolerance floor"
           :minValue="1"
           :maxValue="20"
@@ -212,7 +347,7 @@ function toggleFixability(value: string) {
           </template>
         </PlNumberField>
         <PlNumberField
-          v-model="app.model.data.epistasisRescoreTopK"
+          v-model="epistasisRescoreTopK"
           label="Epistasis re-score top-K"
           :minValue="1"
           :maxValue="100"
@@ -319,13 +454,13 @@ function toggleFixability(value: string) {
   margin-bottom: 8px;
 }
 /* Mirrors `PlCheckboxGroup`'s own layout (`pl-checkbox-group.scss`), since
-   this is a hand-rolled replacement for it — one column, a bold group
+   these lists are a hand-rolled replacement for it — one column, a bold group
    label row, then one 32px row per checkbox. */
-.fixability-group {
+.checkbox-group {
   display: flex;
   flex-direction: column;
 }
-.fixability-group-label {
+.checkbox-group-label {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -334,7 +469,7 @@ function toggleFixability(value: string) {
   font-weight: 600;
   line-height: 20px;
 }
-.fixability-group :deep(.pl-checkbox) {
+.checkbox-group :deep(.pl-checkbox) {
   height: 32px;
 }
 </style>

@@ -1,7 +1,7 @@
 # Test Datasets
 
 **Real sequencing data to run this block against, one dataset per antibody format.** The formats
-themselves — what each one must produce, and which ones are a named skip — live in `CLAUDE.md`. The
+themselves — what each one must produce, and which ones are a named rejection — live in `CLAUDE.md`. The
 committed fixtures used by the integration suite live in `test/assets/README.md`. This file only says
 which public dataset serves which format, and which blocks a project needs to carry it here.
 
@@ -56,7 +56,7 @@ rejects scFv input, and this dataset's own `meta.yaml` names `mixcr-scfv-clonoty
 what `CLAUDE.md` says it is: a guard for a hand-supplied file.
 
 **Test it with a hand-built PDB, one chain carrying two V domains both numbered 1–128.** That is the
-collision step 1 detects, and `structure-multi-domain-chain` is the skip reason it must write. The
+collision step 1 detects, and `structure-multi-domain-chain` is the rejection reason it must write. The
 study's `reference-scfv-panel.fasta` (130 records) is the sequence source for building that file.
 
 ### VHH — Not Reachable From This Library
@@ -86,4 +86,6 @@ anchor and writes none of its own, so it never has to run. Add it only to compar
 this block's own.
 
 **`assets-antifold-weights` is not a project block.** It is an assets package that ships as a
-software dependency of this block's steps.
+software dependency of this block's steps. **`assets-sapiens-weights`** is the same kind of
+dependency, mounted beside it — it ships the Sapiens human-repertoire checkpoints the humanization
+run mode reads, and the read-tolerance step loads them whether or not that mode is on.

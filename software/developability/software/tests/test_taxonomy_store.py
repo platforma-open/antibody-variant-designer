@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-import taxonomy_store
+from engine import taxonomy_store
 
 LIABILITIES = [
     {"id": "deamidation_ng", "liabilityType": "deamidation", "motif": r"N[GS]"},

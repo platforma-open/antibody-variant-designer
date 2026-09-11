@@ -7,7 +7,7 @@ hazard this block's residue index has to survive.
 
 `atom_line` formats a single fixed-column ATOM record per the PDB v3.30
 record layout. `make_pdb` wraps a sequence of `(chain, resSeq, insertionCode,
-resName, bFactor)` tuples — the exact shape `structure.py` parses into its
+resName, bFactor)` tuples — the exact shape `residue_index.py` parses into its
 residue index — into a parseable PDB string, emitting a full N/CA/C
 backbone per residue so nothing is dropped by the backbone check. A test
 exercising that check builds its own ATOM lines instead of going through
@@ -57,7 +57,7 @@ def make_residue_atoms(
     i_code: str,
     serial_start: int,
 ) -> list[str]:
-    """The N/CA/C backbone for one residue — enough to clear structure.py's
+    """The N/CA/C backbone for one residue — enough to clear residue_index.py's
     backbone check. A test for the "missing backbone" rejection path
     writes its own single-atom ATOM line instead of calling this."""
     names = ("N", "CA", "C")
@@ -96,5 +96,5 @@ def make_chain(
 
 def platforma_cdr_remark(role: str, cdr: int, chain_id: str, start: int, end: int) -> str:
     """One `REMARK 99 PLATFORMA CDR<role><cdr>` line, in the wire format
-    `structure.py`'s regex expects: `CDR<H|L><1|2|3> <chain><start>-<chain><end>`."""
+    `residue_index.py`'s regex expects: `CDR<H|L><1|2|3> <chain><start>-<chain><end>`."""
     return f"REMARK  99 PLATFORMA CDR{role}{cdr} {chain_id}{start}-{chain_id}{end}"

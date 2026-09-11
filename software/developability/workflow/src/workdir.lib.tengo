@@ -1,10 +1,12 @@
 // How every entrypoint of this block expects its workdir to be laid out.
 //
 // It lives in the developability piece rather than in the block's own workflow
-// because it is this software's command-line contract: `pdb_index.py` parses the
-// TSV that `renderIndex` writes, and each entrypoint's `--out-*-dir` flag writes
-// the directory that `dirPattern` captures. The two recipes next to this file
-// use it, and so does the AntiFold recipe, whose package depends on this one.
+// because it is this software's command-line contract: an entrypoint's
+// `--out-*-dir` flag writes the directory that `dirPattern` captures. Residues,
+// triaged liabilities and tolerance moved off this mechanism onto one file each
+// per boundary; the human-repertoire prior is the one artifact still staged
+// this way, and its caller is the AntiFold recipe, whose package depends on
+// this one.
 //
 // **A directory crossing a step boundary is a file set.** The SDK has no
 // directory primitive: no `addDir`, no file-set *input* type, and an exec's
@@ -18,29 +20,13 @@
 // names are the full relative workdir paths, and `tpl.inputs()` flattens a
 // `std/map` input into a plain `path -> blob` map, so the consumer is just
 // `addFiles(inputs.<name>)` and every file lands back where it was.
+//
+// **No recipe writes the parent-clonotype list.** `parent_clonotypes.py` recovers it from a
+// staged directory listing, because a staged file is named after the clonotype
+// it belongs to. A list written here would be one value resource holding
+// every key, and the platform caps that at 3 MiB — about 40k clonotypes.
 
 ll := import("@platforma-sdk/workflow-tengo:ll")
-text := import("text")
-
-// The index's filename inside every step's workdir.
-INDEX_FILE := "pdb_index.tsv"
-
-COLUMNS := ["clonotypeKey", "filename"]
-
-/**
- * Render the PDB index as the TSV every entrypoint parses.
- *
- * @param entries: [{clonotypeKey: string, filename: string}] - in the caller's
- *                 order, which is sorted-key order, so the exec input stays
- *                 canonical and the pure step dedups.
- */
-renderIndex := func(entries) {
-	lines := [text.join(COLUMNS, "\t")]
-	for e in entries {
-		lines = append(lines, e.clonotypeKey + "\t" + e.filename)
-	}
-	return text.join(lines, "\n") + "\n"
-}
 
 /**
  * A regex matching every file directly inside `dir` — what `saveFileSet`
@@ -52,7 +38,5 @@ dirPattern := func(dir) {
 }
 
 export ll.toStrict({
-	INDEX_FILE: INDEX_FILE,
-	renderIndex: renderIndex,
 	dirPattern: dirPattern
 })

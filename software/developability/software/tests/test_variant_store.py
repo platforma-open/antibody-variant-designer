@@ -1,12 +1,13 @@
 """Unit tests for `variant_store.py` — the `variants.tsv` round trip, the
 per-parent-ordinal `variantKey` the variant axis is built from, and the
 second pass that turns each parent's own local `rank` into one ordinal
-across the whole run."""
+across the whole run. The score that pass sorts on is tested in
+`test_variant_ranking.py`."""
 
 import csv
 import io
 
-import variant_store
+from engine import variant_ranking, variant_store
 
 
 def _variant(
@@ -17,21 +18,26 @@ def _variant(
     low_confidence_warning=False,
     changed_positions="H:N107D, H:G108S",
     structural_tolerance=2.0,
+    humanness_score=None,
+    addressed_target="Deamidation (N[GS]) @ CDR1 H:107",
+    developability_score=0.0,
 ):
     # `parent_rank` defaults to `rank` — the shape every caller sees before
     # `rewrite_global_rank` ever runs, when the two are still identical.
-    return variant_store.Variant(
+    return variant_ranking.Variant(
         rank=rank,
         parent_rank=rank if parent_rank is None else parent_rank,
         chain=chain,
-        addressed_target="Deamidation (N[GS]) @ CDR1 H:107",
+        addressed_target=addressed_target,
         changed_positions=changed_positions,
         variant_sequence="DSALA",
         structural_tolerance=structural_tolerance,
+        humanness_score=humanness_score,
         worst_confidence_angstroms=worst_confidence_angstroms,
         binding_risk="Medium",
         low_confidence_warning=low_confidence_warning,
         status="unvalidated-hypothesis",
+        developability_score=developability_score,
     )
 
 
@@ -84,6 +90,30 @@ class TestVariantsTsvRoundTrips:
 
         assert variant_store.read_variants_tsv(str(path)) == []
         assert path.read_text().startswith("clonotypeKey\tvariantKey\t")
+
+    def test_no_objective_column_reaches_the_file(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(str(path), "clone-1", [_variant()])
+
+        rows = _rows_of(path)
+        assert "objective" not in variant_store.TSV_COLUMNS
+        assert "objective" not in rows[0]
+
+    def test_a_variant_addressing_two_targets_holds_both_labels_joined(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+        original = _variant(
+            addressed_target="Deamidation (N[GS]) @ CDR1 H:107, Humanization @ H"
+        )
+
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(str(path), "clone-1", [original])
+        [(_, _, rehydrated)] = variant_store.read_variants_tsv(str(path))
+
+        assert rehydrated.addressed_target == "Deamidation (N[GS]) @ CDR1 H:107, Humanization @ H"
+        row = _rows_of(path)[0]
+        assert row["addressedTarget"] == "Deamidation (N[GS]) @ CDR1 H:107, Humanization @ H"
 
 
 class TestOneFileHoldsEveryParent:
@@ -156,6 +186,36 @@ class TestVariantKeyIsAPerParentOrdinal:
         assert len(set(keys)) == len(rows) == 4
 
 
+class TestHumannessScoreRoundTrips:
+    def test_a_none_humanness_score_writes_an_empty_cell_and_leaves_every_other_cell_alone(
+        self, tmp_path
+    ):
+        path = tmp_path / "variants.tsv"
+        original = _variant()
+
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(str(path), "clone-1", [original])
+        [(_, _, rehydrated)] = variant_store.read_variants_tsv(str(path))
+
+        row = _rows_of(path)[0]
+        assert row["humannessScore"] == ""
+        # Every other field round-trips to the same `Variant` the row before
+        # this column existed would have produced.
+        assert rehydrated == original
+
+    def test_a_humanness_score_round_trips_as_a_float(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(
+            str(path), "clone-1", [_variant(humanness_score=80.0)]
+        )
+        [(_, _, rehydrated)] = variant_store.read_variants_tsv(str(path))
+
+        assert rehydrated.humanness_score == 80.0
+        assert isinstance(rehydrated.humanness_score, float)
+
+
 class TestRewriteGlobalRank:
     def test_renumbers_every_parents_survivors_by_tolerance_across_the_run(self, tmp_path):
         path = tmp_path / "variants.tsv"
@@ -174,7 +234,11 @@ class TestRewriteGlobalRank:
             [_variant(rank=1, structural_tolerance=12.0, changed_positions="H:N109D")],
         )
 
-        variant_store.rewrite_global_rank(str(path))
+        variant_store.rewrite_global_rank(
+            str(path),
+            variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+            variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
+        )
 
         written = variant_store.read_variants_tsv(str(path))
         assert [(ck, v.rank) for ck, _, v in written] == [
@@ -197,7 +261,11 @@ class TestRewriteGlobalRank:
             str(path), "clone-2", [_variant(rank=1, structural_tolerance=5.0)]
         )
 
-        variant_store.rewrite_global_rank(str(path))
+        variant_store.rewrite_global_rank(
+            str(path),
+            variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+            variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
+        )
 
         # Both parents' one survivor was locally rank 1, so both still
         # render `v01` — only the now-global `rank` column tells them apart.
@@ -212,7 +280,11 @@ class TestRewriteGlobalRank:
         variant_store.append_variants_tsv(str(path), "clone-2", [tied])
         variant_store.append_variants_tsv(str(path), "clone-1", [tied])
 
-        variant_store.rewrite_global_rank(str(path))
+        variant_store.rewrite_global_rank(
+            str(path),
+            variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+            variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
+        )
 
         written = variant_store.read_variants_tsv(str(path))
         assert [(ck, v.rank) for ck, _, v in written] == [("clone-1", 1), ("clone-2", 2)]
@@ -221,6 +293,67 @@ class TestRewriteGlobalRank:
         path = tmp_path / "variants.tsv"
         variant_store.write_variants_header(str(path))
 
-        variant_store.rewrite_global_rank(str(path))
+        variant_store.rewrite_global_rank(
+            str(path),
+            variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+            variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
+        )
 
         assert variant_store.read_variants_tsv(str(path)) == []
+
+    def test_equal_tolerance_ranks_the_higher_humanness_score_first(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(
+            str(path), "clone-1",
+            [
+                _variant(rank=1, structural_tolerance=5.0, humanness_score=40.0,
+                         changed_positions="H:N107D"),
+                _variant(rank=2, structural_tolerance=5.0, humanness_score=90.0,
+                         changed_positions="H:N108D"),
+            ],
+        )
+
+        variant_store.rewrite_global_rank(
+            str(path),
+            variant_ranking.DEFAULT_RERANK_STRUCTURAL_WEIGHT,
+            variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
+        )
+
+        written = variant_store.read_variants_tsv(str(path))
+        assert [v.changed_positions for _, _, v in written] == ["H:N108D", "H:N107D"]
+
+    def test_no_humanness_number_in_the_file_orders_the_same_for_any_positive_alpha(self, tmp_path):
+        path = tmp_path / "variants.tsv"
+        variant_store.write_variants_header(str(path))
+        variant_store.append_variants_tsv(
+            str(path), "clone-1",
+            [
+                _variant(rank=1, structural_tolerance=9.0, changed_positions="H:N107D"),
+                _variant(rank=2, structural_tolerance=5.0, changed_positions="H:N108D"),
+            ],
+        )
+
+        one = tmp_path / "one.tsv"
+        one.write_text(path.read_text())
+        variant_store.rewrite_global_rank(
+            str(one),
+            rerank_structural_weight=1.0,
+            rerank_humanness_weight=variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
+        )
+
+        seven = tmp_path / "seven.tsv"
+        seven.write_text(path.read_text())
+        variant_store.rewrite_global_rank(
+            str(seven),
+            rerank_structural_weight=7.0,
+            rerank_humanness_weight=variant_ranking.DEFAULT_RERANK_HUMANNESS_WEIGHT,
+        )
+
+        order_at_one = [
+            v.changed_positions for _, _, v in variant_store.read_variants_tsv(str(one))
+        ]
+        order_at_seven = [
+            v.changed_positions for _, _, v in variant_store.read_variants_tsv(str(seven))
+        ]
+        assert order_at_one == order_at_seven == ["H:N107D", "H:N108D"]

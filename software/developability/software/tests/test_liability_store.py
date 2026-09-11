@@ -1,16 +1,14 @@
-"""Unit tests for `liability_store.py` — the round trip for `triaged.json`
+"""Unit tests for `liability_store.py` — the round trip for the triaged keyed artifact
 and the write-only path for `liabilities.tsv`."""
 
 import csv
 import io
 
-import liability_store
-import residue_store
-import triage
+from engine import keyed_artifact, liability_store, liability_triage, residue_index
 
 
 def _residue(chain, offset, imgt=None, region="CDR1"):
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain=chain,
         offset=offset,
         imgt=imgt or str(offset + 1),
@@ -22,7 +20,7 @@ def _residue(chain, offset, imgt=None, region="CDR1"):
 
 
 def _triaged(site, verdict="exposed", low_confidence=False, confidence_angstroms=3.0, rsasa=0.5):
-    return triage.Triaged(
+    return liability_triage.Triaged(
         definition_id="deamidation_ng",
         liability_type="deamidation",
         risk_level="High",
@@ -35,81 +33,48 @@ def _triaged(site, verdict="exposed", low_confidence=False, confidence_angstroms
     )
 
 
-class TestTriagedJsonRoundTrips:
+def _rows_of(path):
+    return list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
+
+
+def _write_triaged(path, clonotype_key, triaged_list):
+    with keyed_artifact.KeyedWriter(str(path)) as writer:
+        liability_store.write_triaged(writer, clonotype_key, triaged_list)
+
+
+class TestTriagedArtifactRoundTrips:
     def test_write_then_read_returns_an_equal_triaged(self, tmp_path):
         site = [_residue("H", 0, imgt="107"), _residue("H", 1, imgt="108")]
         original = _triaged(site)
-        path = tmp_path / "triaged.json"
+        path = tmp_path / "triaged.jsonl"
 
-        liability_store.write_triaged(str(path), [original])
-        [rehydrated] = liability_store.read_triaged(str(path))
+        _write_triaged(path, "clone-1", [original])
+        payload = liability_store.open_triaged(str(path)).take("clone-1")
+        [rehydrated] = liability_store.triaged_from_payload(payload)
 
         assert rehydrated == original
 
     def test_insertion_code_imgt_label_survives_the_round_trip(self, tmp_path):
         site = [_residue("H", 0, imgt="111A")]
         original = _triaged(site)
-        path = tmp_path / "triaged.json"
+        path = tmp_path / "triaged.jsonl"
 
-        liability_store.write_triaged(str(path), [original])
-        [rehydrated] = liability_store.read_triaged(str(path))
+        _write_triaged(path, "clone-1", [original])
+        payload = liability_store.open_triaged(str(path)).take("clone-1")
+        [rehydrated] = liability_store.triaged_from_payload(payload)
 
         assert rehydrated.site[0].imgt == "111A"
 
     def test_empty_list_round_trips_to_empty(self, tmp_path):
-        path = tmp_path / "triaged.json"
+        path = tmp_path / "triaged.jsonl"
 
-        liability_store.write_triaged(str(path), [])
+        _write_triaged(path, "clone-1", [])
 
-        assert liability_store.read_triaged(str(path)) == []
-
-
-class TestLiabilityKey:
-    def test_key_is_type_at_chain_and_span_start_imgt(self):
-        site = [_residue("H", 0, imgt="107"), _residue("H", 1, imgt="108")]
-        triaged = _triaged(site)
-
-        assert liability_store.liability_key(triaged) == "deamidation@H107"
+        payload = liability_store.open_triaged(str(path)).take("clone-1")
+        assert liability_store.triaged_from_payload(payload) == []
 
 
-def _rows_of(path):
-    return list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
-
-
-class TestSummarizeLiabilities:
-    def test_clean_parent_is_none_and_none(self):
-        assert liability_store.summarize_liabilities([]) == ("none", "None")
-
-    def test_any_triaged_liability_makes_the_verdict_present(self):
-        buried = _triaged([_residue("H", 0, imgt="107")], verdict="buried", rsasa=0.01)
-
-        verdict, _ = liability_store.summarize_liabilities([buried])
-
-        assert verdict == "present"
-
-    def test_summary_joins_every_liability_with_its_verdict(self):
-        exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
-        buried = _triaged([_residue("H", 1, imgt="108")], verdict="buried", rsasa=0.01)
-
-        _, summary = liability_store.summarize_liabilities([exposed, buried])
-
-        assert summary == "deamidation@H107 (exposed), deamidation@H108 (buried)"
-
-    def test_declined_entry_names_its_fixability_class(self):
-        declined = _triaged(
-            [_residue("H", 2, imgt="109")], verdict="fixability-declined", rsasa=0.9
-        )
-
-        _, summary = liability_store.summarize_liabilities([declined])
-
-        assert summary == "deamidation@H109 (fixability-declined: fixable)"
-
-    def test_exposed_entry_names_no_fixability_class(self):
-        exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
-
-        _, summary = liability_store.summarize_liabilities([exposed])
-
-        assert summary == "deamidation@H107 (exposed)"
+WEIGHTS = {"fixable": 3.0}
 
 
 class TestLiabilitiesTsv:
@@ -117,7 +82,7 @@ class TestLiabilitiesTsv:
         path = tmp_path / "liabilities.tsv"
 
         liability_store.write_liabilities_header(str(path))
-        liability_store.append_liabilities_tsv(str(path), "clone-1", [])
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [], WEIGHTS)
 
         [row] = _rows_of(path)
         assert row["verdict"] == "none"
@@ -131,13 +96,29 @@ class TestLiabilitiesTsv:
         path = tmp_path / "liabilities.tsv"
 
         liability_store.write_liabilities_header(str(path))
-        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, declined])
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, declined], WEIGHTS)
 
         [row] = _rows_of(path)
         assert row["verdict"] == "present"
         assert row["summary"] == (
             "deamidation@H107 (exposed), deamidation@H109 (fixability-declined: fixable)"
         )
+
+    def test_a_parent_summary_reaches_the_tsv_in_column_order(self, tmp_path):
+        exposed = _triaged([_residue("H", 0, imgt="107")], verdict="exposed")
+        buried = _triaged([_residue("H", 1, imgt="108")], verdict="buried", rsasa=0.01)
+        path = tmp_path / "liabilities.tsv"
+
+        liability_store.write_liabilities_header(str(path))
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, buried], WEIGHTS)
+
+        [_, data_line] = path.read_text().splitlines()
+        [clonotype_key, verdict, summary, _score] = next(
+            csv.reader(io.StringIO(data_line), delimiter="\t")
+        )
+        assert clonotype_key == "clone-1"
+        assert verdict == "present"
+        assert summary == "deamidation@H107 (exposed), deamidation@H108 (buried)"
 
     def test_header_alone_is_a_valid_empty_file(self, tmp_path):
         path = tmp_path / "liabilities.tsv"
@@ -154,10 +135,10 @@ class TestOneFileHoldsEveryParent:
 
         liability_store.write_liabilities_header(str(path))
         liability_store.append_liabilities_tsv(
-            str(path), "clone-1", [_triaged([_residue("H", 0, imgt="107")])]
+            str(path), "clone-1", [_triaged([_residue("H", 0, imgt="107")])], WEIGHTS
         )
         liability_store.append_liabilities_tsv(
-            str(path), "clone-2", [_triaged([_residue("H", 1, imgt="108")])]
+            str(path), "clone-2", [_triaged([_residue("H", 1, imgt="108")])], WEIGHTS
         )
 
         assert [r["clonotypeKey"] for r in _rows_of(path)] == ["clone-1", "clone-2"]
@@ -170,6 +151,6 @@ class TestOneFileHoldsEveryParent:
         path = tmp_path / "liabilities.tsv"
 
         liability_store.write_liabilities_header(str(path))
-        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, buried])
+        liability_store.append_liabilities_tsv(str(path), "clone-1", [exposed, buried], WEIGHTS)
 
         assert len(_rows_of(path)) == 1

@@ -41,14 +41,14 @@
           "artifact": "antifold",
           "cmd": [
             "python",
-            "{pkg}/antifold.py"
+            "{pkg}/read_tolerance.py"
           ]
         },
         "docker": {
           "artifact": "antifold-docker",
           "cmd": [
             "python",
-            "{pkg}/antifold.py"
+            "{pkg}/read_tolerance.py"
           ]
         }
       }

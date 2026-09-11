@@ -1,5 +1,6 @@
 import type {
   AxisId,
+  AxisSpec,
   BlockRenderCtx,
   DatasetOption,
   InferOutputsType,
@@ -18,23 +19,54 @@ import {
   DataModelBuilder,
   getAxisId,
 } from "@platforma-sdk/model";
-import type { BlockArgs, BlockData, SkipReason, SkippedClonotype } from "./types";
+import type {
+  BlockArgs,
+  BlockData,
+  RunMode,
+  RejectionReason,
+  RejectedClonotype,
+  RejectedType,
+} from "./types";
 
-export type { BlockArgs, BlockData, PlRef, SkipReason, SkippedClonotype } from "./types";
+export type {
+  BlockArgs,
+  BlockData,
+  PlRef,
+  RunMode,
+  RejectionReason,
+  RejectedClonotype,
+  RejectedType,
+} from "./types";
+
+/** Every scalar `BlockData` field's default value, in one place: `.init()`
+ *  seeds a new project from it, `.args()` falls back to it for a project
+ *  persisted before a field existed, and the settings panel shows it in the
+ *  field the operator has not touched. */
+export const BLOCK_DATA_DEFAULTS = {
+  runMode: "liabilities" as RunMode,
+  rsasaBuriedCutoff: 0.075,
+  actOnFixability: ["fixable", "easily_fixable"],
+  maxLiabilityEdits: 10,
+  maxFrameworkEdits: 20,
+  frConfidenceThreshold: 4.0,
+  cdrConfidenceThreshold: 6.0,
+  variantsPerParent: 100,
+  candidateResiduesPerPosition: 3,
+  structuralWeight: 1.0,
+  objectiveWeight: 1.0,
+  nonHumanPriorMargin: 0.05,
+  maxNewLiabilities: 0,
+  humanizationIgnoredLiabilities: [] as string[],
+  lowToleranceFloor: 3,
+  epistasisRescoreTopK: 20,
+} satisfies Partial<BlockData>;
 
 const dataModel = new DataModelBuilder().from<BlockData>("v1").init(() => ({
   dataset: undefined,
-  rsasaBuriedCutoff: 0.075,
-  actOnFixability: ["fixable", "easily_fixable"],
-  maxEditsPerVariant: 5,
-  frConfThresh: 4.0,
-  cdrConfThresh: 6.0,
-  variantsPerParent: 10,
-  candidateResiduesPerPosition: 3,
-  lowToleranceFloor: 3,
-  epistasisRescoreTopK: 20,
+  ...BLOCK_DATA_DEFAULTS,
   variantsTableState: createPlDataTableStateV2(),
   liabilitiesTableState: createPlDataTableStateV2(),
+  alignmentModel: {},
 }));
 
 const STRUCTURE_PDB_COLUMN = "pl7.app/structure/pdb";
@@ -55,41 +87,53 @@ function isStructuresDataset(spec: PObjectSpec): boolean {
   );
 }
 
-/** One step's skip TSV: `clonotypeKey \t reason \t detail`, header row
- *  first, reason and detail empty when that clonotype passed. Absent and
- *  empty are equivalent to the reduce below, so only non-empty-reason rows
- *  are kept. */
-function parseSkipRows(tsv: string): Map<string, { reason: SkipReason; detail: string }> {
-  const rows = new Map<string, { reason: SkipReason; detail: string }>();
+/** One step's rejection TSV: `clonotypeKey \t reason \t detail \t rejectedType \t objective`,
+ *  header row first, reason and detail empty when that (clonotype, objective) pair passed. */
+type RejectionRow = {
+  reason: RejectionReason;
+  detail: string;
+  rejectedType: RejectedType;
+  objective: string;
+};
+
+const DEFAULT_REJECTION_OBJECTIVE = "liability";
+
+function parseRejectionRows(tsv: string): Map<string, RejectionRow> {
+  const rows = new Map<string, RejectionRow>();
   for (const line of tsv.split("\n").slice(1)) {
     if (line.length === 0) continue;
-    const [clonotypeKey, reason, detail] = line.split("\t");
-    if (reason) rows.set(clonotypeKey, { reason: reason as SkipReason, detail: detail ?? "" });
+    const [clonotypeKey, reason, detail, rejectedType, objective] = line.split("\t");
+    // Falls back to the liability objective's name: read-tolerance never gained the
+    // `objective` column, so a pre-change file and every row it writes today still parses.
+    if (reason)
+      rows.set(`${clonotypeKey}\t${objective || DEFAULT_REJECTION_OBJECTIVE}`, {
+        reason: reason as RejectionReason,
+        detail: detail ?? "",
+        rejectedType: (rejectedType as RejectedType) || "parent",
+        objective: objective || DEFAULT_REJECTION_OBJECTIVE,
+      });
   }
   return rows;
 }
 
-/** Per clonotype, the first non-empty reason (and its detail) in step
- *  order: index-and-scan, then read-tolerance, then build-variants. A
- *  clonotype named in more than one file is kept once, at its earliest
- *  step. */
-function reduceSkips(
-  stepSkipTsvs: readonly string[],
-): Map<string, { reason: SkipReason; detail: string }> {
-  const byClonotype = new Map<string, { reason: SkipReason; detail: string }>();
-  for (const tsv of stepSkipTsvs) {
-    for (const [clonotypeKey, row] of parseSkipRows(tsv)) {
-      if (!byClonotype.has(clonotypeKey)) byClonotype.set(clonotypeKey, row);
+/** Per (clonotype, objective) pair, the first non-empty reason (and its detail) in step
+ *  order: index-and-scan, then read-tolerance, then build-variants. A pair named in more than
+ *  one file is kept once, at its earliest step — a parent named by two objectives keeps both
+ *  rows, and one named twice by the same objective keeps only its earliest. */
+function reduceRejections(stepRejectionTsvs: readonly string[]): Map<string, RejectionRow> {
+  const byPair = new Map<string, RejectionRow>();
+  for (const tsv of stepRejectionTsvs) {
+    for (const [pairKey, row] of parseRejectionRows(tsv)) {
+      if (!byPair.has(pairKey)) byPair.set(pairKey, row);
     }
   }
-  return byClonotype;
+  return byPair;
 }
 
-function reduceSkippedClonotypes(stepSkipTsvs: readonly string[]): SkippedClonotype[] {
-  return [...reduceSkips(stepSkipTsvs)].map(([clonotypeKey, { reason, detail }]) => ({
-    clonotypeKey,
-    reason,
-    detail,
+function reduceRejectedClonotypes(stepRejectionTsvs: readonly string[]): RejectedClonotype[] {
+  return [...reduceRejections(stepRejectionTsvs)].map(([pairKey, row]) => ({
+    clonotypeKey: pairKey.slice(0, pairKey.lastIndexOf("\t")),
+    ...row,
   }));
 }
 
@@ -130,17 +174,33 @@ function tableFromAccessorOutput(
   const provider = AccessorColumnsProvider(acc);
   const snapshots = provider.getColumns();
   if (snapshots.length === 0) return undefined;
+  // A linker is never the anchor: it carries both identities, so anchoring on
+  // it would key the page's rows on the variant AND its parent at once.
   const anchorSpec = (
-    snapshots.find((s) => s.getSpec().name !== "pl7.app/label") ?? snapshots[0]
+    snapshots.find(
+      (s) =>
+        s.getSpec().name !== "pl7.app/label" &&
+        s.getSpec().annotations?.["pl7.app/isLinkerColumn"] !== "true",
+    ) ?? snapshots[0]
   ).getSpec();
   return createPlDataTableV3(ctx, {
     columns: {
       sources: [provider],
       anchors: { main: anchorSpec },
-      selector: { mode: "enrichment", maxHops: 0 },
+      // One hop, so the variant-to-parent linker is walked. It stays inside
+      // `sources`, so the reach is this block's own columns and not the pool.
+      selector: { mode: "enrichment", maxHops: 1 },
     },
     tableState,
   });
+}
+
+/** The alignment group's PColumns, or undefined when the result was computed by
+ *  a build that did not yet write this output. */
+function alignmentColumns(ctx: BlockRenderCtx<BlockArgs, BlockData>) {
+  return ctx.outputs
+    ?.resolve({ field: "alignmentData", assertFieldType: "Input", allowPermanentAbsence: true })
+    ?.getPColumns();
 }
 
 export const platforma = BlockModelV3.create(dataModel)
@@ -151,6 +211,11 @@ export const platforma = BlockModelV3.create(dataModel)
     return {
       primaryRef: data.dataset.primary,
       subsetRef: data.dataset.primary.filter,
+      // `.init()` seeds a field only for a project created after that field
+      // lands, so a project that already ran carries persisted `BlockData`
+      // without it. The workflow's schema rejects an absent key, so every
+      // field added after v1 falls back here.
+      runMode: data.runMode ?? BLOCK_DATA_DEFAULTS.runMode,
       rsasaBuriedCutoff: data.rsasaBuriedCutoff,
       // A set, and the args are the run's content key: the workflow hands this
       // list to step 1's exec, and the backend canonicalizes a JSON resource's
@@ -160,11 +225,38 @@ export const platforma = BlockModelV3.create(dataModel)
       // the AntiFold pass. Sorted and uniqued here because `.args()` is where
       // the key is authored.
       actOnFixability: [...new Set(data.actOnFixability)].sort(),
-      maxEditsPerVariant: data.maxEditsPerVariant,
-      frConfThresh: data.frConfThresh,
-      cdrConfThresh: data.cdrConfThresh,
+      // The liability cap falls back to the one number a project persisted
+      // before the two caps split apart, then to the default — a project that
+      // already ran keeps that number as its liability cap. The framework cap
+      // has no old spelling to fall back to: it is bounded for the first time.
+      maxLiabilityEdits:
+        data.maxLiabilityEdits ?? data.maxEditsPerVariant ?? BLOCK_DATA_DEFAULTS.maxLiabilityEdits,
+      maxFrameworkEdits: data.maxFrameworkEdits ?? BLOCK_DATA_DEFAULTS.maxFrameworkEdits,
+      // These four fall back to the spelling a project persisted before the
+      // rename, then to the default. Reading the old key keeps a project that
+      // already ran on its own settings instead of silently resetting it.
+      frConfidenceThreshold:
+        data.frConfidenceThreshold ??
+        data.frConfThresh ??
+        BLOCK_DATA_DEFAULTS.frConfidenceThreshold,
+      cdrConfidenceThreshold:
+        data.cdrConfidenceThreshold ??
+        data.cdrConfThresh ??
+        BLOCK_DATA_DEFAULTS.cdrConfidenceThreshold,
       variantsPerParent: data.variantsPerParent,
       candidateResiduesPerPosition: data.candidateResiduesPerPosition,
+      structuralWeight:
+        data.structuralWeight ?? data.wStruct ?? BLOCK_DATA_DEFAULTS.structuralWeight,
+      objectiveWeight: data.objectiveWeight ?? data.wObj ?? BLOCK_DATA_DEFAULTS.objectiveWeight,
+      nonHumanPriorMargin: data.nonHumanPriorMargin ?? BLOCK_DATA_DEFAULTS.nonHumanPriorMargin,
+      maxNewLiabilities: data.maxNewLiabilities ?? BLOCK_DATA_DEFAULTS.maxNewLiabilities,
+      // A set, and the args are the run's content key — sorted and uniqued for
+      // the same reason `actOnFixability` above is.
+      humanizationIgnoredLiabilities: [
+        ...new Set(
+          data.humanizationIgnoredLiabilities ?? BLOCK_DATA_DEFAULTS.humanizationIgnoredLiabilities,
+        ),
+      ].sort(),
       lowToleranceFloor: data.lowToleranceFloor,
       epistasisRescoreTopK: data.epistasisRescoreTopK,
       indexAndScanCpu: data.indexAndScanCpu,
@@ -237,21 +329,33 @@ export const platforma = BlockModelV3.create(dataModel)
   // remains — the block's generic output-export command reaches this named
   // handle directly — but the handle stays a named output for that to work.
   .output("synthesisCsv", (ctx) => ctx.outputs?.resolve("synthesisCsv")?.getRemoteFileHandle())
-  // Per-parent skip reason and detail for the Skipped page.
-  .output("skippedClonotypes", (ctx): SkippedClonotype[] | undefined => {
-    const liabilitiesSkip = ctx.outputs?.resolve("liabilitiesSkip")?.getDataAsString();
-    const toleranceSkip = ctx.outputs?.resolve("toleranceSkip")?.getDataAsString();
-    const variantsSkip = ctx.outputs?.resolve("variantsSkip")?.getDataAsString();
+  // Per-parent rejection reason and detail for the Rejection Causes page.
+  .outputWithStatus("rejectedClonotypes", (ctx): RejectedClonotype[] | undefined => {
+    // `allowPermanentAbsence` because a result computed by an earlier build of this block
+    // carries whatever output names that build wrote. A bare `resolve` throws "Service or
+    // input field not found" on one of them and takes the whole render down with it; this
+    // reads as no data yet, which is what an un-recomputed result is.
+    //
+    // `Input`, not `Output`: `TreeNodeAccessor.resolve` is a shortcut for `resolveInput`, so
+    // a workflow output reached through `ctx.outputs` is an input field of that resource.
+    // The flag is honoured only when the assertion names the field's real type.
+    const rejectedTsv = (name: string) =>
+      ctx.outputs
+        ?.resolve({ field: name, assertFieldType: "Input", allowPermanentAbsence: true })
+        ?.getDataAsString();
+    const liabilitiesRejected = rejectedTsv("liabilitiesRejected");
+    const toleranceRejected = rejectedTsv("toleranceRejected");
+    const variantsRejected = rejectedTsv("variantsRejected");
     if (
-      liabilitiesSkip === undefined ||
-      toleranceSkip === undefined ||
-      variantsSkip === undefined
+      liabilitiesRejected === undefined ||
+      toleranceRejected === undefined ||
+      variantsRejected === undefined
     ) {
       return undefined;
     }
-    return reduceSkippedClonotypes([liabilitiesSkip, toleranceSkip, variantsSkip]);
+    return reduceRejectedClonotypes([liabilitiesRejected, toleranceRejected, variantsRejected]);
   })
-  // PFrame handle the Skipped page resolves the parent's `pl7.app/label`
+  // PFrame handle the Rejection Causes page resolves the parent's `pl7.app/label`
   // through, asynchronously — the label column is Parquet-stored, so the
   // synchronous `ctx.resultPool.findLabels` cannot read it
   // (`3D-Structure-Based-Liabilities/ui/src/composables/useClonotypeLabels.ts:15-17`).
@@ -263,7 +367,7 @@ export const platforma = BlockModelV3.create(dataModel)
     if (pCols === undefined || pCols.length === 0) return undefined;
     return createPFrameForGraphs(ctx, [pCols[0]]);
   })
-  // The parent axis identifier the Skipped page matches the label column
+  // The parent axis identifier the Rejection Causes page matches the label column
   // against — whichever axis `liabilitiesData` actually carries, bulk or
   // single-cell, rather than a hard-coded name.
   .output("clonotypeAxisId", (ctx): AxisId | undefined => {
@@ -272,10 +376,35 @@ export const platforma = BlockModelV3.create(dataModel)
     if (axis === undefined) return undefined;
     return getAxisId(axis);
   })
+  // The comparison view's alignment frame: one row per parent and one per
+  // variant, on the single axis `buildAlignmentSettings` declares.
+  //
+  // `ctx.createPFrame`, not `createPFrameForGraphs`: the latter auto-enriches
+  // from the result pool, which is the reach that crashes this block's renders
+  // with `Key not found ctl/file/blobInfo` (see `tableFromAccessorOutput`
+  // above). Nothing needs enriching here — the group ships its own label column.
+  //
+  // `allowPermanentAbsence`, unlike the two table outputs above: this output
+  // name is newer than the results already in some projects, and a bare
+  // `resolve` of a name the computing build never wrote throws "Service or
+  // input field not found" and takes the whole render down — see
+  // `rejectedClonotypes` below for the same guard and the reason
+  // `assertFieldType` must be `Input`.
+  .output("alignmentPf", (ctx): PFrameHandle | undefined => {
+    const pCols = alignmentColumns(ctx);
+    if (pCols === undefined || pCols.length === 0) return undefined;
+    return ctx.createPFrame(pCols);
+  })
+  // The full axis spec, not an `AxisId`: it is what the page hands the viewer as
+  // `PlSelectionModel.axesSpec`, and a selection whose axis does not match the
+  // frame's own silently selects nothing.
+  .output("alignmentAxisSpec", (ctx): AxisSpec | undefined => {
+    return alignmentColumns(ctx)?.[0]?.spec.axesSpec[0];
+  })
   .sections(() => [
     { type: "link", href: "/parents", label: "Parents" },
     { type: "link", href: "/", label: "Variants" },
-    { type: "link", href: "/skipped", label: "Skipped" },
+    { type: "link", href: "/rejection-causes", label: "Objective Findings" },
   ])
   .done();
 

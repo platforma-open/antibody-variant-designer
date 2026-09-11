@@ -3,13 +3,14 @@ name = "antibody-variant-designer-developability"
 version = "0.1.0"
 description = "Residue indexing, liability scan and triage, candidate generation, and ranking."
 requires-python = ">=3.12"
-# freesasa is the only third-party import this package has: `exposure.py` calls
+# freesasa is the only third-party import this package has: `residue_exposure.py` calls
 # it and nothing else here reaches outside the standard library. It is a real
 # dependency rather than an extra because `deps:export` compiles this list
 # straight into `src/requirements.txt`, and because the test suite needs it —
-# `exposure.py` is under test.
+# `residue_exposure.py` is under test.
 dependencies = [
     "freesasa==2.2.1",
+    "promb==1.0.2",
 ]
 
 [dependency-groups]
@@ -21,15 +22,15 @@ dev = [
 
 [tool.ruff]
 extend = "../../ruff.toml"
-# Where a bare `import residue_store` resolves from, so import order sorts the
-# block's own modules apart from third-party ones. Both packages state this,
+# Where `from engine import residue_store` resolves from, so import order sorts
+# the block's own modules apart from third-party ones. Both packages state this,
 # and both name the same two source trees, so one module is first-party to
 # whichever package lints it.
 src = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `../../antifold/software/src` carries `antifold.py`, whose unit tests live here rather
+# `../../antifold/software/src` carries `read_tolerance.py`, whose unit tests live here rather
 # than with the wrapper: they need the `batch` fixture in `tests/conftest.py`,
 # and the module keeps every torch import inside a function, so loading it
 # costs nothing this environment does not already have. The wrapper's own

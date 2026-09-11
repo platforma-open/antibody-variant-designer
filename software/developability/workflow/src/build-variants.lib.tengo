@@ -17,27 +17,40 @@ f := exec.formula
 variantsSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software-developability:build-variants")
 
 VARIANTS_FILE := "variants.tsv"
-SKIP_FILE := "skip.tsv"
+REJECTED_FILE := "rejected.tsv"
+HUMANNESS_FILE := "humanness.tsv"
+PARENT_SEQUENCES_FILE := "parent-sequences.tsv"
 
-// The tag the RAM formula measures. All three staged directories carry it: an
+// The tag the RAM formula measures. All three staged blobs carry it: an
 // iteration reads one antibody's tolerance matrix, its residues and its triaged
 // liabilities together, and none of the three dominates the other two.
 PER_ANTIBODY_TAG := "per-antibody"
 
 // What the process holds before it reads any of the caller's data: the
-// interpreter and the liability taxonomy.
-BASE_RAM := f.gib(1)
+// interpreter, the liability taxonomy, and promb's human-OAS peptide set. That
+// set dominates the three — six million 9-mers in a python set measure 913 MiB
+// resident, whatever the run designs against — and the banner promb prints
+// while loading it understates it as "<256 MB".
+BASE_RAM := f.gib(2)
 
-// What one antibody costs, per byte of the three files it arrives as: the parsed
-// tolerance matrix, and the candidates and variants built from it. The variant
-// count is bounded by the params rather than by the data, so it needs no term of
-// its own. An upper-bound estimate, not a measurement.
+// What one antibody costs the design loop, per byte of the three files it
+// arrives as: the parsed tolerance matrix, and the candidates and variants built
+// from it while that antibody is the one in hand. What the run keeps past it is
+// RAM_PER_RANKED_VARIANT below. An upper-bound estimate, not a measurement.
 RAM_PER_ANTIBODY_BYTE := 64
 
-// The most this recipe ever asks for. The multiplier above is deliberately
-// generous, so an unusually large antibody must be able to raise the request
-// without pushing it past what a machine running this block has.
-RAM_CEILING := f.gib(8)
+// What one surviving variant costs the global re-rank, which holds every one of
+// them at once: 3542 bytes measured over 100k paired-Fv rows — the parsed
+// `Variant` objects, the rewritten row buffer and the joined output text
+// together — rounded up. The headroom also covers the rejection rows the batch
+// loop accumulates beside them.
+RAM_PER_RANKED_VARIANT := 4096
+
+// The most this recipe ever asks for. The multipliers above are deliberately
+// generous, so an unusually large dataset must be able to raise the request
+// without pushing it past what a machine running this block has. It matches
+// `index-and-scan.lib.tengo` and stays inside what the medium queue grants.
+RAM_CEILING := f.gib(12)
 
 // What a backend that cannot evaluate a formula at run time gets instead. It is
 // also the amount this recipe asked for unconditionally before it could measure.
@@ -48,14 +61,19 @@ FALLBACK_RAM := "4GiB"
 DEFAULT_CPU := 2
 
 /**
- * The RAM to ask for, given how many antibodies the staged files hold.
+ * The RAM to ask for, given how many antibodies the run holds and how
+ * many variants each is allowed to keep.
  *
- * `batch.py` runs one antibody at a time and releases it before the next one
- * starts, and every row it produces is appended rather than accumulated, so the
- * peak is BASE_RAM plus the largest single antibody. The average stands in for
- * the largest — see the same note in `index-and-scan.lib.tengo`.
+ * Two terms, because the step has two peaks. `antibody_batch.py` runs one
+ * antibody at a time and releases it before the next one starts, so the design
+ * loop costs one antibody — the average stands in for the largest, the same way
+ * `index-and-scan.lib.tengo` does it. Then `variant_store.rewrite_global_rank`
+ * reads every surviving variant of every antibody back to number them against
+ * each other, and a dataset-wide ordinal cannot be derived from any smaller set.
+ * That second term is what a run with many parents, or a raised
+ * `variantsPerParent`, actually grows.
  */
-ramFor := func(count) {
+ramFor := func(count, variantsPerParent) {
 	// An empty index would divide by zero, and leaves the base — which is all a
 	// run with nothing to design against needs.
 	divisor := count > 0 ? count : 1
@@ -63,6 +81,7 @@ ramFor := func(count) {
 		dividedBy(divisor).
 		times(RAM_PER_ANTIBODY_BYTE).
 		plus(BASE_RAM).
+		plus(count * variantsPerParent * RAM_PER_RANKED_VARIANT).
 		atMost(RAM_CEILING).
 		staticFallback(FALLBACK_RAM)
 }
@@ -71,21 +90,28 @@ ramFor := func(count) {
 // `index-and-scan.lib.tengo`.
 ARGS := {
 	"__options__,closed": "",
-	pdbIndex: [{
-		"__options__,closed": "",
-		clonotypeKey: "string",
-		filename: "string"
-	}],
-	// Each a `workdir path -> blob` map, as `tpl.inputs()` flattens a staged
-	// directory.
-	triaged: { any: validation.resource() },
-	tolerance: { any: validation.resource() },
-	residues: { any: validation.resource() },
+	triaged: validation.resource(),
+	tolerance: validation.resource(),
+	residues: validation.resource(),
+	// The human-repertoire prior is still a directory of per-antibody files, staged as a
+	// fileSet the same way every input here was staged before this row.
+	priors: { any: validation.resource() },
 	definitions: validation.resource(),
+	// The parents step 1 staged. An upper bound on the parents this step
+	// reads, because step 1 rejects some — see `ramFor`.
+	parentCount: "number",
 	params: {
 		"__options__,closed": "",
-		maxEditsPerVariant: "number",
+		runMode: "string",
+		maxLiabilityEdits: "number",
+		maxFrameworkEdits: "number",
 		candidateResiduesPerPosition: "number",
+		structuralWeight: "number",
+		objectiveWeight: "number",
+		nonHumanPriorMargin: "number",
+		maxNewLiabilities: "number",
+		humanizationIgnoredLiabilities: "string",
+		frConfidenceThreshold: "number",
 		variantsPerParent: "number",
 		lowToleranceFloor: "number",
 		epistasisRescoreTopK: "number"
@@ -97,50 +123,95 @@ ARGS := {
 }
 
 /**
+ * The `--flag value` pairs `run` derives from `args.params`, in the order the
+ * command line carries them. Exported so `resources.test.tengo` can pin the
+ * rendered command line without an exec run, the way `ramFor` already lets it
+ * pin the RAM formula.
+ *
+ * @param params: map — `ARGS.params`'s own shape
+ *
+ * @return [string]
+ */
+paramArgsFor := func(params) {
+	args := [
+		"--run-mode", params.runMode,
+		"--max-liability-edits", string(params.maxLiabilityEdits),
+		"--max-framework-edits", string(params.maxFrameworkEdits),
+		"--candidate-residues-per-position", string(params.candidateResiduesPerPosition),
+		"--structural-weight", string(params.structuralWeight),
+		"--objective-weight", string(params.objectiveWeight),
+		"--non-human-prior-margin", string(params.nonHumanPriorMargin),
+		"--max-new-liabilities", string(params.maxNewLiabilities),
+		"--fr-confidence-threshold", string(params.frConfidenceThreshold),
+		"--variants-per-parent", string(params.variantsPerParent),
+		"--low-tolerance-floor", string(params.lowToleranceFloor),
+		"--epistasis-rescore-top-k", string(params.epistasisRescoreTopK)
+	]
+	// The flag is omitted when the operator ignores nothing, the way the sidecar
+	// flags in `index-and-scan.lib.tengo` are. An empty argv element would leave
+	// the next flag standing where the value belongs.
+	if params.humanizationIgnoredLiabilities != "" {
+		args = append(
+			args, "--humanization-ignored-liabilities", params.humanizationIgnoredLiabilities
+		)
+	}
+	return args
+}
+
+/**
  * Build, gate and rank the variants of every antibody in the PDB index.
  *
- * @return {variants: file, skip: file, skipContent: content}
+ * @return {variants: file, humanness: file, parentSequences: file, rejected: file,
+ *          rejectedContent: content}
  */
 run := func(args) {
 	validation.assertType(args, ARGS, "build-variants: bad args")
 
-	result := exec.builder().
+	recipeRam := ramFor(args.parentCount, args.params.variantsPerParent)
+
+	cmd := exec.builder().
 		software(variantsSw).
 		resources({
 			queue: execConstants.MEDIUM_QUEUE,
 			onCPU: {
 				cpu: is_undefined(args.cpu) ? DEFAULT_CPU : args.cpu,
-				ram: is_undefined(args.ram) ? ramFor(len(args.pdbIndex)) : args.ram
+				ram: is_undefined(args.ram) ? recipeRam : args.ram
 			}
 		}).
 		printErrStreamToStdout().
-		addFiles(args.triaged, { tag: PER_ANTIBODY_TAG }).
-		addFiles(args.tolerance, { tag: PER_ANTIBODY_TAG }).
-		addFiles(args.residues, { tag: PER_ANTIBODY_TAG }).
-		writeFile(workdir.INDEX_FILE, workdir.renderIndex(args.pdbIndex)).
+		addFile("triaged.jsonl", args.triaged, { tag: PER_ANTIBODY_TAG }).
+		addFile("tolerance.tsv", args.tolerance, { tag: PER_ANTIBODY_TAG }).
+		addFile("residues.jsonl", args.residues, { tag: PER_ANTIBODY_TAG }).
+		addFiles(args.priors).
 		addFile("definitions.json", args.definitions).
-		arg("--pdb-index").arg(workdir.INDEX_FILE).
-		arg("--triaged-dir").arg("triaged").
-		arg("--tolerance-dir").arg("tolerance").
-		arg("--residues-dir").arg("residues").
+		arg("--triaged").arg("triaged.jsonl").
+		arg("--tolerance").arg("tolerance.tsv").
+		arg("--residues").arg("residues.jsonl").
+		arg("--priors-dir").arg("priors").
 		arg("--definitions").arg("definitions.json").
 		arg("--out-variants").arg(VARIANTS_FILE).
-		arg("--out-skip").arg(SKIP_FILE).
-		arg("--max-edits-per-variant").arg(string(args.params.maxEditsPerVariant)).
-		arg("--candidate-residues-per-position").
-		arg(string(args.params.candidateResiduesPerPosition)).
-		arg("--variants-per-parent").arg(string(args.params.variantsPerParent)).
-		arg("--low-tolerance-floor").arg(string(args.params.lowToleranceFloor)).
-		arg("--epistasis-rescore-top-k").arg(string(args.params.epistasisRescoreTopK)).
+		arg("--out-rejected").arg(REJECTED_FILE).
+		arg("--out-humanness").arg(HUMANNESS_FILE).
+		arg("--out-parent-sequences").arg(PARENT_SEQUENCES_FILE)
+
+	for a in paramArgsFor(args.params) {
+		cmd = cmd.arg(a)
+	}
+
+	result := cmd.
 		saveFile(VARIANTS_FILE).
-		saveFile(SKIP_FILE).
-		saveFileContent(SKIP_FILE).
+		saveFile(HUMANNESS_FILE).
+		saveFile(PARENT_SEQUENCES_FILE).
+		saveFile(REJECTED_FILE).
+		saveFileContent(REJECTED_FILE).
 		run()
 
 	return {
 		variants: result.getFile(VARIANTS_FILE),
-		skip: result.getFile(SKIP_FILE),
-		skipContent: result.getFileContent(SKIP_FILE)
+		humanness: result.getFile(HUMANNESS_FILE),
+		parentSequences: result.getFile(PARENT_SEQUENCES_FILE),
+		rejected: result.getFile(REJECTED_FILE),
+		rejectedContent: result.getFileContent(REJECTED_FILE)
 	}
 }
 
@@ -148,5 +219,8 @@ export ll.toStrict({
 	run: run,
 	// Exported for `resources.test.tengo`, which pins what it computes. A caller
 	// never needs it: `run` applies it unless the caller overrides `ram`.
-	ramFor: ramFor
+	ramFor: ramFor,
+	// Exported for the same reason: `resources.test.tengo` pins the rendered
+	// command line without running the exec.
+	paramArgsFor: paramArgsFor
 })

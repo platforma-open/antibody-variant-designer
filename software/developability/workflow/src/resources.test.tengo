@@ -7,6 +7,7 @@
 
 test := import("@platforma-sdk/workflow-tengo:test")
 exec := import("@platforma-sdk/workflow-tengo:exec")
+text := import("text")
 
 indexAndScan := import(":index-and-scan")
 buildVariants := import(":build-variants")
@@ -97,17 +98,73 @@ TestBuildVariantsCountsAllThreeOfAnAntibodysFiles := func() {
 	sizes := { "a.tsv": 50000, "a.json": 8000, "a.triaged.json": 2000 }
 	// One antibody, so the average is the whole tag: the tolerance matrix, the
 	// residue index and the triaged liabilities together.
-	test.isEqual((50000 + 8000 + 2000) * 64 + GIB, _ram(buildVariants.ramFor(1), tagMap, sizes))
+	test.isEqual(
+		(50000 + 8000 + 2000) * 64 + 2 * GIB + 10 * 4096,
+		_ram(buildVariants.ramFor(1, 10), tagMap, sizes)
+	)
+}
+
+TestBuildVariantsFollowsTheWholeRunsVariantCount := func() {
+	// Ten times the parents at ten times the cap is a hundredfold request — the
+	// one thing the per-antibody average cannot see. The staged file is empty so
+	// that average contributes nothing, leaving the term under test alone above
+	// the base.
+	tagMap := { "per-antibody": ["a.tsv"] }
+	sizes := { "a.tsv": 0 }
+
+	test.isEqual(2 * GIB + 200 * 4096, _ram(buildVariants.ramFor(20, 10), tagMap, sizes))
+	test.isEqual(2 * GIB + 20000 * 4096, _ram(buildVariants.ramFor(200, 100), tagMap, sizes))
 }
 
 TestBuildVariantsStaysInsideItsCeiling := func() {
 	tagMap := { "per-antibody": ["huge.tsv"] }
-	test.isEqual(8 * GIB, _ram(buildVariants.ramFor(1), tagMap, { "huge.tsv": GIB }))
+	test.isEqual(12 * GIB, _ram(buildVariants.ramFor(1, 10), tagMap, { "huge.tsv": GIB }))
+}
+
+TestBuildVariantsCeilingCapsTheRerankTermToo := func() {
+	// A hundred thousand parents at a hundred variants each would ask for 37 GiB.
+	// The request must stay at what a machine running this block has.
+	tagMap := { "per-antibody": ["a.tsv"] }
+	test.isEqual(
+		12 * GIB, _ram(buildVariants.ramFor(100000, 100), tagMap, { "a.tsv": 1000 })
+	)
 }
 
 TestBothRecipesCarryAStaticFallback := func() {
 	// Without one, a backend that cannot evaluate a formula fails the exec rather
 	// than falling back to a fixed request.
 	test.isEqual("4GiB", f.fallbackOf(indexAndScan.ramFor(4)))
-	test.isEqual("4GiB", f.fallbackOf(buildVariants.ramFor(4)))
+	test.isEqual("4GiB", f.fallbackOf(buildVariants.ramFor(4, 10)))
+}
+
+_buildVariantsParams := {
+	runMode: "liabilities",
+	maxLiabilityEdits: 7,
+	maxFrameworkEdits: 12,
+	candidateResiduesPerPosition: 3,
+	structuralWeight: 1.0,
+	objectiveWeight: 1.0,
+	nonHumanPriorMargin: 0.05,
+	maxNewLiabilities: 0,
+	humanizationIgnoredLiabilities: "",
+	frConfidenceThreshold: 4.0,
+	variantsPerParent: 10,
+	lowToleranceFloor: 3,
+	epistasisRescoreTopK: 20
+}
+
+TestBuildVariantsCommandLineCarriesBothEditCapFlags := func() {
+	args := buildVariants.paramArgsFor(_buildVariantsParams)
+	test.isTrue(
+		text.contains(text.join(args, " "), "--max-liability-edits 7"),
+		"expected --max-liability-edits 7 in " + text.join(args, " ")
+	)
+	test.isTrue(
+		text.contains(text.join(args, " "), "--max-framework-edits 12"),
+		"expected --max-framework-edits 12 in " + text.join(args, " ")
+	)
+	test.isFalse(
+		text.contains(text.join(args, " "), "--max-edits-per-variant"),
+		"the old flag must not survive: " + text.join(args, " ")
+	)
 }

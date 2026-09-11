@@ -19,16 +19,14 @@ exec := import("@platforma-sdk/workflow-tengo:exec")
 execConstants := import("@platforma-sdk/workflow-tengo:exec.constants")
 validation := import("@platforma-sdk/workflow-tengo:validation")
 
-workdir := import(":workdir")
-
 f := exec.formula
 
 scanSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software-developability:index-and-scan")
 
-RESIDUES_DIR := "residues"
-TRIAGED_DIR := "triaged"
+RESIDUES_FILE := "residues.jsonl"
+TRIAGED_FILE := "triaged.jsonl"
 LIABILITIES_FILE := "liabilities.tsv"
-SKIP_FILE := "skip.tsv"
+REJECTED_FILE := "rejected.tsv"
 
 // The two tags the RAM formula measures, because the two are held for different
 // lengths of time — see `ramFor`.
@@ -40,7 +38,7 @@ CONFIDENCE_TAG := "confidence"
 BASE_RAM := f.gib(1)
 
 // What one antibody costs, per byte of its PDB text: the parsed `Residue` list,
-// plus freesasa's own copy of every atom, which `exposure.py` builds over the
+// plus freesasa's own copy of every atom, which `residue_exposure.py` builds over the
 // whole structure rather than over the residues in scope. An upper-bound
 // estimate, not a measurement.
 RAM_PER_STRUCTURE_BYTE := 32
@@ -68,7 +66,7 @@ DEFAULT_CPU := 2
  *
  * The two terms have different shapes because the two inputs live for different
  * lengths of time. `_load_confidence_tsv` reads the whole table before the loop
- * and holds it to the end, so the confidence term is the TOTAL. `batch.py` runs
+ * and holds it to the end, so the confidence term is the TOTAL. `antibody_batch.py` runs
  * one antibody at a time and releases it before the next one starts, so a
  * structure only ever costs the largest one, and the average stands in for it: a
  * tag is measured by its total bytes and the DSL has no maximum, so dividing by
@@ -92,13 +90,6 @@ ramFor := func(count) {
 // be told, not handed the default in silence.
 ARGS := {
 	"__options__,closed": "",
-	// Sorted-key order, so the exec input stays canonical and a pure step
-	// dedups.
-	pdbIndex: [{
-		"__options__,closed": "",
-		clonotypeKey: "string",
-		filename: "string"
-	}],
 	// A `workdir path -> blob` map, as `tpl.inputs()` flattens a staged
 	// directory — which is exactly what `addFiles` takes.
 	pdbs: { any: validation.resource() },
@@ -107,13 +98,13 @@ ARGS := {
 	// because an older upstream emits no per-residue confidence at all, and
 	// each antibody then falls back to its own B-factor column.
 	"confidence,?": validation.resource(),
-	// Absent means the whole index is in scope.
+	// Absent means every parent clonotype is in scope.
 	"clonotypeFilter,?": validation.resource(),
 	params: {
 		"__options__,closed": "",
 		rsasaBuriedCutoff: "number",
-		frConfThresh: "number",
-		cdrConfThresh: "number",
+		frConfidenceThreshold: "number",
+		cdrConfidenceThreshold: "number",
 		actOnFixability: "string"
 	},
 	// Both optional, and an override wins over the recipe: `ramFor` sizes the RAM
@@ -126,8 +117,8 @@ ARGS := {
 /**
  * Index, scan and triage every antibody in the PDB index.
  *
- * @return {residues: fileSet, triaged: fileSet, liabilities: file,
- *          skip: file, skipContent: content}
+ * @return {residues: file, triaged: file, liabilities: file,
+ *          rejected: file, rejectedContent: content}
  */
 run := func(args) {
 	validation.assertType(args, ARGS, "index-and-scan: bad args")
@@ -138,23 +129,21 @@ run := func(args) {
 			queue: execConstants.MEDIUM_QUEUE,
 			onCPU: {
 				cpu: is_undefined(args.cpu) ? DEFAULT_CPU : args.cpu,
-				ram: is_undefined(args.ram) ? ramFor(len(args.pdbIndex)) : args.ram
+				ram: is_undefined(args.ram) ? ramFor(len(args.pdbs)) : args.ram
 			}
 		}).
 		printErrStreamToStdout().
 		addFiles(args.pdbs, { tag: STRUCTURE_TAG }).
-		writeFile(workdir.INDEX_FILE, workdir.renderIndex(args.pdbIndex)).
 		addFile("definitions.json", args.definitions).
 		arg("--pdb-dir").arg("pdbs").
-		arg("--pdb-index").arg(workdir.INDEX_FILE).
 		arg("--definitions").arg("definitions.json").
-		arg("--out-residues-dir").arg(RESIDUES_DIR).
-		arg("--out-triaged-dir").arg(TRIAGED_DIR).
+		arg("--out-residues").arg(RESIDUES_FILE).
+		arg("--out-triaged").arg(TRIAGED_FILE).
 		arg("--out-liabilities").arg(LIABILITIES_FILE).
-		arg("--out-skip").arg(SKIP_FILE).
+		arg("--out-rejected").arg(REJECTED_FILE).
 		arg("--rsasa-buried-cutoff").arg(string(args.params.rsasaBuriedCutoff)).
-		arg("--fr-confidence-gating-threshold").arg(string(args.params.frConfThresh)).
-		arg("--cdr-confidence-gating-threshold").arg(string(args.params.cdrConfThresh)).
+		arg("--fr-confidence-threshold").arg(string(args.params.frConfidenceThreshold)).
+		arg("--cdr-confidence-threshold").arg(string(args.params.cdrConfidenceThreshold)).
 		arg("--act-on-fixability").arg(args.params.actOnFixability)
 
 	// Each optional sidecar's flag is omitted entirely when its input never
@@ -173,19 +162,19 @@ run := func(args) {
 	}
 
 	result := cmd.
-		saveFileSet("residues", workdir.dirPattern(RESIDUES_DIR)).
-		saveFileSet("triaged", workdir.dirPattern(TRIAGED_DIR)).
+		saveFile(RESIDUES_FILE).
+		saveFile(TRIAGED_FILE).
 		saveFile(LIABILITIES_FILE).
-		saveFile(SKIP_FILE).
-		saveFileContent(SKIP_FILE).
+		saveFile(REJECTED_FILE).
+		saveFileContent(REJECTED_FILE).
 		run()
 
 	return {
-		residues: result.getFileSet("residues"),
-		triaged: result.getFileSet("triaged"),
+		residues: result.getFile(RESIDUES_FILE),
+		triaged: result.getFile(TRIAGED_FILE),
 		liabilities: result.getFile(LIABILITIES_FILE),
-		skip: result.getFile(SKIP_FILE),
-		skipContent: result.getFileContent(SKIP_FILE)
+		rejected: result.getFile(REJECTED_FILE),
+		rejectedContent: result.getFileContent(REJECTED_FILE)
 	}
 }
 

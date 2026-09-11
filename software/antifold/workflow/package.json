@@ -12,6 +12,7 @@
     "@platforma-open/milaboratories.antibody-variant-designer.software-antifold": "workspace:*",
     "@platforma-open/milaboratories.antibody-variant-designer.software-developability.workflow": "workspace:*",
     "@platforma-open/milaboratories.antifold-weights-assets": "^1.0.0",
+    "@platforma-open/milaboratories.sapiens-weights-assets": "^1.0.0",
     "@platforma-sdk/workflow-tengo": "catalog:"
   },
   "devDependencies": {

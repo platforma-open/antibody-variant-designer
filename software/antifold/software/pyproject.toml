@@ -40,6 +40,13 @@ antifold = [
     "scipy>=1,<1.17",
     "biotite==0.38.*",
     "biopython==1.83",
+    # The human-repertoire prior. Sapiens pins nothing — not torch, not
+    # transformers, not pandas (`Merck/Sapiens/setup.py:24-27`) — so every bound
+    # here is ours. `transformers` is capped because `deps:export` compiles with
+    # `--no-deps`: a newer line may require a torch this file contradicts, and pip
+    # then refuses the exported set outright rather than resolving around it.
+    "sapiens==1.1.*",
+    "transformers>=4.44,<4.45",
 ]
 
 [dependency-groups]
@@ -56,8 +63,8 @@ e2e = [
 [tool.ruff]
 extend = "../../ruff.toml"
 # `../../developability/software/src` is here for the same reason it is on `pythonpath`
-# below: `antifold.py` imports that package's stores as bare names, and they
-# must sort as first-party here exactly as they do there.
+# below: `read_tolerance.py` imports that package's `engine`, which must sort as
+# first-party here exactly as it does there.
 src = ["src", "../../developability/software/src", "tests"]
 # Vendored third-party source (BSD 3-Clause, commit 789d467) — ours to run,
 # not ours to restyle.
@@ -65,8 +72,8 @@ extend-exclude = ["src/vendor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `antifold.py` imports the developability package's stores at module level, so
-# this package's own source is not enough to load it.
+# `read_tolerance.py` imports the developability package's `engine` at module
+# level, so this package's own source is not enough to load it.
 pythonpath = ["src", "../../developability/software/src", "tests"]
 markers = [
     "e2e: end-to-end tests that run the real vendored AntiFold",
