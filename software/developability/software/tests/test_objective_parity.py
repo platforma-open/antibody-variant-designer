@@ -10,6 +10,7 @@ seam existed — see the TODO's own capture command."""
 import csv
 import io
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -151,6 +152,17 @@ def _golden(name: str) -> Path:
     return GOLDEN_DIR / name
 
 
+def _portable(raw: bytes) -> bytes:
+    """`raw` with every rSASA number replaced by a marker.
+
+    freesasa's macOS and Linux builds of the pinned version disagree on the absolute
+    number — 0.315 against 0.191 for the same residue — so a captured rSASA is not a
+    portable byte. What the number decides is portable and stays captured beside it:
+    the `verdict` each liability carries, which is what the buried cutoff turns it into.
+    """
+    return re.sub(rb'"rsasa": [0-9eE.+-]+', b'"rsasa": <platform>', raw)
+
+
 def _check_or_capture(produced_path: str, golden_name: str) -> None:
     golden_path = _golden(golden_name)
     produced = Path(produced_path).read_bytes()
@@ -158,7 +170,9 @@ def _check_or_capture(produced_path: str, golden_name: str) -> None:
         GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
         golden_path.write_bytes(produced)
         return
-    assert produced == golden_path.read_bytes(), f"{golden_name} drifted from its golden capture"
+    assert _portable(produced) == _portable(golden_path.read_bytes()), (
+        f"{golden_name} drifted from its golden capture"
+    )
 
 
 class TestObjectiveSeamParity:
