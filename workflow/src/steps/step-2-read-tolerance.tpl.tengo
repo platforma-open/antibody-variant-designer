@@ -29,18 +29,11 @@ readTolerance := import("@platforma-open/milaboratories.antibody-variant-designe
 
 self.validateInputs({
 	"__options__,closed": "",
-	// The PDB index, verbatim as `main.tpl.tengo` built it from the PDB
-	// ResourceMap's sorted keys.
-	pdbIndex: [{
-		"__options__,closed": "",
-		clonotypeKey: "string",
-		filename: "string"
-	}],
 	pdbs: { any: validation.resource() },
-	residues: { any: validation.resource() },
+	residues: validation.resource(),
 	// Read only as a gate — never opened. An antibody absent here has no
 	// actionable liability, or was already named upstream.
-	triaged: { any: validation.resource() },
+	triaged: validation.resource(),
 	// Advanced Settings → Resource Allocation. Either may be unset — the recipe
 	// sizes the dimension the operator left empty from the data it is handed.
 	// `vram` is not exposed at all: it sizes to the checkpoint AntiFold loads,
@@ -52,11 +45,10 @@ self.validateInputs({
 	}
 })
 
-self.defineOutputs("tolerance", "skip", "skipContent")
+self.defineOutputs("tolerance", "priors", "rejected", "rejectedContent")
 
 self.body(func(inputs) {
 	return readTolerance.run({
-		pdbIndex: inputs.pdbIndex,
 		pdbs: inputs.pdbs,
 		residues: inputs.residues,
 		triaged: inputs.triaged,

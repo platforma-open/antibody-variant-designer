@@ -2,7 +2,7 @@
 
 **This file names the antibody formats the python pipeline must accept, and what each one must
 produce.** Every case below is a test in `software/tests/`. A format that is not in this list is a
-named skip, never a best-effort guess.
+named rejection, never a best-effort guess.
 
 ## Vocabulary
 
@@ -18,7 +18,7 @@ named skip, never a best-effort guess.
 ## The scope rule
 
 **A residue is in scope when its chain carries a role AND the residue carries an IMGT region.** One
-rule decides every case below. `residue_store.Residue.in_scope` is the single place it lives;
+rule decides every case below. `residue_index.Residue.in_scope` is the single place it lives;
 `liability_motifs.py` and `liability_cysteines.py` read it and never re-derive it.
 
 **Out-of-scope residues stay in the residue index.** They are dropped from research, not from the
@@ -44,10 +44,10 @@ scanned on its own sequence, so no motif can span the two chains.
 
 ## Case 3 — scFv
 
-**One chain that holds VH, a linker, and VL — a named skip, not a partial result.** Two V domains on
-one chain both number 1–128, so `(chain, imgt)` stops identifying one residue, and every downstream
-join uses that pair. Step 1 detects the repeated `(chain, resSeq, insertionCode)` and writes the skip
-reason `structure-multi-domain-chain`.
+**One chain that holds VH, a linker, and VL — a named rejection, not a partial result.**
+Two V domains on one chain both number 1–128, so `(chain, imgt)` stops identifying one residue, and every downstream
+join uses that pair. Step 1 detects the repeated `(chain, resSeq, insertionCode)` and writes the
+rejection reason `structure-multi-domain-chain`.
 
 The upstream Structure Prediction block already blocks scFv input
 (`text/work/projects/3d-structures-and-clustering/block-structure-prediction.md:163`), so this case
@@ -81,7 +81,7 @@ is excluded.** This is Case 4 and Case 5 applied together, with no new rule: con
 no region, and the chains that carry no `REMARK 99` role have no role. The block reports liabilities
 for the one variable domain it can design against, and the constant mass only shapes burial.
 
-**A run that ends with zero in-scope residues is a skip, not an empty success.** Step 1 writes
+**A run that ends with zero in-scope residues is a rejection, not an empty success.** Step 1 writes
 `no-researchable-residue` when the scope rule retains nothing, so a file of pure constant region
 never reaches the scan step as a silent empty index.
 
@@ -92,9 +92,9 @@ variable domains only — ImmuneBuilder runs on variable-domain sequences
 (`block-structure-prediction.md:32`), VHH mode drops the light chain (`:40`), and scFv is blocked
 (`:163`). A Fab or mAb dataset therefore arrives as its Fv part. Cases 3 to 6 are guards for
 hand-supplied files and for a future upstream that predicts more, and they exist so that such a file
-skips with a name rather than losing residues without a word.
+is rejected by name rather than losing residues without a word.
 
-## Step 1 Skip Reasons
+## Step 1 Rejection Reasons
 
 | Reason | Raised when |
 |---|---|

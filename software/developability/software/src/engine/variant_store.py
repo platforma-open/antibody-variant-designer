@@ -6,17 +6,10 @@ variant. xsv.importFile builds each axis from a column.
 
 import csv
 import io
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 
-DEFAULT_ALPHA = 1.0
-DEFAULT_BETA = 1.0
-
-# The fixed domain each re-rank term normalises over before weighting. A
-# per-run min/max would make one variant's rank depend on which other
-# variants happen to share its file.
-STRUCTURAL_TOLERANCE_DOMAIN = (1.0, 20.0)
-HUMANNESS_DOMAIN = (0.0, 100.0)
+from engine import variant_ranking
 
 # This file carries no run or block id column.
 # The workflow attaches run identity to these columns downstream, once this process finishes.
@@ -27,7 +20,6 @@ TSV_COLUMNS = [
     "variantKey",
     "rank",
     "parentRank",
-    "objective",
     "chain",
     "addressedTarget",
     "changedPositions",
@@ -38,30 +30,15 @@ TSV_COLUMNS = [
     "bindingRisk",
     "lowConfidenceWarning",
     "status",
+    "developabilityScore",
 ]
-
-
-@dataclass(frozen=True)
-class Variant:
-    rank: int  # Global ordinal across the whole run, written by rewrite_global_rank.
-    parent_rank: int  # Local rank inside one parent — shown as "best pick of this antibody"
-    chain: str  # "H" for a VHH, "H,L" for a paired Fv
-    addressed_target: str
-    changed_positions: str
-    variant_sequence: str
-    structural_tolerance: float
-    humanness_score: float | None
-    worst_confidence_angstroms: float | None
-    binding_risk: str  # "Low" | "Medium" | "High"
-    low_confidence_warning: bool
-    status: str
 
 
 def _tsv_value(value) -> str:
     return "" if value is None else str(value)
 
 
-def _low_confidence_warning_str(variant: Variant) -> str:
+def _low_confidence_warning_str(variant: variant_ranking.Variant) -> str:
     return "yes" if variant.low_confidence_warning else "no"
 
 
@@ -78,12 +55,12 @@ def variant_key(parent_rank: int) -> str:
 def write_variants_header(path: str) -> None:
     """Writes the header for the run's one dataset-wide file.
 
-    Call this before the batch loop starts. Then an empty `pdb_index`
+    Call this before the batch loop starts. Then an empty run
     still leaves a header-only TSV."""
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
 
 
-def _row(clonotype_key: str, variant_key_str: str, objective: str, v: Variant) -> list:
+def _row(clonotype_key: str, variant_key_str: str, v: variant_ranking.Variant) -> list:
     """Returns one TSV row, in `TSV_COLUMNS` order.
 
     `append_variants_tsv` and `rewrite_global_rank` both call this to write
@@ -98,7 +75,6 @@ def _row(clonotype_key: str, variant_key_str: str, objective: str, v: Variant) -
         variant_key_str,
         v.rank,
         v.parent_rank,
-        objective,
         v.chain,
         v.addressed_target,
         v.changed_positions,
@@ -109,11 +85,12 @@ def _row(clonotype_key: str, variant_key_str: str, objective: str, v: Variant) -
         v.binding_risk,
         _low_confidence_warning_str(v),
         v.status,
+        v.developability_score,
     ]
 
 
 def append_variants_tsv(
-    path: str, clonotype_key: str, objective: str, variants: list[Variant]
+    path: str, clonotype_key: str, variants: list[variant_ranking.Variant]
 ) -> None:
     """Appends one parent's ranked variants to path.
 
@@ -121,28 +98,24 @@ def append_variants_tsv(
     variant's rank and its parent clonotype are available. Later,
     rewrite_global_rank overwrites rank with a dataset-wide ordinal without
     touching variantKey or parent_rank."""
-    buf = io.StringIO()
-    writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
+    row_buffer = io.StringIO()
+    writer = csv.writer(row_buffer, delimiter="\t", lineterminator="\n")
     for v in variants:
-        writer.writerow(_row(clonotype_key, variant_key(v.parent_rank), objective, v))
-    with Path(path).open("a") as fh:
-        fh.write(buf.getvalue())
+        writer.writerow(_row(clonotype_key, variant_key(v.parent_rank), v))
+    with Path(path).open("a") as out_file:
+        out_file.write(row_buffer.getvalue())
 
 
-def read_variants_tsv(path: str) -> list[tuple[str, str, str, Variant]]:
-    """`(clonotype_key, variant_key, objective, variant)` per row, in file
-    order. `objective` round-trips through the file but not through
-    `Variant` — it is the objective that produced the row, carried
-    alongside it rather than on it."""
+def read_variants_tsv(path: str) -> list[tuple[str, str, variant_ranking.Variant]]:
+    """`(clonotype_key, variant_key, variant)` per row, in file order."""
     variants = []
-    with Path(path).open(newline="") as fh:
-        for row in csv.DictReader(fh, delimiter="\t"):
+    with Path(path).open(newline="") as out_file:
+        for row in csv.DictReader(out_file, delimiter="\t"):
             variants.append(
                 (
                     row["clonotypeKey"],
                     row["variantKey"],
-                    row["objective"],
-                    Variant(
+                    variant_ranking.Variant(
                         rank=int(row["rank"]),
                         parent_rank=int(row["parentRank"]),
                         chain=row["chain"],
@@ -159,28 +132,18 @@ def read_variants_tsv(path: str) -> list[tuple[str, str, str, Variant]]:
                         binding_risk=row["bindingRisk"],
                         low_confidence_warning=row["lowConfidenceWarning"] == "yes",
                         status=row["status"],
+                        developability_score=float(row["developabilityScore"]),
                     ),
                 )
             )
     return variants
 
 
-def _normalize(value: float, domain: tuple[float, float]) -> float:
-    lo, hi = domain
-    return (value - lo) / (hi - lo)
-
-
-def _rerank_score(v: Variant, alpha: float, beta: float) -> float:
-    """Each term is scaled by its own fixed domain first, unclamped.
-    `alpha = beta = 1.0` then weighs the two terms equally."""
-    structural = _normalize(v.structural_tolerance, STRUCTURAL_TOLERANCE_DOMAIN)
-    humanness = (
-        0.0 if v.humanness_score is None else _normalize(v.humanness_score, HUMANNESS_DOMAIN)
-    )
-    return alpha * structural + beta * humanness
-
-
-def rewrite_global_rank(path: str, alpha: float, beta: float) -> None:
+def rewrite_global_rank(
+    path: str,
+    rerank_structural_weight: float,
+    rerank_humanness_weight: float,
+) -> None:
     """Overwrites rank in path as one dataset-wide ordinal, 1..N.
 
     Reads all surviving variants, sorts by the normalised, weighted re-rank
@@ -196,17 +159,17 @@ def rewrite_global_rank(path: str, alpha: float, beta: float) -> None:
         return
     rows.sort(
         key=lambda row: (
-            -_rerank_score(row[3], alpha, beta),
-            row[3].changed_positions,
+            -variant_ranking.rerank_score(
+                row[2], rerank_structural_weight, rerank_humanness_weight
+            ),
+            row[2].changed_positions,
             row[0],
             row[1],
         )
     )
 
-    buf = io.StringIO()
-    writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-    for global_rank, (clonotype_key, variant_key_str, objective, v) in enumerate(rows, start=1):
-        writer.writerow(
-            _row(clonotype_key, variant_key_str, objective, replace(v, rank=global_rank))
-        )
-    Path(path).write_text("\t".join(TSV_COLUMNS) + "\n" + buf.getvalue())
+    row_buffer = io.StringIO()
+    writer = csv.writer(row_buffer, delimiter="\t", lineterminator="\n")
+    for global_rank, (clonotype_key, variant_key_str, v) in enumerate(rows, start=1):
+        writer.writerow(_row(clonotype_key, variant_key_str, replace(v, rank=global_rank)))
+    Path(path).write_text("\t".join(TSV_COLUMNS) + "\n" + row_buffer.getvalue())

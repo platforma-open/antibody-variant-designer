@@ -13,9 +13,59 @@ const props = defineProps<{
   worstConfidence: number | null;
   bindingRisk: string;
   lowConfidenceWarning: string;
+  developabilityScore: number | null;
+  parentDevelopabilityScore: number | null;
+  humannessScore: number | null;
+  parentHumannessScore: number | null;
 }>();
 
 const edits = computed(() => parseChangedPositions(props.changedPositions));
+
+/** One row of the before/after block: the parent's number, this variant's, and the
+ *  move between them. `improves` says which direction is the good one, so the sign
+ *  of the move can be coloured without the row knowing which score it holds. */
+type Move = {
+  label: string;
+  parent: number | null;
+  variant: number | null;
+  delta: number | null;
+  better: "up" | "down" | "flat";
+};
+
+function move(
+  label: string,
+  parent: number | null,
+  variant: number | null,
+  improves: "lower" | "higher",
+): Move {
+  // A missing end leaves the move unmeasured rather than assuming the other end:
+  // treating an absent parent score as 0 would read every variant as a regression.
+  if (parent === null || variant === null) {
+    return { label, parent, variant, delta: null, better: "flat" };
+  }
+  const delta = variant - parent;
+  const improved = improves === "lower" ? delta < 0 : delta > 0;
+  return { label, parent, variant, delta, better: delta === 0 ? "flat" : improved ? "up" : "down" };
+}
+
+const moves = computed<Move[]>(() => [
+  move(
+    "Developability burden",
+    props.parentDevelopabilityScore,
+    props.developabilityScore,
+    "lower",
+  ),
+  move("Humanness", props.parentHumannessScore, props.humannessScore, "higher"),
+]);
+
+function cell(value: number | null): string {
+  return value === null ? "—" : value.toFixed(2);
+}
+
+function signedCell(value: number | null): string {
+  if (value === null) return "—";
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
+}
 </script>
 
 <template>
@@ -27,7 +77,7 @@ const edits = computed(() => parseChangedPositions(props.changedPositions));
       <dd>{{ rank ?? "—" }}</dd>
       <dt>Rank per parent</dt>
       <dd>{{ parentRank ?? "—" }}</dd>
-      <dt>Addressed liability</dt>
+      <dt>Addressed targets</dt>
       <dd>{{ addressedTarget }}</dd>
       <dt>Structural tolerance</dt>
       <dd>{{ structuralTolerance !== null ? structuralTolerance.toFixed(2) : "—" }}</dd>
@@ -38,6 +88,26 @@ const edits = computed(() => parseChangedPositions(props.changedPositions));
       <dt>Low confidence</dt>
       <dd>{{ lowConfidenceWarning }}</dd>
     </dl>
+
+    <h3>What this variant bought</h3>
+    <table class="moves">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Parent</th>
+          <th>Variant</th>
+          <th>Change</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="m in moves" :key="m.label">
+          <th scope="row">{{ m.label }}</th>
+          <td class="number">{{ cell(m.parent) }}</td>
+          <td class="number">{{ cell(m.variant) }}</td>
+          <td class="number" :class="`move--${m.better}`">{{ signedCell(m.delta) }}</td>
+        </tr>
+      </tbody>
+    </table>
 
     <h3>Edits versus the parent</h3>
     <table class="edits">
@@ -84,12 +154,32 @@ const edits = computed(() => parseChangedPositions(props.changedPositions));
 .summary dd {
   margin: 0;
 }
-.edits {
+.edits,
+.moves {
   border-collapse: collapse;
   width: 100%;
 }
+.moves th[scope="row"] {
+  text-align: left;
+  font-weight: 600;
+}
+.number {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.move--up {
+  color: var(--text-color-success, #15803d);
+}
+.move--down {
+  color: var(--text-color-error, #b91c1c);
+}
+.move--flat {
+  color: var(--text-color-secondary, #6b7280);
+}
 .edits th,
-.edits td {
+.edits td,
+.moves th,
+.moves td {
   border: 1px solid var(--border-color-default, #e5e7eb);
   padding: 4px 8px;
   text-align: left;

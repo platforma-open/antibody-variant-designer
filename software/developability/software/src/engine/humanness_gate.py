@@ -8,7 +8,7 @@ measured at, or how loading it is cached.
 
 from functools import lru_cache
 
-from engine import residue_store
+from engine import residue_index
 
 MIN_WINDOW = 9
 AA_ALPHABET = frozenset("ACDEFGHIKLMNPQRSTVWYX")
@@ -41,26 +41,37 @@ def identity(sequence: str | None) -> float | None:
     return round(float(fraction) * 100.0, 2)
 
 
-def chain_sequence(
-    residues: list[residue_store.Residue],
+def chain_residues(
+    residues: list[residue_index.Residue],
     chain: str,
-    substituted: list[residue_store.Residue],
-) -> str:
+    substituted: list[residue_index.Residue],
+) -> tuple[residue_index.Residue, ...]:
     """One chain's in-scope residues, in offset order.
 
     Each residue is replaced by its entry in `substituted` when one shares its
-    `(chain, offset)`; otherwise its own wild type stands.
+    `(chain, offset)`; otherwise it stands.
 
-    Reads the chain from `residue_store.in_scope_chains`, the one minter, so this measures
-    the same sequence a scan would see without keeping a second derivation of it.
+    Reads the chain from `residue_index.in_scope_chains`, the one minter, so a scanner and a
+    scorer see the same residues without keeping a second derivation of them. A caller that
+    needs a whole edited chain — the motif and cysteine detectors both do — takes it here
+    rather than passing the edited residues alone, which would spell motifs across residues
+    that never touch.
 
-    Pass an empty `substituted` for a sequence with no edits applied."""
-    replacement = {(r.chain, r.offset): r.wild_type for r in substituted}
+    Pass an empty `substituted` for the chain with no edits applied."""
+    replacement = {(r.chain, r.offset): r for r in substituted}
     in_scope_chain = next(
-        (c for c in residue_store.in_scope_chains(residues) if c.chain == chain), None
+        (c for c in residue_index.in_scope_chains(residues) if c.chain == chain), None
     )
     if in_scope_chain is None:
-        return ""
-    return "".join(
-        replacement.get((r.chain, r.offset), r.wild_type) for r in in_scope_chain.residues
-    )
+        return ()
+    return tuple(replacement.get((r.chain, r.offset), r) for r in in_scope_chain.residues)
+
+
+def chain_sequence(
+    residues: list[residue_index.Residue],
+    chain: str,
+    substituted: list[residue_index.Residue],
+) -> str:
+    """The amino acids of `chain_residues`, in the same order — `""` for a chain not in
+    scope."""
+    return "".join(r.wild_type for r in chain_residues(residues, chain, substituted))

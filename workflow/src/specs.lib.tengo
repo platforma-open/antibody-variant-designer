@@ -217,24 +217,6 @@ variantColumns := func(blockId) {
 			}
 		},
 		{
-			column: "objective",
-			csvHeader: "objective",
-			// The constant `liability` — the only objective this block designs
-			// against. A column rather than a domain key, like `status`, because
-			// the synthesis CSV must carry the word.
-			spec: {
-				name: "pl7.app/antibodyVariantDesigner/objective",
-				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
-				annotations: {
-					"pl7.app/label": "Objective",
-					"pl7.app/description": "Always 'liability' — the objective this variant was designed against.",
-					"pl7.app/isDiscreteFilter": "true",
-					"pl7.app/table/visibility": "hidden"
-				}
-			}
-		},
-		{
 			column: "addressedTarget",
 			csvHeader: "addressedTarget",
 			spec: {
@@ -242,9 +224,9 @@ variantColumns := func(blockId) {
 				valueType: "String",
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
-					"pl7.app/label": "Addressed liability",
+					"pl7.app/label": "Addressed targets",
 					"pl7.app/isDiscreteFilter": "true",
-					"pl7.app/description": "The one liability this variant was designed to clear — one variant always targets exactly one liability."
+					"pl7.app/description": "Every target this variant was designed to address, comma-joined — a cleared liability, a humanised framework position, or both."
 				}
 			}
 		},
@@ -276,7 +258,7 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Humanness score",
-					"pl7.app/description": "OASis identity (human-oas): fraction of overlapping 9-mer peptides found in human OAS antibody repertoires, x100 (range 0-100; higher = more human). NOTE: this is a raw OASis IDENTITY at a fixed tier, NOT a calibrated OASis percentile — it is not directly comparable to a calibrated percentile published elsewhere. The tier is fixed at peptides present in more than 10% of human OAS subjects.",
+					"pl7.app/description": "This variant's own heavy chain on the humanness scale, measured for every variant whichever objective built it, so a liability fix can be read against the parent baseline beside it. OASis identity (human-oas): fraction of overlapping 9-mer peptides found in human OAS antibody repertoires, x100 (range 0-100; higher = more human). NOTE: this is a raw OASis IDENTITY at a fixed tier, NOT a calibrated OASis percentile — it is not directly comparable to a calibrated percentile published elsewhere. The tier is fixed at peptides present in more than 10% of human OAS subjects.",
 					"pl7.app/format": ".2f",
 					"pl7.app/isScore": "true",
 					"pl7.app/score/rankingOrder": "decreasing",
@@ -291,9 +273,8 @@ variantColumns := func(blockId) {
 			column: "parentHumannessScore",
 			// The same value the Parents page shows, joined onto this row from
 			// `humanness.tsv` so a reader compares the designed score against the
-			// baseline it had to beat without leaving the page. Filled exactly when
-			// "Humanness score" beside it is: both come from the humanization
-			// objective, and a liability variant carries neither.
+			// baseline without leaving the page. Both cells are filled in every run
+			// mode, so a liabilities-only run reads its own rise or fall.
 			//
 			// NOT spelled `pl7.app/humannessScore`, the name the variant's own score
 			// carries: on this axis a row IS a variant, so that name must mean the
@@ -305,8 +286,49 @@ variantColumns := func(blockId) {
 				contextDomain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Parent humanness",
-					"pl7.app/description": "The parent's own heavy chain on the humanness scale, before any edit — the baseline this variant had to beat. Measured the same way as \"Humanness score\" beside it, so the two subtract. Empty when the run did not include the humanization objective.",
+					"pl7.app/description": "The parent's own heavy chain on the humanness scale, before any edit — the baseline this variant had to beat. Measured the same way as \"Humanness score\" beside it, so the two subtract. Empty only when the chain could not be scored.",
 					"pl7.app/format": ".2f"
+				}
+			}
+		},
+		{
+			// No `csvHeader`, for the same reason `parentHumannessScore` declares
+			// none: this is a reading aid on the page, not part of the vendor's set.
+			column: "parentDevelopabilityScore",
+			// The same value the Parents page shows, joined onto this row from
+			// `liabilities.tsv` so a reader sees what the edits bought without
+			// leaving the page. Filled in every run mode.
+			//
+			// NOT spelled `pl7.app/developabilityScore`, the name the variant's own
+			// burden carries: on this axis a row IS a variant, so that name must mean
+			// the variant's own value. A consumer joining on it would otherwise read
+			// the parent's number for a designed sequence.
+			spec: {
+				name: "pl7.app/antibodyVariantDesigner/parentDevelopabilityScore",
+				valueType: "Double",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Parent developability",
+					"pl7.app/description": "The engineering burden the parent carried before any edit - the baseline this variant had to beat. Measured the same way as \"Developability score\" beside it, so the two subtract. Lower is better.",
+					"pl7.app/format": ".2f"
+				}
+			}
+		},
+		{
+			// No `csvHeader`: the vendor's exported set is the fixed list
+			// `specs.test.tengo` pins, and this column is a reading aid on the
+			// page rather than part of that contract.
+			column: "developabilityScore",
+			spec: {
+				name: "pl7.app/developabilityScore",
+				valueType: "Double",
+				contextDomain: { "pl7.app/blockId": blockId },
+				annotations: {
+					"pl7.app/label": "Developability score",
+					"pl7.app/description": "The engineering burden this variant's own sequence still carries: every liability re-detected on it costs its fixability class weight times the weight of the region it sits in, and the costs sum. Lower is better, 0 means no liability left. The parent's own score on the Parents page is measured the same way, so the two subtract into what the edits bought. A disqualifying liability is not counted here - it is a verdict, not a cost.",
+					"pl7.app/format": ".2f",
+					"pl7.app/isScore": "true",
+					"pl7.app/score/rankingOrder": "increasing"
 				}
 			}
 		},
@@ -369,8 +391,7 @@ variantColumns := func(blockId) {
 			column: "status",
 			csvHeader: "status",
 			// The constant `unvalidated-hypothesis`. A column rather than a
-			// domain key, like `objective`, because the synthesis CSV must
-			// carry the word.
+			// domain key, because the synthesis CSV must carry the word.
 			spec: {
 				name: "pl7.app/antibodyVariantDesigner/status",
 				valueType: "String",
@@ -401,6 +422,43 @@ variantColumns := func(blockId) {
 	]
 }
 
+// The variant group's own axis, written once because two groups key on it —
+// the value columns and the parent linker below.
+_variantKeyAxis := func(blockId) {
+	return {
+		column: "variantClonotypeKey",
+		// The registry's variant identity axis. A designed sequence is a
+		// variant, and this is the name every block that already reads
+		// variants selects on, so this group needs no new name to be
+		// consumed. `main.tpl.tengo` computes the value; the
+		// `pl7.app/label` column beside it carries the short id.
+		//
+		// NOT `pl7.app/vdj/clonotypeKey`: label discovery binds a label
+		// column to an axis by axis name alone, so that name would bind the
+		// PARENT's `pl7.app/label` onto this axis and draw an all-null
+		// "Clone Id" beside our own.
+		spec: {
+			type: "String",
+			name: "pl7.app/variantKey",
+			// One name, several producers, told apart by one domain key —
+			// a peptide run writes `pl7.app/peptide/extractionRunId`, an
+			// amplicon run `pl7.app/repertoire/extractionRunId`, and a design
+			// run writes this. It carries the block id because two runs over
+			// one dataset hash the same designed sequences to the same
+			// values: without it, the rows of two runs share an axis value
+			// and join into one.
+			domain: {
+				"pl7.app/antibodyVariantDesigner/designRunId": blockId
+			},
+			annotations: {
+				"pl7.app/label": "Variant key",
+				"pl7.app/description": "sha256 of the parent clonotype key and the designed V-domain sequence, base64-alphanumeric, 120 bits — the recipe upstream hashes a clonotype with. The parent is an ingredient because two parents that differ only at the liability being fixed converge on one designed sequence, and hashing the sequence alone would collide their rows. Same parent and same designed sequence, same key, in every run.",
+				"pl7.app/table/fontFamily": "monospace"
+			}
+		}
+	}
+}
+
 /**
 	* The PFrame `variants.tsv` becomes — the Variants page's group.
 	*
@@ -423,42 +481,153 @@ buildVariantsSettings := func(blockId) {
 	columns = _stampOrderPriority(columns)
 
 	return {
+		axes: [_variantKeyAxis(blockId)],
+		columns: columns,
+		storageFormat: "Parquet"
+	}
+}
+
+/**
+	* The PFrame `alignment-rows.tsv` becomes — the sequences the comparison
+	* view stacks, one row per parent and one per variant.
+	*
+	* One axis carrying BOTH identities, which is the whole reason this group
+	* exists rather than the variant group serving the view: the alignment viewer
+	* draws one row per key of one sequence column, so a parent keyed on its own
+	* axis could never be a row beside its variant. The `pl7.app/label` column is
+	* what tells the two apart on screen — the viewer sorts by axis value, a
+	* hash, and reads no ordering annotation.
+	*
+	* @param blockId: string - this run's block id, which the axis's domain and
+	*                 every column's context domain carry
+	*/
+buildAlignmentSettings := func(blockId) {
+	return {
 		axes: [
 			{
-				column: "variantClonotypeKey",
-				// The registry's variant identity axis. A designed sequence is a
-				// variant, and this is the name every block that already reads
-				// variants selects on, so this group needs no new name to be
-				// consumed. `main.tpl.tengo` computes the value; the
-				// `pl7.app/label` column beside it carries the short id.
+				column: "alignmentKey",
+				// A name of this block's own, deliberately NOT `pl7.app/variantKey`:
+				// the column holds parent keys beside variant keys, so it is not the
+				// variant identity, and spelling it as one would join a parent row
+				// onto the variant group's columns.
 				//
-				// NOT `pl7.app/vdj/clonotypeKey`: label discovery binds a label
-				// column to an axis by axis name alone, so that name would bind the
-				// PARENT's `pl7.app/label` onto this axis and draw an all-null
-				// "Clone Id" beside our own.
+				// The `designRunId` domain is here for the reason
+				// `_variantKeyAxis` gives: two runs over one dataset hash the same
+				// sequences to the same keys, and without it their rows merge.
 				spec: {
 					type: "String",
-					name: "pl7.app/variantKey",
-					// One name, several producers, told apart by one domain key —
-					// a peptide run writes `pl7.app/peptide/extractionRunId`, an
-					// amplicon run `pl7.app/repertoire/extractionRunId`, and a design
-					// run writes this. It carries the block id because two runs over
-					// one dataset hash the same designed sequences to the same
-					// values: without it, the rows of two runs share an axis value
-					// and join into one.
+					name: "pl7.app/antibodyVariantDesigner/alignmentKey",
 					domain: {
 						"pl7.app/antibodyVariantDesigner/designRunId": blockId
 					},
 					annotations: {
-						"pl7.app/label": "Variant key",
-						"pl7.app/description": "sha256 of the parent clonotype key and the designed V-domain sequence, base64-alphanumeric, 120 bits — the recipe upstream hashes a clonotype with. The parent is an ingredient because two parents that differ only at the liability being fixed converge on one designed sequence, and hashing the sequence alone would collide their rows. Same parent and same designed sequence, same key, in every run.",
+						"pl7.app/label": "Alignment row key",
+						"pl7.app/description": "Either a parent's clonotype key or a designed variant's, whichever this row's sequence belongs to. One column, because the comparison view stacks the two.",
 						"pl7.app/table/fontFamily": "monospace"
 					}
 				}
 			}
 		],
-		columns: columns,
+		columns: [
+			{
+				column: "sequence",
+				// `pl7.app/alphabet: aminoacid` is what the viewer's column
+				// predicate and its chemical-property colouring key on. The feature
+				// domain differs from the variant group's `designed-variant` so the
+				// two `pl7.app/sequence` columns stay distinct specs.
+				//
+				// None of `variantColumns`' `isAnchor` / `isMainSequence` /
+				// `isAssemblingFeature` annotations belong here: this group is an
+				// input to one rendering, not a sequence a downstream block should
+				// discover and design against.
+				spec: {
+					name: "pl7.app/sequence",
+					valueType: "String",
+					domain: {
+						"pl7.app/feature": "alignment-row",
+						"pl7.app/alphabet": "aminoacid"
+					},
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "V-domain aa",
+						"pl7.app/description": "The V-domain sequence this row contributes to the alignment — a parent's wild type, or one designed variant of it. Every row of one parent's comparison is the same length: a design substitutes residues and never inserts or deletes.",
+						"pl7.app/table/visibility": "hidden"
+					}
+				}
+			},
+			{
+				column: "label",
+				// The viewer's row name, and the only thing on screen that says
+				// whether a row is the parent or the design.
+				//
+				// Being a label column is the name and the single axis, nothing
+				// else: `pl-model-common`'s `isLabelColumn` is
+				// `axesSpec.length === 1 && name === "pl7.app/label"`. There is no
+				// `pl7.app/isLabelColumn` annotation in the SDK — a column that
+				// declares one is read by nothing.
+				spec: {
+					name: "pl7.app/label",
+					valueType: "String",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Alignment row",
+						"pl7.app/description": "`Parent <id>` or `Variant <id>` — which side of the comparison this row is."
+					}
+				}
+			}
+		],
 		storageFormat: "Parquet"
+	}
+}
+
+/**
+	* The PFrame `variant-parent-link.tsv` becomes — the variant-to-parent edge,
+	* one row per variant, value the sentinel `1`.
+	*
+	* Two axes and no fact of its own: the relation IS the axis pair, which is
+	* what makes this a linker rather than a value column. A consumer anchored on
+	* either identity finds it by `pl7.app/isLinkerColumn` and walks it to reach
+	* the other side, so a parent-keyed column — upstream's own `pl7.app/label`,
+	* this block's Parents-page verdict — joins onto a variant row without either
+	* group repeating it.
+	*
+	* The `parentClonotypeKey` value column on the Variants page states the same
+	* binding for a human to read. It joins nothing: a value column is a fact
+	* about the row, and only an axis carries an identity a join can match on.
+	*
+	* @param blockId: string - this run's block id, which the variant axis's
+	*                 domain carries
+	* @param clonotypeAxisSpec: map - upstream's clonotype axis, verbatim. An
+	*                 axis joins on name, type and domain, so a spelling of this
+	*                 block's own would point the edge at nothing.
+	*/
+buildParentLinkSettings := func(blockId, clonotypeAxisSpec) {
+	return {
+		axes: [
+			_variantKeyAxis(blockId),
+			{
+				column: "clonotypeKey",
+				spec: clonotypeAxisSpec
+			}
+		],
+		columns: [
+			{
+				column: "link",
+				spec: {
+					name: "pl7.app/antibodyVariantDesigner/parentLink",
+					valueType: "Int",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/isLinkerColumn": "true",
+						"pl7.app/label": "Variant to parent link",
+						"pl7.app/description": "The edge from a designed variant to the clonotype it was designed from. Always 1 — the pair of axes is the whole content.",
+						"pl7.app/table/visibility": "hidden"
+					}
+				}
+			}
+		],
+		storageFormat: "Parquet",
+		partitionKeyLength: 0
 	}
 }
 
@@ -570,6 +739,10 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 					contextDomain: { "pl7.app/blockId": blockId },
 					annotations: {
 						"pl7.app/label": "Summary",
+						// Read in the Parents page's side panel, not as a column: the
+						// joined line is too long for a cell and reads as one item per
+						// line there.
+						"pl7.app/table/visibility": "optional",
 						"pl7.app/description": "Every triaged liability on this parent, comma-joined as <liability type>@<chain><IMGT position> (<verdict>), with the fixability class named when the verdict is fixability-declined. \"None\" when the parent triaged clean."
 					}
 				}
@@ -582,7 +755,24 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 					contextDomain: { "pl7.app/blockId": blockId },
 					annotations: {
 						"pl7.app/label": "Humanness Summary",
+						// Side panel, for the same reason as Summary above.
+						"pl7.app/table/visibility": "optional",
 						"pl7.app/description": "Every framework position humanization considered on this parent, comma-joined as <wild type>@<chain><IMGT position> (humanised|declined) — declined means no candidate at that position cleared the humanness gate. \"None\" when every framework position already read as human. Empty when the run did not include the humanization objective."
+					}
+				}
+			},
+			{
+				column: "developabilityScore",
+				spec: {
+					name: "pl7.app/developabilityScore",
+					valueType: "Double",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Developability score",
+						"pl7.app/description": "The engineering burden this parent carries before any edit: every triaged liability costs its fixability class weight times the weight of the region it sits in, and the costs sum. Buried and fixability-declined sites are counted too - the number measures what the antibody carries, not what this run chose to act on. Lower is better, 0 means none found.",
+						"pl7.app/format": ".2f",
+						"pl7.app/isScore": "true",
+						"pl7.app/score/rankingOrder": "increasing"
 					}
 				}
 			},
@@ -595,7 +785,7 @@ buildParentsSettings := func(blockId, clonotypeAxisSpec) {
 					contextDomain: { "pl7.app/blockId": blockId },
 					annotations: {
 						"pl7.app/label": "Heavy humanness",
-						"pl7.app/description": "This parent's own heavy chain scored on the humanness scale, before any edit — the baseline each of its variants had to beat. Raw identity at one fixed tier, not a calibrated percentile, so it is not comparable with a published figure. Empty when the run did not include the humanization objective."
+						"pl7.app/description": "This parent's own heavy chain scored on the humanness scale, before any edit — the baseline each of its variants had to beat. Raw identity at one fixed tier, not a calibrated percentile, so it is not comparable with a published figure. Measured in every run mode, unlike the two humanization columns beside it."
 					}
 				}
 			},
@@ -654,6 +844,8 @@ csvColumnOrder := func(blockId) {
 
 export ll.toStrict({
 	buildVariantsSettings: buildVariantsSettings,
+	buildAlignmentSettings: buildAlignmentSettings,
+	buildParentLinkSettings: buildParentLinkSettings,
 	buildParentsSettings: buildParentsSettings,
 	csvColumnOrder: csvColumnOrder
 })

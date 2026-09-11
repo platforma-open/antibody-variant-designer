@@ -1,6 +1,6 @@
 """Unit tests for `residue_exposure.py` — solvent-exposure annotation."""
 
-from engine import residue_exposure, residue_store
+from engine import residue_exposure, residue_index
 from pdb_fixtures import make_chain, make_pdb
 
 
@@ -50,11 +50,11 @@ def test_annotate_joins_on_chain_and_imgt(tmp_path):
     pdb_text = make_pdb(make_chain("H", 2, res_name="ALA"))
     pdb_path = _write(tmp_path, pdb_text)
     residues = [
-        residue_store.Residue(
+        residue_index.Residue(
             chain="H", offset=0, imgt="1", wild_type="A", res_name="ALA",
             b_factor=20.0, region="FR1",
         ),
-        residue_store.Residue(
+        residue_index.Residue(
             chain="H", offset=1, imgt="2", wild_type="A", res_name="ALA",
             b_factor=20.0, region="FR1",
         ),
@@ -70,11 +70,11 @@ def test_annotate_skips_residue_absent_from_freesasa_result(tmp_path):
     pdb_text = make_pdb(make_chain("H", 1, res_name="ALA"))
     pdb_path = _write(tmp_path, pdb_text)
     residues = [
-        residue_store.Residue(
+        residue_index.Residue(
             chain="H", offset=0, imgt="1", wild_type="A", res_name="ALA",
             b_factor=20.0, region="FR1",
         ),
-        residue_store.Residue(
+        residue_index.Residue(
             chain="L", offset=0, imgt="1", wild_type="A", res_name="ALA",
             b_factor=20.0, region="FR1",
         ),

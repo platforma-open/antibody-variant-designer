@@ -3,7 +3,8 @@ evaluated against real IMGT region tagging (built via the real parser,
 never hand-tagged) so the FR1/FR3 boundaries used here are authentic."""
 
 from engine.liability_cysteines import detect_all
-from engine.residue_index import index_residues, parse_pdb
+from engine.residue_index import index_residues
+from engine.residue_store import parse_pdb
 from pdb_fixtures import make_chain, make_pdb, platforma_cdr_remark
 
 TAXONOMY = [

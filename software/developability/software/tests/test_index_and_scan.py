@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 
 import index_and_scan
-from engine import liability_store, skip_store
-from pdb_fixtures import make_pdb, platforma_cdr_remark
+from engine import keyed_artifact, liability_store, rejection_store, residue_index, residue_store
+from pdb_fixtures import make_chain, make_pdb, platforma_cdr_remark
 
 TAXONOMY = [
     {"id": "deamidation_ng", "name": "Deamidation (N[GS])",
@@ -40,43 +40,50 @@ def remarks(role, chain):
     )
 
 
-def _stage(batch, clonotype_key, pdb_text, stem=None):
+def _stage(batch, clonotype_key, pdb_text):
     """Stage one antibody's PDB. The residue index is no longer staged: the
     entrypoint's own index phase produces it in the same process."""
-    return batch.add(clonotype_key, pdb_text, stem=stem)
+    return batch.add(clonotype_key, pdb_text)
 
 
 def _run(batch, extra_args=None):
     """Run the batch CLI over whatever `batch` holds. Returns
-    `(skips, triaged_dir, liabilities_path)`."""
+    `(rejections, out_triaged, liabilities_path)`, where `out_triaged` is the one
+    keyed artifact every staged parent's triaged rows land in."""
     definitions_path = batch.definitions(TAXONOMY)
-    triaged_dir = batch.dir("triaged")
+    out_triaged = batch.path("triaged.jsonl")
     out_liabilities = batch.path("liabilities.tsv")
-    out_skip = batch.path("skip.tsv")
+    out_rejected = batch.path("rejected.tsv")
 
     rc = index_and_scan.main(
         [
             "--pdb-dir", str(batch.pdb_dir),
-            "--pdb-index", batch.index,
-            "--out-residues-dir", batch.dir("residues"),
+            "--out-residues", batch.path("residues.jsonl"),
             "--definitions", definitions_path,
-            "--out-triaged-dir", triaged_dir,
+            "--out-triaged", out_triaged,
             "--out-liabilities", out_liabilities,
-            "--out-skip", out_skip,
+            "--out-rejected", out_rejected,
         ]
         + (extra_args or [])
     )
 
     assert rc == 0
-    return skip_store.read_skips(out_skip), triaged_dir, Path(out_liabilities)
+    return rejection_store.read_rejections(out_rejected), out_triaged, Path(out_liabilities)
 
 
 def _run_scan(batch, pdb_text, extra_args=None):
     """The one-antibody case, which most of these tests are."""
-    entry = _stage(batch, "clonotype-1", pdb_text)
-    skips, triaged_dir, out_liabilities = _run(batch, extra_args)
-    [(_, reason, _detail)] = skips
-    return reason, Path(triaged_dir, f"{entry.stem}.json"), out_liabilities
+    _stage(batch, "clonotype-1", pdb_text)
+    rejections, out_triaged, out_liabilities = _run(batch, extra_args)
+    [(_, reason, _detail, _type, _objective)] = rejections
+    return reason, out_triaged, out_liabilities
+
+
+def _triaged_of(out_triaged, clonotype_key):
+    """One parent's triaged list out of the artifact `_run` wrote, or `None` when the
+    artifact carries no entry for that key at all."""
+    payload = liability_store.open_triaged(str(out_triaged)).take(clonotype_key)
+    return None if payload is None else liability_store.triaged_from_payload(payload)
 
 
 def _rows_of(path):
@@ -97,9 +104,8 @@ def _write_keyed_tsv(path, rows):
 
 def _index(pdb_text, role="H", chain="H"):
     """Run `residue_index.py` for real so `index_and_scan.py` reads its actual output shape."""
-    from engine import residue_index
 
-    parsed = residue_index.parse_pdb(pdb_text)
+    parsed = residue_store.parse_pdb(pdb_text)
     return residue_index.index_residues(parsed)
 
 
@@ -112,10 +118,10 @@ class TestActionableOnlyReachesTriagedJson:
             remarks("H", "H") + "\n"
             + make_pdb(v_domain("H", cys_at=(104,), overrides={30: "ASN", 31: "GLY"}))
         )
-        skip, out_triaged, out_liabilities = _run_scan(batch, pdb_text)
+        rejection, out_triaged, out_liabilities = _run_scan(batch, pdb_text)
 
-        assert skip == ""
-        [actionable] = liability_store.read_triaged(str(out_triaged))
+        assert rejection == ""
+        [actionable] = _triaged_of(out_triaged, "clonotype-1")
         assert actionable.definition_id == "deamidation_ng"
 
         [row] = _rows_of(out_liabilities)
@@ -128,15 +134,19 @@ class TestActionableOnlyReachesTriagedJson:
         )
 
 
-class TestSkipWhenNothingSurvivesTriage:
-    def test_declined_liability_still_writes_both_files(self, batch):
+class TestRejectionWhenNothingSurvivesTriage:
+    def test_declined_liability_still_writes_both_files_and_no_rejection_row(self, batch):
         # A canonical V domain except FR1's conserved cysteine is missing —
-        # one declined liability, no motif hit, nothing actionable.
-        pdb_text = remarks("H", "H") + "\n" + make_pdb(v_domain("H", cys_at=(104,)))
-        skip, out_triaged, out_liabilities = _run_scan(batch, pdb_text)
+        # one declined liability, no motif hit, nothing actionable. The design
+        # step, not this one, decides whether the parent still ships a variant
+        # through another objective, so this step writes no rejection row.
+        entry = _stage(
+            batch, "clonotype-1", remarks("H", "H") + "\n" + make_pdb(v_domain("H", cys_at=(104,)))
+        )
+        rejections, out_triaged, out_liabilities = _run(batch)
 
-        assert skip == "no-liability-survived-triage"
-        assert liability_store.read_triaged(str(out_triaged)) == []
+        assert rejections == []
+        assert _triaged_of(out_triaged, entry.clonotype_key) == []
         [row] = _rows_of(out_liabilities)
         assert row["verdict"] == "present"
         assert row["summary"].startswith("cysteine@")
@@ -156,7 +166,7 @@ class TestLowConfidenceFallsBackToBFactor:
         )
         _, out_triaged, _ = _run_scan(batch, pdb_text)
 
-        [hit] = liability_store.read_triaged(str(out_triaged))
+        [hit] = _triaged_of(out_triaged, "clonotype-1")
         assert hit.low_confidence is True
 
     def test_sidecar_confidence_overrides_the_b_factor_fallback(self, batch):
@@ -177,10 +187,10 @@ class TestLowConfidenceFallsBackToBFactor:
         confidence_tsv = batch.path("confidence.tsv")
         _write_keyed_tsv(confidence_tsv, [("clonotype-1", json.dumps(sidecar))])
 
-        skips, triaged_dir, _ = _run(batch, ["--per-residue-confidence", confidence_tsv])
+        rejections, out_triaged, _ = _run(batch, ["--per-residue-confidence", confidence_tsv])
 
-        assert skips == [("clonotype-1", "", "")]
-        [hit] = liability_store.read_triaged(str(Path(triaged_dir, f"{entry.stem}.json")))
+        assert rejections == [("clonotype-1", "", "", "parent", "liability")]
+        [hit] = _triaged_of(out_triaged, entry.clonotype_key)
         assert hit.low_confidence is False
 
     def test_a_clonotype_with_no_row_in_the_tsv_falls_back_to_its_b_factor(self, batch):
@@ -192,22 +202,24 @@ class TestLowConfidenceFallsBackToBFactor:
         confidence_tsv = batch.path("confidence.tsv")
         _write_keyed_tsv(confidence_tsv, [("some-other-clonotype", json.dumps([]))])
 
-        skips, _, _ = _run(batch, ["--per-residue-confidence", confidence_tsv])
+        rejections, _, _ = _run(batch, ["--per-residue-confidence", confidence_tsv])
 
-        assert skips == [("clonotype-1", "no-liability-survived-triage", "")]
+        # The design step, not this one, owns "no-liability-survived-triage" — it
+        # knows whether the parent still shipped a variant via another objective.
+        assert rejections == []
 
 
 class TestActOnFixabilityIsWired:
     def test_structural_liability_generates_once_admitted(self, batch):
         pdb_text = remarks("H", "H") + "\n" + make_pdb(v_domain("H", cys_at=(104,)))
 
-        skip, out_triaged, _ = _run_scan(
+        rejection, out_triaged, _ = _run_scan(
             batch, pdb_text,
             extra_args=["--act-on-fixability", "structural"],
         )
 
-        assert skip == ""
-        [actionable] = liability_store.read_triaged(str(out_triaged))
+        assert rejection == ""
+        [actionable] = _triaged_of(out_triaged, "clonotype-1")
         assert actionable.definition_id == "missing_cysteines"
 
 
@@ -225,20 +237,26 @@ class TestClonotypeFilter:
         filter_tsv = batch.path("clonotype_filter.tsv")
         _write_keyed_tsv(filter_tsv, [("clone-1", "1"), ("clone-2", "1")])
 
-        skips, _, out_liabilities = _run(batch, ["--clonotype-filter", filter_tsv])
+        rejections, _, out_liabilities = _run(batch, ["--clonotype-filter", filter_tsv])
 
-        # The filtered-out clonotype gets no skip row at all — it was never
+        # The filtered-out clonotype gets no rejection row at all — it was never
         # in scope, which is not the same as having failed.
-        assert skips == [("clone-1", "", ""), ("clone-2", "", "")]
+        assert rejections == [
+            ("clone-1", "", "", "parent", "liability"),
+            ("clone-2", "", "", "parent", "liability"),
+        ]
         assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"clone-1", "clone-2"}
 
     def test_an_absent_filter_attempts_the_whole_index(self, batch):
         _stage(batch, "clone-1", self._actionable())
         _stage(batch, "clone-2", self._actionable())
 
-        skips, _, _ = _run(batch)
+        rejections, _, _ = _run(batch)
 
-        assert skips == [("clone-1", "", ""), ("clone-2", "", "")]
+        assert rejections == [
+            ("clone-1", "", "", "parent", "liability"),
+            ("clone-2", "", "", "parent", "liability"),
+        ]
 
 
 class TestBatchCli:
@@ -252,9 +270,12 @@ class TestBatchCli:
         _stage(batch, "clone-1", self._actionable())
         _stage(batch, "clone-2", self._actionable())
 
-        skips, _, out_liabilities = _run(batch)
+        rejections, _, out_liabilities = _run(batch)
 
-        assert skips == [("clone-1", "", ""), ("clone-2", "", "")]
+        assert rejections == [
+            ("clone-1", "", "", "parent", "liability"),
+            ("clone-2", "", "", "parent", "liability"),
+        ]
         assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"clone-1", "clone-2"}
 
     def test_clonotype_key_alone_identifies_a_row_across_the_file(self, batch):
@@ -276,41 +297,82 @@ class TestBatchCli:
         # named `structure-not-imgt` and NOT also reported as having no
         # surviving liability. Before the fusion the index step wrote an
         # empty residues file, the scan step's absence guard could never
-        # fire, and the antibody collected a reason in two skip files.
+        # fire, and the antibody collected a reason in two rejection files.
         _stage(batch, "indexed", self._actionable())
         _stage(batch, "not-imgt", make_pdb(v_domain("H")[:5]))  # never reaches IMGT 10
 
-        skips, _, out_liabilities = _run(batch)
+        rejections, _, out_liabilities = _run(batch)
 
-        assert skips == [("indexed", "", ""), ("not-imgt", "structure-not-imgt", "")]
-        assert [reason for _, reason, _detail in skips].count("no-liability-survived-triage") == 0
+        assert rejections == [
+            ("indexed", "", "", "parent", "liability"),
+            ("not-imgt", "structure-not-imgt", "", "parent", "liability"),
+        ]
+        reasons = [reason for _, reason, _detail, _type, _objective in rejections]
+        assert reasons.count("no-liability-survived-triage") == 0
         # It never reached triage, so it contributes no Parents-page rows
         # either — the liabilities TSV holds only what was actually scanned.
         assert {r["clonotypeKey"] for r in _rows_of(out_liabilities)} == {"indexed"}
 
-    def test_an_unindexable_antibody_leaves_no_residues_or_triaged_file(self, batch):
+    def test_an_unindexable_antibody_leaves_no_residues_or_triaged_entry(self, batch):
         # Absence is what a later step reads as "already named"; an empty
         # placeholder would make its guard a no-op.
         _stage(batch, "not-imgt", make_pdb(v_domain("H")[:5]))
 
-        _, triaged_dir, _ = _run(batch)
+        _, out_triaged, _ = _run(batch)
 
-        assert not Path(batch.dir("residues"), "not-imgt.json").exists()
-        assert not Path(triaged_dir, "not-imgt.json").exists()
-
-    def test_an_indexed_clonotype_with_no_staged_blob_is_no_structure(self, batch):
-        # A clonotype the upstream block failed for has no ResourceMap entry
-        # at all, so its blob is simply absent — never a null one.
-        _stage(batch, "present", self._actionable())
-        batch.add_without_blob("absent")
-
-        skips, _, _ = _run(batch)
-
-        assert skips == [("present", "", ""), ("absent", "no-structure", "")]
+        assert keyed_artifact.keys_of(batch.path("residues.jsonl")) == []
+        assert keyed_artifact.keys_of(out_triaged) == []
 
     def test_an_empty_index_leaves_a_header_only_liabilities_tsv(self, batch):
-        skips, _, out_liabilities = _run(batch)
+        rejections, _, out_liabilities = _run(batch)
 
-        assert skips == []
+        assert rejections == []
         assert _rows_of(out_liabilities) == []
         assert out_liabilities.read_text().startswith("clonotypeKey\t")
+
+
+class TestIndexOneWritesOnlyOnSuccess:
+    """Absence, not emptiness, is how a rejected antibody is signalled — an
+    empty file would make every downstream `is_file()` guard a no-op and the
+    antibody would be counted twice."""
+
+    def test_a_passing_antibody_gets_its_residues_file(self, tmp_path):
+        text = (
+            platforma_cdr_remark("H", 1, "H", 27, 38)
+            + "\n"
+            + make_pdb(make_chain("H", 20))
+        )
+        pdb = tmp_path / "in.pdb"
+        pdb.write_text(text)
+        out = tmp_path / "residues.jsonl"
+
+        with keyed_artifact.KeyedWriter(str(out)) as writer:
+            reason, residues = index_and_scan.index_one(str(pdb), writer, "clonotype-1")
+
+        assert reason == ""
+        assert residues
+        assert keyed_artifact.keys_of(str(out)) == ["clonotype-1"]
+
+    def test_a_rejected_antibody_leaves_no_entry_at_all(self, tmp_path):
+        pdb = tmp_path / "in.pdb"
+        pdb.write_text(make_pdb(make_chain("H", 5)))  # never reaches IMGT 10
+        out = tmp_path / "residues.jsonl"
+
+        with keyed_artifact.KeyedWriter(str(out)) as writer:
+            reason, residues = index_and_scan.index_one(str(pdb), writer, "clonotype-1")
+
+        assert reason == "structure-not-imgt"
+        assert residues == []
+        assert keyed_artifact.keys_of(str(out)) == []
+
+    def test_an_unparseable_structure_leaves_no_entry_at_all(self, tmp_path):
+        pdb = tmp_path / "in.pdb"
+        pdb.write_text("")
+        out = tmp_path / "residues.jsonl"
+
+        with keyed_artifact.KeyedWriter(str(out)) as writer:
+            reason, residues = index_and_scan.index_one(str(pdb), writer, "clonotype-1")
+
+        assert reason == "no-structure"
+        assert residues == []
+        assert keyed_artifact.keys_of(str(out)) == []

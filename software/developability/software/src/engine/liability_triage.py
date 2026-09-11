@@ -10,7 +10,7 @@ already found.
 
 from dataclasses import dataclass
 
-from engine import residue_store
+from engine import parent_summary, residue_index
 
 DEFAULT_ACT_ON_FIXABILITY = ["fixable", "easily_fixable"]
 DEFAULT_FR_CONFIDENCE_THRESHOLD = 4.0
@@ -25,7 +25,7 @@ class Triaged:
     liability_type: str
     risk_level: str
     fixability: str
-    site: list[residue_store.Residue]
+    site: list[residue_index.Residue]
     verdict: str  # "exposed" | "buried" | "fixability-declined"
     low_confidence: bool
     confidence_angstroms: float | None
@@ -40,7 +40,7 @@ def generates_for(triaged: Triaged) -> bool:
     return triaged.verdict == "exposed"
 
 
-def _relevant_residue(hit) -> residue_store.Residue:
+def relevant_residue(hit) -> residue_index.Residue:
     """The motif's own chemically-relevant residue, when the hit has one.
 
     A cysteine hit has no single residue whose chemistry changes. This
@@ -64,7 +64,7 @@ def _verdict_for_one(
     rsasa_buried_cutoff: float,
     act_on_fixability: list[str],
 ) -> tuple[str, float | None]:
-    relevant = _relevant_residue(hit)
+    relevant = relevant_residue(hit)
     rsasa = rsasa_lookup.get((relevant.chain, relevant.imgt))
 
     # `rsasa is None` means the residue's type is missing from the
@@ -157,3 +157,30 @@ def verdict_for(
             )
         )
     return triaged
+
+
+def liability_key(triaged: Triaged) -> str:
+    """`<liabilityType>@<chain><imgtLabel>` built from the site's first residue, the span start.
+    Two liabilities of the same type can never share a key within one parent."""
+    start = triaged.site[0]
+    return f"{triaged.liability_type}@{start.chain}{start.imgt}"
+
+
+def summarize_liabilities(triaged_list: list[Triaged]) -> parent_summary.ParentSummary:
+    """Build coarse verdict ("present" or "none") and summary line for a parent's triaged
+    liabilities.
+
+    summary lists each liability as <type>@<chain><imgtLabel> (<verdict>), declined ones
+    included. fixability-declined sites append their fixability class — the only place this
+    decline reason survives after the per-liability columns are dropped.
+    """
+    if not triaged_list:
+        return parent_summary.ParentSummary(verdict="none", summary="None")
+    parts = []
+    for t in triaged_list:
+        entry = f"{liability_key(t)} ({t.verdict}"
+        if t.verdict == "fixability-declined":
+            entry += f": {t.fixability}"
+        entry += ")"
+        parts.append(entry)
+    return parent_summary.ParentSummary(verdict="present", summary=", ".join(parts))

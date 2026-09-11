@@ -9,7 +9,7 @@ from engine import (
     liability_cysteines,
     liability_motifs,
     liability_objective,
-    residue_store,
+    residue_index,
 )
 
 TAXONOMY = [
@@ -25,7 +25,7 @@ TAXONOMY = [
 
 
 def _residue(chain, offset, wild_type, imgt=None, region="CDR1"):
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain=chain,
         offset=offset,
         imgt=imgt or str(offset + 1),

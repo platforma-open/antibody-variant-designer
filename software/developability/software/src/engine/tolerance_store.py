@@ -1,39 +1,60 @@
-"""Read/write for `tolerance.tsv`, written by `read_tolerance.py`.
+"""Read/write for the tolerance keyed artifact, written by `read_tolerance.py`: one flat TSV
+carrying every parent, a leading `clonotypeKey` column grouping each parent's rows.
 
-One row per position AntiFold scored. `posins` is the IMGT label, matching
-`residue_store.Residue.imgt`. `perplexity` is entropy in bits, `2^H₂(p)`, in the range `[1,20]`.
+One row per position AntiFold scored. `imgt` is the IMGT label, matching
+`residue_index.Residue.imgt`. `perplexity` is entropy in bits, `2^H₂(p)`, in the range `[1,20]`.
 The twenty amino-acid columns hold log-probabilities, never the raw
 logits `save_flag=False` returns. A later step therefore never has to
 remember which base it is comparing against.
 """
 
 import csv
-import io
 from pathlib import Path
 
+from engine import keyed_artifact
+
 AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
-COLUMNS = ["chain", "posins", "perplexity", *AMINO_ACIDS]
+COLUMNS = [keyed_artifact.KEY_COLUMN, "chain", "imgt", "perplexity", *AMINO_ACIDS]
+_ROW_COLUMNS = COLUMNS[1:]
 
 
-def write_tolerance_tsv(path: str, rows: list[dict]) -> None:
-    buf = io.StringIO()
-    writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-    writer.writerow(COLUMNS)
-    for row in rows:
-        writer.writerow([row[c] for c in COLUMNS])
-    Path(path).write_text(buf.getvalue())
+class ToleranceWriter:
+    """The one tolerance artifact, header written once, rows appended per parent."""
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        with Path(path).open("w", newline="") as fh:
+            csv.writer(fh, delimiter="\t", lineterminator="\n").writerow(COLUMNS)
+
+    def write(self, clonotype_key: str, rows: list[dict]) -> None:
+        with Path(self._path).open("a", newline="") as fh:
+            writer = csv.writer(fh, delimiter="\t", lineterminator="\n")
+            for row in rows:
+                writer.writerow([clonotype_key, *(row[c] for c in _ROW_COLUMNS)])
+
+    def close(self) -> None:
+        pass
+
+    def __enter__(self) -> "ToleranceWriter":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
 
-def read_tolerance_tsv(path: str) -> dict[tuple[str, str], dict]:
-    """Keyed `(chain, posins)`, the same pair `residue_index.index_residues`
+def open_tolerance(path: str) -> keyed_artifact.KeyedReader:
+    return keyed_artifact.read_keyed_tsv(path, _ROW_COLUMNS)
+
+
+def lookup_from_payload(payload: object) -> dict[tuple[str, str], dict]:
+    """Keyed `(chain, imgt)`, the same pair `residue_index.index_residues`
     assigns. A later step looks a row up with the residue it already
     holds. There is no second join format to remember."""
     lookup: dict[tuple[str, str], dict] = {}
-    with Path(path).open(newline="") as fh:
-        for row in csv.DictReader(fh, delimiter="\t"):
-            key = (row["chain"], row["posins"])
-            lookup[key] = {
-                "perplexity": float(row["perplexity"]),
-                "logProbs": {aa: float(row[aa]) for aa in AMINO_ACIDS},
-            }
+    for row in payload:
+        key = (row["chain"], row["imgt"])
+        lookup[key] = {
+            "perplexity": float(row["perplexity"]),
+            "logProbs": {aa: float(row[aa]) for aa in AMINO_ACIDS},
+        }
     return lookup

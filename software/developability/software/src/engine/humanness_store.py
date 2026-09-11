@@ -1,18 +1,15 @@
-"""Reduces one parent's considered framework positions to a coarse verdict and one joined
-summary line, and appends its row to the run's one humanness file — alongside the parent's own
-per-chain baseline score, measured once regardless of what the reduction finds.
+"""Appends one parent's row to the run's one humanness file: the verdict and summary
+`humanness_objective.summarize_humanness` reduces to, beside the parent's own per-chain
+baseline score, measured once regardless of what the reduction finds.
 
-Mirrors `liability_store.py`'s verdict/summary pair: same two literals for "nothing found",
-same comma-joined summary shape, same append-per-parent file. The one addition is a third
-state — targets of `None` — because here "the run never looked" and "it looked and found
-nothing" are both real and must not collapse into one string.
+Mirrors `liability_store.py`'s append-per-parent file, one row per parent.
 """
 
 import csv
 import io
 from pathlib import Path
 
-from engine import liability_store, residue_store, variant_candidates
+from engine import humanness_objective, residue_index, variant_candidates
 
 TSV_COLUMNS = [
     "clonotypeKey",
@@ -21,9 +18,6 @@ TSV_COLUMNS = [
     "heavyHumannessScore",
 ]
 
-AMINO_SEP = ", "
-
-
 def _tsv_value(value) -> str:
     return "" if value is None else str(value)
 
@@ -31,46 +25,15 @@ def _tsv_value(value) -> str:
 def write_humanness_header(path: str) -> None:
     """Starts the run's one dataset-wide file with the header row alone.
 
-    Called once, before the batch loop, so an empty pdb_index still leaves a header-only
+    Called once, before the batch loop, so an empty run still leaves a header-only
     file rather than no file."""
     Path(path).write_text("\t".join(TSV_COLUMNS) + "\n")
-
-
-def summarize_humanness(
-    targets: list[residue_store.Residue] | None,
-    cleared: list[variant_candidates.Candidate],
-) -> liability_store.ParentSummary:
-    """Build coarse verdict and summary for a parent's considered framework positions.
-
-    targets is the humanization objective's selected positions for this parent, in its own
-    order; `None` when the objective did not run for this parent at all. cleared is the
-    candidates that passed the Humanness gate for that parent.
-
-    ("",  "")            targets is None      — the objective did not look
-    ("none", "None")     targets is empty     — it looked and left everything alone
-    ("present", <line>)  otherwise            — one entry per target, in target order
-
-    A target reads "humanised" when some cleared candidate edits its position, "declined"
-    otherwise. The per-parent variant cap runs after the gate, so a candidate the cap later
-    dropped still counts here — this reduction never sees the cap's decision."""
-    if targets is None:
-        return liability_store.ParentSummary(verdict="", summary="")
-    if not targets:
-        return liability_store.ParentSummary(verdict="none", summary="None")
-
-    edited = {(edit.chain, edit.imgt) for candidate in cleared for edit in candidate.edits}
-    entries = [
-        f"{target.wild_type}@{target.chain}{target.imgt} "
-        f"({'humanised' if target.join_key in edited else 'declined'})"
-        for target in targets
-    ]
-    return liability_store.ParentSummary(verdict="present", summary=AMINO_SEP.join(entries))
 
 
 def append_humanness_tsv(
     path: str,
     clonotype_key: str,
-    targets: list[residue_store.Residue] | None,
+    targets: list[residue_index.Residue] | None,
     cleared: list[variant_candidates.Candidate],
     humanness_parent_scores: dict[str, float | None],
 ) -> None:
@@ -78,23 +41,22 @@ def append_humanness_tsv(
 
     humanness_parent_scores is the parent's own baseline, keyed by chain role. Only the heavy
     chain's score is emitted: it is the chain every antibody format in scope carries, and the
-    one the row is keyed on. The column is empty when the objective did not run for this
-    parent and when the gate could not score the chain, the same three-state reading the
-    verdict and summary columns already carry.
+    one the row is keyed on. The column is filled in every run mode, unlike the verdict and
+    summary beside it, and is empty only when the gate could not score the chain.
 
     Appends rather than returning a row to collect, for the reason `liability_store.py`'s
     `append_liabilities_tsv` gives: one file holds the whole dataset and the pipeline
     streams one antibody at a time."""
-    parent_summary = summarize_humanness(targets, cleared)
-    buf = io.StringIO()
-    writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
+    summary = humanness_objective.summarize_humanness(targets, cleared)
+    row_buffer = io.StringIO()
+    writer = csv.writer(row_buffer, delimiter="\t", lineterminator="\n")
     writer.writerow(
         [
             _tsv_value(clonotype_key),
-            parent_summary.verdict,
-            parent_summary.summary,
+            summary.verdict,
+            summary.summary,
             _tsv_value(humanness_parent_scores.get("H")),
         ]
     )
-    with Path(path).open("a") as fh:
-        fh.write(buf.getvalue())
+    with Path(path).open("a") as out_file:
+        out_file.write(row_buffer.getvalue())

@@ -12,11 +12,10 @@ import build_variants
 from engine import (
     design_objective,
     humanness_objective,
-    liability_store,
     liability_triage,
-    residue_store,
+    rejection_store,
+    residue_index,
     run_mode,
-    skip_store,
     tolerance_store,
     variant_store,
 )
@@ -57,7 +56,7 @@ def _region_at(offset):
 
 def _heavy_chain_residues():
     return [
-        residue_store.Residue(
+        residue_index.Residue(
             chain="H",
             offset=offset,
             imgt=str(offset + 1),
@@ -88,7 +87,7 @@ def _steered_tolerance_row(residue, favored_aa, perplexity=2.0):
     log_probs = dict.fromkeys(AMINO_ACIDS, -5.0)
     log_probs[favored_aa] = -0.1
     log_probs[residue.wild_type] = -6.0
-    return {"chain": residue.chain, "posins": residue.imgt, "perplexity": perplexity, **log_probs}
+    return {"chain": residue.chain, "imgt": residue.imgt, "perplexity": perplexity, **log_probs}
 
 
 def _stage(batch, clonotype_key, offset, favored_aa):
@@ -100,8 +99,8 @@ def _stage(batch, clonotype_key, offset, favored_aa):
     residues = _heavy_chain_residues()
     site_residue = next(r for r in residues if r.offset == offset)
 
-    liability_store.write_triaged(
-        str(Path(batch.dir("triaged"), f"{entry.stem}.json")),
+    batch.append_triaged(
+        entry.clonotype_key,
         [
             liability_triage.Triaged(
                 definition_id="framework_liability",
@@ -116,12 +115,11 @@ def _stage(batch, clonotype_key, offset, favored_aa):
             )
         ],
     )
-    tolerance_store.write_tolerance_tsv(
-        str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
-        [_steered_tolerance_row(site_residue, favored_aa)],
+    batch.append_tolerance(
+        entry.clonotype_key, [_steered_tolerance_row(site_residue, favored_aa)]
     )
-    residue_store.write_residues(str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues)
-    Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}").write_text(
+    batch.append_residues(entry.clonotype_key, residues)
+    Path(batch.dir("priors"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}").write_text(
         "chain\timgt\n"
     )
     return entry
@@ -134,6 +132,7 @@ def _as_design_target(triaged):
         region=triaged.site[0].region,
         is_low_confidence=triaged.low_confidence,
         confidence_angstroms=triaged.confidence_angstroms,
+        objective=run_mode.HUMANNESS,
     )
 
 
@@ -150,11 +149,11 @@ def _run_humanness_only(batch, monkeypatch, extra_args=None):
     monkeypatch.setattr(
         build_variants.run_mode,
         "objectives_for",
-        lambda mode, prior_path, non_human_prior_cutoff: [
+        lambda _mode, prior_path, margin, *_rest: [
             (
                 run_mode.HUMANNESS,
                 lambda residues: humanness_objective.build(
-                    prior_path, residues, non_human_prior_cutoff
+                    prior_path, residues, margin
                 ),
             )
         ],
@@ -162,7 +161,7 @@ def _run_humanness_only(batch, monkeypatch, extra_args=None):
     monkeypatch.setattr(
         build_variants.run_mode,
         "targets_for",
-        lambda name, mode, triaged_list, objective, residues: [
+        lambda mode, triaged_list, objectives, residues: [
             _as_design_target(t) for t in triaged_list
         ],
     )
@@ -172,17 +171,18 @@ def _run_humanness_only(batch, monkeypatch, extra_args=None):
 def _run(batch, extra_args=None):
     definitions = batch.definitions([])  # no taxonomy entry can spell a new liability here
     out_variants = batch.path("variants.tsv")
-    out_skip = batch.path("skip.tsv")
+    out_rejected = batch.path("rejected.tsv")
 
     argv = [
-        "--triaged-dir", batch.dir("triaged"),
-        "--tolerance-dir", batch.dir("tolerance"),
-        "--residues-dir", batch.dir("residues"),
-        "--pdb-index", batch.index,
+        "--triaged", batch.path("triaged.jsonl"),
+        "--tolerance", batch.path("tolerance.tsv"),
+        "--residues", batch.path("residues.jsonl"),
+        "--priors-dir", batch.dir("priors"),
         "--definitions", definitions,
         "--out-variants", out_variants,
-        "--out-skip", out_skip,
+        "--out-rejected", out_rejected,
         "--out-humanness", batch.path("humanness.tsv"),
+        "--out-parent-sequences", batch.path("parent-sequences.tsv"),
         # Asking for more than the top-ranked substitution would let a
         # second, unsteered amino acid into the candidate set too.
         "--candidate-residues-per-position", "1",
@@ -190,7 +190,10 @@ def _run(batch, extra_args=None):
     rc = build_variants.main(argv + (extra_args or []))
 
     assert rc == 0
-    return skip_store.read_skips(out_skip), variant_store.read_variants_tsv(out_variants)
+    return (
+        rejection_store.read_rejections(out_rejected),
+        variant_store.read_variants_tsv(out_variants),
+    )
 
 
 class TestHumanizationObjectiveAgainstTheRealMetric:
@@ -198,13 +201,25 @@ class TestHumanizationObjectiveAgainstTheRealMetric:
         _stage(batch, "rises", _RISE_OFFSET, _RISE_AA)
         _stage(batch, "falls", _FALL_OFFSET, _FALL_AA)
 
-        skips, written = _run_humanness_only(batch, monkeypatch)
+        rejections, written = _run_humanness_only(batch, monkeypatch)
 
-        assert skips == [("rises", "", ""), ("falls", "no-candidate-cleared-motif", "")]
-        assert [key for key, _, _, _ in written] == ["rises"]
+        # The reason names the humanization gate, and the detail names the check and the
+        # measurement behind it — a fall, not a motif. "rises" shipped its variant, so the
+        # humanness objective contributed and carries no row. "falls" built a candidate the
+        # gate refused, so the row is a variant rejection, not a parent one.
+        [(falls_key, falls_reason, falls_detail, falls_type, _falls_objective)] = rejections
+        assert (falls_key, falls_reason) == (
+            "falls",
+            build_variants.NO_HUMANIZATION_REASON,
+        )
+        assert falls_detail.startswith(
+            f"H: {humanness_objective.DID_NOT_RISE_REASON} ("
+        )
+        assert falls_type == rejection_store.VARIANT_REJECTED
+        assert [key for key, _, _ in written] == ["rises"]
         rise_wild_type = VH_SEQUENCE[_RISE_OFFSET]
         assert (
-            written[0][3].changed_positions
+            written[0][2].changed_positions
             == f"H:{rise_wild_type}{_RISE_OFFSET + 1}{_RISE_AA}"
         )
 
@@ -214,15 +229,19 @@ class TestHumanizationObjectiveAgainstTheRealMetric:
         _stage(batch, "rises", _RISE_OFFSET, _RISE_AA)
         _stage(batch, "falls", _FALL_OFFSET, _FALL_AA)
 
-        skips, written = _run(batch)
+        rejections, written = _run(batch)
 
-        assert skips == [("rises", "", ""), ("falls", "", "")]
-        assert {key for key, _, _, _ in written} == {"rises", "falls"}
+        assert rejections == []
+        assert {key for key, _, _ in written} == {"rises", "falls"}
 
     def test_a_tie_does_not_meet_the_goal_through_the_real_metric(self, batch, monkeypatch):
         _stage(batch, "ties", _TIE_OFFSET, _TIE_AA)
 
-        skips, written = _run_humanness_only(batch, monkeypatch)
+        rejections, written = _run_humanness_only(batch, monkeypatch)
 
-        assert skips == [("ties", "no-candidate-cleared-motif", "")]
+        # A tie is a fall for the gate, and the detail shows the two equal scores rather
+        # than leaving the operator to guess why nothing shipped.
+        [(key, reason, detail, _rejected_type, _objective)] = rejections
+        assert (key, reason) == ("ties", build_variants.NO_HUMANIZATION_REASON)
+        assert humanness_objective.DID_NOT_RISE_REASON in detail
         assert written == []

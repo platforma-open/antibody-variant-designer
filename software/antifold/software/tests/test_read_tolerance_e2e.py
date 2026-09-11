@@ -3,7 +3,7 @@ package. The only test file in this package, and the only one that needs the
 heavy set: run it with `uv run --extra antifold --group e2e pytest -m e2e`.
 Every other test of this module is a unit test and lives in the
 developability package's suite, which never installs torch — so this file
-skips itself whenever torch is absent.
+rejections itself whenever torch is absent.
 
 `isolated_antifold_module` loads our script under a private name and clears
 every `antifold`/`antifold.*` entry around each test, so a case starts from
@@ -28,7 +28,15 @@ from pathlib import Path
 import pytest
 
 import sapiens_prior
-from engine import liability_store, liability_triage, pdb_index_store, residue_store, skip_store
+from engine import (
+    keyed_artifact,
+    liability_store,
+    liability_triage,
+    rejection_store,
+    residue_index,
+    residue_store,
+    tolerance_store,
+)
 
 pytest.importorskip("torch")
 
@@ -39,7 +47,7 @@ _SCRIPT_PATH = Path(__file__).parent.parent / "src" / "read_tolerance.py"
 # The real, tiny (4.4 MiB) Sapiens checkpoint + tokenizer TODO-11.1 already fetched, in
 # the sibling asset repo this multi-repo workspace checks out beside this one. A
 # standalone clone of this repo alone (e.g. CI) never has it — `sapiens_weights_root`
-# below skips rather than fails when it is absent.
+# below rejections rather than fails when it is absent.
 _SAPIENS_WEIGHTS_ROOT = (
     Path(__file__).resolve().parents[4].parent
     / "assets-sapiens-weights" / "sapiens" / "indexed_model" / "sapiens"
@@ -147,7 +155,9 @@ def untrained_model(isolated_antifold_module):
 @pytest.fixture
 def sapiens_weights_root():
     if not _SAPIENS_WEIGHTS_ROOT.is_dir():
-        pytest.skip(f"sibling asset repo not checked out beside this one: {_SAPIENS_WEIGHTS_ROOT}")
+        pytest.skip(
+            f"sibling asset repo not checked out beside this one: {_SAPIENS_WEIGHTS_ROOT}"
+        )
     return str(_SAPIENS_WEIGHTS_ROOT)
 
 
@@ -179,74 +189,75 @@ class TestRealEntrypointWithTheHumanPrior:
         pytest.importorskip("sapiens")
 
         pdb_dir = tmp_path / "pdbs"
-        residues_dir = tmp_path / "residues"
-        triaged_dir = tmp_path / "triaged"
-        for one_dir in (pdb_dir, residues_dir, triaged_dir):
-            one_dir.mkdir()
+        pdb_dir.mkdir()
+        out_residues = tmp_path / "residues.jsonl"
+        out_triaged = tmp_path / "triaged.jsonl"
+        priors_dir = tmp_path / "priors"
+        priors_dir.mkdir()
 
         pdb_text = nanobody_pdb.read_text()
-        entries = []
-        for stem in ("parent-1", "parent-2"):
-            (pdb_dir / f"{stem}.pdb").write_text(pdb_text)
-            # The ten residues `_NANOBODY_LIKE_PDB` stages: eight framework
-            # positions and, at offsets 3-4, one contiguous CDR1 pair — so the
-            # prior's row count must differ from the residue count, proving
-            # the framework filter still applies to a whole-chain scoring.
-            residues = [
-                residue_store.Residue(
-                    chain="H", offset=i, imgt=str(i + 1), wild_type="A", res_name="ALA",
-                    b_factor=20.0, region="CDR1" if i in (3, 4) else "FR1", chain_role="H",
-                )
-                for i in range(10)
-            ]
-            residue_store.write_residues(str(residues_dir / f"{stem}.json"), residues)
-            liability_store.write_triaged(
-                str(triaged_dir / f"{stem}.json"),
-                [
-                    liability_triage.Triaged(
-                        definition_id="deamidation_ng",
-                        liability_type="deamidation",
-                        risk_level="High",
-                        fixability="fixable",
-                        site=residues[:1],
-                        verdict="exposed",
-                        low_confidence=False,
-                        confidence_angstroms=3.0,
-                        rsasa=0.5,
+        with (
+            keyed_artifact.KeyedWriter(str(out_residues)) as residues_writer,
+            keyed_artifact.KeyedWriter(str(out_triaged)) as triaged_writer,
+        ):
+            for stem in ("parent-1", "parent-2"):
+                (pdb_dir / f"{stem}.pdb").write_text(pdb_text)
+                # The ten residues `_NANOBODY_LIKE_PDB` stages: eight framework
+                # positions and, at offsets 3-4, one contiguous CDR1 pair — so the
+                # prior's row count must differ from the residue count, proving
+                # the framework filter still applies to a whole-chain scoring.
+                residues = [
+                    residue_index.Residue(
+                        chain="H", offset=i, imgt=str(i + 1), wild_type="A", res_name="ALA",
+                        b_factor=20.0, region="CDR1" if i in (3, 4) else "FR1", chain_role="H",
                     )
-                ],
-            )
-            entries.append(pdb_index_store.Entry(clonotype_key=stem, filename=f"{stem}.pdb"))
-
-        index_path = tmp_path / "pdb_index.tsv"
-        pdb_index_store.write_index(str(index_path), entries)
-
-        out_dir = tmp_path / "tolerance"
-        out_skip = tmp_path / "skip.tsv"
+                    for i in range(10)
+                ]
+                residue_store.write_residues(residues_writer, stem, residues)
+                liability_store.write_triaged(
+                    triaged_writer,
+                    stem,
+                    [
+                        liability_triage.Triaged(
+                            definition_id="deamidation_ng",
+                            liability_type="deamidation",
+                            risk_level="High",
+                            fixability="fixable",
+                            site=residues[:1],
+                            verdict="exposed",
+                            low_confidence=False,
+                            confidence_angstroms=3.0,
+                            rsasa=0.5,
+                        )
+                    ],
+                )
+        out_tolerance = tmp_path / "tolerance.tsv"
+        out_rejected = tmp_path / "rejected.tsv"
 
         rc = isolated_antifold_module.main(
             [
                 "--pdb-dir", str(pdb_dir),
-                "--residues-dir", str(residues_dir),
-                "--triaged-dir", str(triaged_dir),
-                "--pdb-index", str(index_path),
+                "--residues", str(out_residues),
+                "--triaged", str(out_triaged),
                 "--weights", antifold_weights_path,
                 "--sapiens-weights", sapiens_weights_root,
-                "--out-tolerance-dir", str(out_dir),
-                "--out-skip", str(out_skip),
+                "--out-tolerance", str(out_tolerance),
+                "--out-priors-dir", str(priors_dir),
+                "--out-rejected", str(out_rejected),
             ]
         )
 
         assert rc == 0
-        # Every parent completed inside `_block_network()` with no exception —
+        # Every parent completed inside `_forbid_network_access()` with no exception —
         # a `backend-failed` row here would mean the model call raised.
-        assert skip_store.read_skips(str(out_skip)) == [
-            ("parent-1", "", ""),
-            ("parent-2", "", ""),
+        assert rejection_store.read_rejections(str(out_rejected)) == [
+            ("parent-1", "", "", rejection_store.PARENT_REJECTED, "liability"),
+            ("parent-2", "", "", rejection_store.PARENT_REJECTED, "liability"),
         ]
+        tolerance_reader = tolerance_store.open_tolerance(str(out_tolerance))
         for stem in ("parent-1", "parent-2"):
-            assert (out_dir / f"{stem}.tsv").is_file()
-            prior_path = out_dir / f"{stem}{isolated_antifold_module.sapiens_prior.PRIOR_SUFFIX}"
+            assert tolerance_reader.take(stem) is not None
+            prior_path = priors_dir / f"{stem}{isolated_antifold_module.sapiens_prior.PRIOR_SUFFIX}"
             assert prior_path.is_file()
             # Header plus one row per framework position — eight, not the ten
             # residues staged: the two CDR1 offsets reached the model (the
@@ -260,50 +271,52 @@ class TestThePriorKeysAndValuesSurviveTheReshape:
         sapiens_weights_root, tmp_path,
     ):
         pytest.importorskip("sapiens")
-        pdb_dir, residues_dir, triaged_dir = (
-            tmp_path / "pdbs", tmp_path / "residues", tmp_path / "triaged"
-        )
-        for one_dir in (pdb_dir, residues_dir, triaged_dir):
-            one_dir.mkdir()
+        pdb_dir = tmp_path / "pdbs"
+        pdb_dir.mkdir()
+        out_residues = tmp_path / "residues.jsonl"
+        out_triaged = tmp_path / "triaged.jsonl"
+        priors_dir = tmp_path / "priors"
+        priors_dir.mkdir()
         (pdb_dir / "parent-1.pdb").write_text(nanobody_pdb.read_text())
         residues = [
-            residue_store.Residue(
+            residue_index.Residue(
                 chain="H", offset=i, imgt=str(i + 1), wild_type="A", res_name="ALA",
                 b_factor=20.0, region="CDR1" if i in (3, 4) else "FR1", chain_role="H",
             )
             for i in range(10)
         ]
-        residue_store.write_residues(str(residues_dir / "parent-1.json"), residues)
-        liability_store.write_triaged(
-            str(triaged_dir / "parent-1.json"),
-            [
-                liability_triage.Triaged(
-                    definition_id="deamidation_ng", liability_type="deamidation",
-                    risk_level="High", fixability="fixable", site=residues[:1],
-                    verdict="exposed", low_confidence=False, confidence_angstroms=3.0, rsasa=0.5,
-                )
-            ],
-        )
-        index_path = tmp_path / "pdb_index.tsv"
-        entry = pdb_index_store.Entry(clonotype_key="parent-1", filename="parent-1.pdb")
-        pdb_index_store.write_index(str(index_path), [entry])
-        out_dir = tmp_path / "tolerance"
+        with keyed_artifact.KeyedWriter(str(out_residues)) as residues_writer:
+            residue_store.write_residues(residues_writer, "parent-1", residues)
+        with keyed_artifact.KeyedWriter(str(out_triaged)) as triaged_writer:
+            liability_store.write_triaged(
+                triaged_writer,
+                "parent-1",
+                [
+                    liability_triage.Triaged(
+                        definition_id="deamidation_ng", liability_type="deamidation",
+                        risk_level="High", fixability="fixable", site=residues[:1],
+                        verdict="exposed", low_confidence=False, confidence_angstroms=3.0,
+                        rsasa=0.5,
+                    )
+                ],
+            )
+        out_tolerance = tmp_path / "tolerance.tsv"
 
         rc = isolated_antifold_module.main(
             [
                 "--pdb-dir", str(pdb_dir),
-                "--residues-dir", str(residues_dir),
-                "--triaged-dir", str(triaged_dir),
-                "--pdb-index", str(index_path),
+                "--residues", str(out_residues),
+                "--triaged", str(out_triaged),
                 "--weights", antifold_weights_path,
                 "--sapiens-weights", sapiens_weights_root,
-                "--out-tolerance-dir", str(out_dir),
-                "--out-skip", str(tmp_path / "skip.tsv"),
+                "--out-tolerance", str(out_tolerance),
+                "--out-priors-dir", str(priors_dir),
+                "--out-rejected", str(tmp_path / "rejected.tsv"),
             ]
         )
         assert rc == 0
 
-        prior_path = out_dir / f"parent-1{sapiens_prior.PRIOR_SUFFIX}"
+        prior_path = priors_dir / f"parent-1{sapiens_prior.PRIOR_SUFFIX}"
         via_entrypoint = {
             (row["chain"], row["imgt"]): row
             for row in csv.DictReader(io.StringIO(prior_path.read_text()), delimiter="\t")
@@ -325,14 +338,14 @@ class TestThePriorKeysAndValuesSurviveTheReshape:
         # "A" (light) sorts before "H" (heavy) alphabetically — the one input
         # where the rendering order and the chain-letter order disagree.
         heavy = [
-            residue_store.Residue(
+            residue_index.Residue(
                 chain="H", offset=offset, imgt=str(offset + 1), wild_type=wild_type,
                 res_name="ALA", b_factor=20.0, region=_region_at(offset), chain_role="H",
             )
             for offset, wild_type in enumerate(_TRASTUZUMAB_VH)
         ]
         light = [
-            residue_store.Residue(
+            residue_index.Residue(
                 chain="A", offset=0, imgt="1", wild_type="A", res_name="ALA",
                 b_factor=20.0, region="FR1", chain_role="L",
             )
@@ -436,7 +449,7 @@ def _heavy_chain_index():
     """Trastuzumab's real heavy-chain V-domain, indexed with its real CDR
     spans — the fixture the divergence case scores."""
     return [
-        residue_store.Residue(
+        residue_index.Residue(
             chain="H",
             offset=offset,
             imgt=str(offset + 1),

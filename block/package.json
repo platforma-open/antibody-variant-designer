@@ -1,6 +1,6 @@
 {
   "name": "@platforma-open/milaboratories.antibody-variant-designer.block",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "files": [
     "dist",
     "block-pack"
@@ -45,7 +45,7 @@
       "description": "Ranked antibody variant hypotheses that remove chemical liabilities.",
       "longDescription": "file:../docs/description.md",
       "changelog": "file:../CHANGELOG.md",
-      "logo": "file:logos/block-logo.png",
+      "logo": "file:../logos/block-logo.png",
       "url": "https://github.com/platforma-open/antibody-variant-designer",
       "support": "mailto:support@milaboratories.com",
       "tags": [
@@ -57,7 +57,7 @@
       "organization": {
         "name": "MiLaboratories Inc",
         "url": "https://milaboratories.com/",
-        "logo": "file:logos/organization-logo.png"
+        "logo": "file:../logos/organization-logo.png"
       },
       "supportedPlatforms": [
         "linux-x64",

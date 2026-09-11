@@ -6,7 +6,7 @@ data and a hand-built `logits_rows` fixture, and the CLI test monkeypatches
 `_run_model`, the one function that actually calls the backend.
 
 `TestPdbsFrame` is the one exception, and needs pandas but not torch — it
-skips outright when pandas is absent, which is the `dev` group's default.
+rejections outright when pandas is absent, which is the `dev` group's default.
 """
 
 import csv
@@ -19,7 +19,7 @@ import pytest
 import read_tolerance
 import sapiens_prior
 
-from engine import liability_store, liability_triage, residue_store, skip_store, tolerance_store
+from engine import liability_triage, rejection_store, residue_index, tolerance_store
 
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
 
@@ -33,7 +33,7 @@ def _no_human_prior(monkeypatch):
 
 
 def _residue(chain, offset, imgt=None, role=None):
-    return residue_store.Residue(
+    return residue_index.Residue(
         chain=chain,
         offset=offset,
         imgt=imgt or str(offset + 1),
@@ -45,10 +45,10 @@ def _residue(chain, offset, imgt=None, role=None):
     )
 
 
-def _logits_row(chain, posins, perplexity=3.0, value=0.0):
+def _logits_row(chain, imgt, perplexity=3.0, value=0.0):
     return {
         "chain": chain,
-        "posins": posins,
+        "imgt": imgt,
         "perplexity": perplexity,
         "logits": dict.fromkeys(AMINO_ACIDS, value),
     }
@@ -157,13 +157,15 @@ class TestBuildToleranceRows:
 class TestPdbsFrame:
     """AntiFold's own dataset loader rejects a dataframe missing any of
     `pdb`/`Hchain`/`Lchain` before it reads a single row — column presence
-    alone, independent of `nanobody_mode`. `_pdbs_frame` must always emit
+    alone, independent of `nanobody_mode`. `_antifold_input_frame` must always emit
     the three columns; only the `Lchain` value tells nanobody from paired."""
 
     def test_a_nanobody_still_gets_an_lchain_column(self):
         pd = pytest.importorskip("pandas")
 
-        df = read_tolerance._pdbs_frame("clone-1", read_tolerance.RoleChains(heavy="H", light=None))
+        df = read_tolerance._antifold_input_frame(
+            "clone-1", read_tolerance.RoleChains(heavy="H", light=None)
+        )
 
         assert set(df.columns) == {"pdb", "Hchain", "Lchain"}
         assert pd.isna(df.loc[0, "Lchain"])
@@ -171,25 +173,25 @@ class TestPdbsFrame:
     def test_a_paired_antibody_carries_both_chain_letters(self):
         pytest.importorskip("pandas")
 
-        df = read_tolerance._pdbs_frame(
+        df = read_tolerance._antifold_input_frame(
             "clone-1", read_tolerance.RoleChains(heavy="H", light="L")
         )
 
         assert (df.loc[0, "Hchain"], df.loc[0, "Lchain"]) == ("H", "L")
 
 
-class TestBlockNetwork:
+class TestForbidNetworkAccess:
     def test_opening_a_socket_inside_the_guard_raises(self):
         with (
             pytest.raises(RuntimeError, match="network access is disabled"),
-            read_tolerance._block_network(),
+            read_tolerance._forbid_network_access(),
         ):
             socket.socket()
 
     def test_the_guard_restores_the_real_socket_class_on_exit(self):
         original = socket.socket
 
-        with read_tolerance._block_network():
+        with read_tolerance._forbid_network_access():
             pass
 
         assert socket.socket is original
@@ -197,7 +199,7 @@ class TestBlockNetwork:
     def test_the_guard_restores_the_real_socket_class_even_after_a_raise(self):
         original = socket.socket
 
-        with pytest.raises(ValueError, match="boom"), read_tolerance._block_network():
+        with pytest.raises(ValueError, match="boom"), read_tolerance._forbid_network_access():
             raise ValueError("boom")
 
         assert socket.socket is original
@@ -222,16 +224,12 @@ def _actionable(site):
 def _stage(batch, clonotype_key, residues=None, triaged=True):
     """Stage one antibody's PDB, residue index and triaged liabilities, as
     `index-and-scan` would. `triaged=False` is the antibody whose triage left
-    nothing actionable — indexed, but never written to `triaged/`."""
+    nothing actionable — indexed, but never carried into the triaged artifact."""
     entry = batch.add(clonotype_key, "ATOM")
     residues = residues if residues is not None else [_residue("H", 0, imgt="1", role="H")]
-    residue_store.write_residues(
-        str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
-    )
+    batch.append_residues(entry.clonotype_key, residues)
     if triaged:
-        liability_store.write_triaged(
-            str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_actionable(residues[:1])]
-        )
+        batch.append_triaged(entry.clonotype_key, [_actionable(residues[:1])])
     return entry
 
 
@@ -241,25 +239,34 @@ def _weights(batch):
     return str(path)
 
 
+def _tolerance_has(out_tolerance, clonotype_key):
+    return tolerance_store.open_tolerance(str(out_tolerance)).take(clonotype_key) is not None
+
+
 def _run(batch, weights):
-    out_dir = batch.dir("tolerance")
-    out_skip = batch.path("skip.tsv")
+    # Production code always opens a writer for each artifact, even over zero parents.
+    for name in ("residues.jsonl", "triaged.jsonl"):
+        path = Path(batch.path(name))
+        if not path.exists():
+            path.touch()
+    out_tolerance = batch.path("tolerance.tsv")
+    out_rejected = batch.path("rejected.tsv")
 
     rc = read_tolerance.main(
         [
             "--pdb-dir", str(batch.pdb_dir),
-            "--residues-dir", batch.dir("residues"),
-            "--triaged-dir", batch.dir("triaged"),
-            "--pdb-index", batch.index,
+            "--residues", batch.path("residues.jsonl"),
+            "--triaged", batch.path("triaged.jsonl"),
             "--weights", weights,
             "--sapiens-weights", batch.dir("sapiens"),
-            "--out-tolerance-dir", out_dir,
-            "--out-skip", out_skip,
+            "--out-tolerance", out_tolerance,
+            "--out-priors-dir", batch.dir("priors"),
+            "--out-rejected", out_rejected,
         ]
     )
 
     assert rc == 0
-    return skip_store.read_skips(out_skip), out_dir
+    return rejection_store.read_rejections(out_rejected), out_tolerance
 
 
 class TestMissingWeightsRaisesBeforeAnyModelCall:
@@ -276,23 +283,23 @@ class TestMissingWeightsRaisesBeforeAnyModelCall:
             read_tolerance.main(
                 [
                     "--pdb-dir", str(batch.pdb_dir),
-                    "--residues-dir", batch.dir("residues"),
-                    "--triaged-dir", batch.dir("triaged"),
-                    "--pdb-index", batch.index,
+                    "--residues", batch.path("residues.jsonl"),
+                    "--triaged", batch.path("triaged.jsonl"),
                     "--weights", missing_weights,
                     "--sapiens-weights", batch.dir("sapiens"),
-                    "--out-tolerance-dir", batch.dir("tolerance"),
-                    "--out-skip", batch.path("skip.tsv"),
+                    "--out-tolerance", batch.path("tolerance.tsv"),
+                    "--out-priors-dir", batch.dir("priors"),
+                    "--out-rejected", batch.path("rejected.tsv"),
                 ]
             )
 
         # A missing checkpoint is a broken run, not N bad antibodies: it must
-        # not degrade into a skip TSV full of `backend-failed` rows.
-        assert not Path(batch.path("skip.tsv")).exists()
+        # not degrade into a rejection TSV full of `backend-failed` rows.
+        assert not Path(batch.path("rejected.tsv")).exists()
 
 
 class TestMainWiresTheJoinAndWritesTheTsv:
-    def test_a_successful_run_writes_the_tolerance_tsv_and_an_empty_skip(
+    def test_a_successful_run_writes_the_tolerance_tsv_and_an_empty_rejection(
         self, batch, monkeypatch
     ):
         entry = _stage(batch, "clone-1")
@@ -305,20 +312,17 @@ class TestMainWiresTheJoinAndWritesTheTsv:
         monkeypatch.setattr(read_tolerance, "load_model", lambda _w: "loaded-model")
         monkeypatch.setattr(read_tolerance, "_run_model", _fake_run_model)
 
-        skips, out_dir = _run(batch, _weights(batch))
+        rejections, out_tolerance = _run(batch, _weights(batch))
 
-        assert skips == [("clone-1", "", "")]
+        assert rejections == [("clone-1", "", "", "parent", "liability")]
         assert captured["chains"].heavy == "H"
         assert captured["chains"].light is None
         assert captured["chains"].nanobody is True
 
-        rows = list(
-            csv.DictReader(
-                io.StringIO(Path(out_dir, f"{entry.stem}.tsv").read_text()), delimiter="\t"
-            )
-        )
+        rows = list(csv.DictReader(io.StringIO(Path(out_tolerance).read_text()), delimiter="\t"))
+        assert rows[0]["clonotypeKey"] == entry.clonotype_key
         assert rows[0]["chain"] == "H"
-        assert rows[0]["posins"] == "1"
+        assert rows[0]["imgt"] == "1"
         assert rows[0]["perplexity"] == "4.2"
 
 
@@ -340,48 +344,54 @@ class TestBatchCli:
             lambda *_a, **_k: [_logits_row("H", "1", perplexity=4.2)],
         )
 
-        skips, _ = _run(batch, _weights(batch))
+        rejections, _ = _run(batch, _weights(batch))
 
         assert len(loads) == 1
-        assert skips == [("clone-1", "", ""), ("clone-2", "", ""), ("clone-3", "", "")]
+        assert rejections == [
+            ("clone-1", "", "", "parent", "liability"),
+            ("clone-2", "", "", "parent", "liability"),
+            ("clone-3", "", "", "parent", "liability"),
+        ]
 
     def test_a_middle_antibody_raising_is_named_and_the_others_still_finish(
         self, batch, monkeypatch, capsys
     ):
-        _stage(batch, "first")
-        _stage(batch, "middle")
-        _stage(batch, "last")
+        # Named so the sorted listing puts the failing antibody between the other
+        # two — the parent clonotypes are key-ordered, not staging-ordered.
+        _stage(batch, "a-first")
+        _stage(batch, "b-middle")
+        _stage(batch, "c-last")
 
         def _fake_run_model(_model, pdb_path, *_a, **_k):
             # Match the filename, never the whole path — pytest names the
             # tmp dir after the test, so a substring check on the path would
             # match every antibody in this one.
-            if Path(pdb_path).stem == "middle":
+            if Path(pdb_path).stem == "b-middle":
                 raise RuntimeError("torch exploded")
             return [_logits_row("H", "1", perplexity=4.2)]
 
         monkeypatch.setattr(read_tolerance, "load_model", lambda _w: "loaded-model")
         monkeypatch.setattr(read_tolerance, "_run_model", _fake_run_model)
 
-        skips, out_dir = _run(batch, _weights(batch))
+        rejections, out_tolerance = _run(batch, _weights(batch))
 
-        assert skips == [
-            ("first", "", ""),
-            ("middle", "backend-failed", "torch exploded"),
-            ("last", "", ""),
+        assert rejections == [
+            ("a-first", "", "", "parent", "liability"),
+            ("b-middle", "backend-failed", "torch exploded", "parent", "liability"),
+            ("c-last", "", "", "parent", "liability"),
         ]
-        assert Path(out_dir, "first.tsv").is_file()
-        assert not Path(out_dir, "middle.tsv").exists()
-        assert Path(out_dir, "last.tsv").is_file()
+        assert _tolerance_has(out_tolerance, "a-first")
+        assert not _tolerance_has(out_tolerance, "b-middle")
+        assert _tolerance_has(out_tolerance, "c-last")
         # AntiFold swallows its own exceptions and exits 0, so the clonotype
         # key reaching stderr is the only trace back to the cause.
-        assert "middle" in capsys.readouterr().err
+        assert "b-middle" in capsys.readouterr().err
 
-    def test_an_antibody_step_one_skipped_gets_no_row_and_no_model_call(
+    def test_an_antibody_step_one_rejected_gets_no_row_and_no_model_call(
         self, batch, monkeypatch
     ):
         _stage(batch, "indexed")
-        batch.add("skipped-earlier", "ATOM")  # no residues file written
+        batch.add("rejected-earlier", "ATOM")  # no residues file written
         seen = []
 
         monkeypatch.setattr(read_tolerance, "load_model", lambda _w: "loaded-model")
@@ -392,9 +402,9 @@ class TestBatchCli:
 
         monkeypatch.setattr(read_tolerance, "_run_model", _fake_run_model)
 
-        skips, _ = _run(batch, _weights(batch))
+        rejections, _ = _run(batch, _weights(batch))
 
-        assert skips == [("indexed", "", "")]
+        assert rejections == [("indexed", "", "", "parent", "liability")]
         assert len(seen) == 1
 
     def test_an_antibody_with_nothing_actionable_is_gated_out_of_the_model_call(
@@ -402,7 +412,7 @@ class TestBatchCli:
     ):
         # The GNN pass is the run's dominant term and this antibody yields no
         # variant, so scoring it is pure waste. Its reason is already in exec
-        # 1's skip TSV, so a row here would count the clonotype twice.
+        # 1's rejection TSV, so a row here would count the clonotype twice.
         _stage(batch, "actionable")
         _stage(batch, "nothing-to-fix", triaged=False)
         seen = []
@@ -415,11 +425,11 @@ class TestBatchCli:
             or [_logits_row("H", "1", perplexity=4.2)],
         )
 
-        skips, out_dir = _run(batch, _weights(batch))
+        rejections, out_tolerance = _run(batch, _weights(batch))
 
-        assert skips == [("actionable", "", "")]
+        assert rejections == [("actionable", "", "", "parent", "liability")]
         assert [Path(p).stem for p in seen] == ["actionable"]
-        assert not Path(out_dir, "nothing-to-fix.tsv").exists()
+        assert not _tolerance_has(out_tolerance, "nothing-to-fix")
 
     def test_a_batch_gated_out_in_full_never_loads_the_checkpoint(self, batch, monkeypatch):
         _stage(batch, "nothing-to-fix", triaged=False)
@@ -429,9 +439,9 @@ class TestBatchCli:
 
         monkeypatch.setattr(read_tolerance, "load_model", _fail_if_called)
 
-        skips, _ = _run(batch, _weights(batch))
+        rejections, _ = _run(batch, _weights(batch))
 
-        assert skips == []
+        assert rejections == []
 
     def test_an_empty_index_never_loads_the_checkpoint(self, batch, monkeypatch):
         def _fail_if_called(*_args, **_kwargs):
@@ -439,6 +449,6 @@ class TestBatchCli:
 
         monkeypatch.setattr(read_tolerance, "load_model", _fail_if_called)
 
-        skips, _ = _run(batch, _weights(batch))
+        rejections, _ = _run(batch, _weights(batch))
 
-        assert skips == []
+        assert rejections == []

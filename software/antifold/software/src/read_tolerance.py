@@ -1,5 +1,5 @@
-"""AntiFold tolerance read, the entrypoint that writes one
-`tolerance.tsv` per antibody.
+"""AntiFold tolerance read, the entrypoint that writes one dataset-wide
+tolerance keyed artifact.
 
 Calls AntiFold as a library, never its own CLI or subprocess:
 `_load_IF1_local()` builds the architecture, `load_IF1_checkpoint` loads the
@@ -27,7 +27,7 @@ network — `antiscripts.load_model()`'s `urllib.request.urlretrieve` call to
 `torch.hub.load_state_dict_from_url` — and a call-graph audit of the whole
 vendored tree found neither one reachable from `_load_IF1_local()` +
 `load_IF1_checkpoint()` + `get_pdbs_logits()`, the only three entry points
-`_run_model` calls. `_block_network` is the belt-and-braces layer on top of
+`_run_model` calls. `_forbid_network_access` is the belt-and-braces layer on top of
 that audit: it makes any *future* vendor bump that reintroduces a reachable
 download fail loudly during the model call, instead of silently fetching.
 """
@@ -41,7 +41,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import sapiens_prior
-from engine import antibody_batch, pdb_index_store, residue_store, tolerance_store
+from engine import (
+    antibody_batch,
+    keyed_artifact,
+    parent_clonotypes,
+    rejection_store,
+    residue_index,
+    residue_store,
+    run_mode,
+    tolerance_store,
+)
 
 _VENDOR_DIR = str(Path(__file__).parent / "vendor" / "AntiFold")
 
@@ -63,7 +72,7 @@ class RoleChains:
         return self.light is None
 
 
-def pick_chains(residues: list[residue_store.Residue]) -> RoleChains:
+def pick_chains(residues: list[residue_index.Residue]) -> RoleChains:
     """The physical PDB chain letters carrying the `H` and `L` roles — decided here, from the
     parsed chain count, because one run may mix VHH and paired antibodies and Tengo has no
     residue index of its own to decide it from."""
@@ -94,18 +103,18 @@ def _log_softmax(values: list[float]) -> list[float]:
 
 
 def build_tolerance_rows(
-    residues: list[residue_store.Residue], logits_rows: list[dict]
+    residues: list[residue_index.Residue], logits_rows: list[dict]
 ) -> list[dict]:
     """Join AntiFold's own per-position frame onto this antibody's H/L
-    residues by `(chain, posins)`. `logits_rows` is
-    `[{"chain", "posins", "perplexity", "logits": {aa: float, ...}}, ...]`,
+    residues by `(chain, imgt)`. `logits_rows` is
+    `[{"chain", "imgt", "perplexity", "logits": {aa: float, ...}}, ...]`,
     already read out of AntiFold's own DataFrame.
 
     Raises, rather than trusting AntiFold's length-only assert, when a
     residue this antibody needs has no matching row: the recoverable
     `backend-failed` verdict belongs to the workflow driving this exec, not
     to a silently short join happening inside it."""
-    by_key = {(row["chain"], row["posins"]): row for row in logits_rows}
+    by_key = {(row["chain"], row["imgt"]): row for row in logits_rows}
 
     wanted_chains = {r.chain for r in residues if r.chain_role in ("H", "L")}
     missing = [
@@ -121,14 +130,14 @@ def build_tolerance_rows(
     rows = []
     for row in logits_rows:
         log_probs = _log_softmax([row["logits"][aa] for aa in AMINO_ACIDS])
-        out = {"chain": row["chain"], "posins": row["posins"], "perplexity": row["perplexity"]}
+        out = {"chain": row["chain"], "imgt": row["imgt"], "perplexity": row["perplexity"]}
         out.update(dict(zip(AMINO_ACIDS, log_probs, strict=True)))
         rows.append(out)
     return rows
 
 
 @contextmanager
-def _block_network():
+def _forbid_network_access():
     """Raise instead of silently reaching the network, for the duration of
     the model call. `socket.socket` is the one chokepoint every stdlib and
     torch network path routes through — `urllib`, `torch.hub`, `requests`
@@ -159,13 +168,13 @@ def load_model(weights_path: str):
     import antifold.antiscripts as antiscripts
     import antifold.esm.pretrained as pretrained
 
-    with _block_network():
+    with _forbid_network_access():
         model, _ = pretrained._load_IF1_local()
         model = antiscripts.load_IF1_checkpoint(model, weights_path)
         return model.eval()
 
 
-def _pdbs_frame(pdb_stem: str, chains: RoleChains):
+def _antifold_input_frame(pdb_stem: str, chains: RoleChains):
     """AntiFold's one-row `pdb, Hchain, Lchain` frame for a single antibody.
 
     `Lchain` is always a column, `None` for a nanobody. AntiFold's own
@@ -191,9 +200,9 @@ def _run_model(model, pdb_path: str, chains: RoleChains) -> list[dict]:
         sys.path.insert(0, _VENDOR_DIR)
     import antifold.antiscripts as antiscripts
 
-    with _block_network():
+    with _forbid_network_access():
         pdb = Path(pdb_path)
-        pdbs_df = _pdbs_frame(pdb.stem, chains)
+        pdbs_df = _antifold_input_frame(pdb.stem, chains)
 
         # `custom_chain_mode` and `nanobody_mode` are two independent flags on
         # AntiFold's own call, but its H/L coordinate loader looks up BOTH
@@ -217,7 +226,7 @@ def _run_model(model, pdb_path: str, chains: RoleChains) -> list[dict]:
     return [
         {
             "chain": r["pdb_chain"],
-            "posins": r["pdb_posins"],
+            "imgt": r["pdb_posins"],
             "perplexity": float(r["perplexity"]),
             "logits": {aa: float(r[aa]) for aa in AMINO_ACIDS},
         }
@@ -228,8 +237,9 @@ def _run_model(model, pdb_path: str, chains: RoleChains) -> list[dict]:
 def process_one(
     model,
     pdb_path: str,
-    residues_path: str,
-    out_tolerance: str,
+    residues: list[residue_index.Residue],
+    clonotype_key: str,
+    tolerance_writer: tolerance_store.ToleranceWriter,
     sapiens_weights: str,
     out_prior: str,
 ) -> str:
@@ -237,15 +247,14 @@ def process_one(
     prior. Nanobody mode is decided here, from this antibody's own parsed chain
     count — one batch may legally mix VHH and paired structures, so it can
     never be a run-level flag."""
-    residues = residue_store.read_residues(residues_path)
     chains = pick_chains(residues)
 
     logits_rows = _run_model(model, pdb_path, chains)
     rows = build_tolerance_rows(residues, logits_rows)
 
-    tolerance_store.write_tolerance_tsv(out_tolerance, rows)
+    tolerance_writer.write(clonotype_key, rows)
 
-    with _block_network():
+    with _forbid_network_access():
         prior_rows = sapiens_prior.build_prior_rows(residues, sapiens_weights)
     Path(out_prior).write_text(sapiens_prior.render(prior_rows))
 
@@ -257,23 +266,23 @@ def main(argv: list[str] | None = None) -> int:
         description="Read AntiFold's per-position tolerance for every staged antibody."
     )
     parser.add_argument("--pdb-dir", required=True)
+    parser.add_argument("--residues", required=True, help="index_and_scan.py's --out-residues")
     parser.add_argument(
-        "--residues-dir", required=True, help="index_and_scan.py's --out-residues-dir"
-    )
-    parser.add_argument(
-        "--triaged-dir",
+        "--triaged",
         required=True,
-        help="index_and_scan.py's --out-triaged-dir, read as a gate only — never opened",
+        help="index_and_scan.py's --out-triaged, read as a gate only — never opened",
     )
-    parser.add_argument("--pdb-index", required=True, help="the pdb_index")
     parser.add_argument("--weights", required=True, help="mounted models/model.pt")
     parser.add_argument(
         "--sapiens-weights",
         required=True,
         help="the mounted Sapiens asset root, holding vh/, vl/ and tokenizer/",
     )
-    parser.add_argument("--out-tolerance-dir", required=True)
-    parser.add_argument("--out-skip", required=True)
+    parser.add_argument("--out-tolerance", required=True)
+    # The human-repertoire prior is still one file per antibody: this row's keyed-artifact
+    # format is not extended to it.
+    parser.add_argument("--out-priors-dir", required=True)
+    parser.add_argument("--out-rejected", required=True)
     args = parser.parse_args(argv)
 
     # Asserted and loaded before the loop, and deliberately outside the
@@ -285,42 +294,49 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"--weights does not exist: {weights_path}")
 
     pdb_dir = Path(args.pdb_dir)
-    residues_dir = Path(args.residues_dir)
-    triaged_dir = Path(args.triaged_dir)
-    out_dir = Path(args.out_tolerance_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    priors_dir = Path(args.out_priors_dir)
+    priors_dir.mkdir(parents=True, exist_ok=True)
 
-    entries = pdb_index_store.read_index(args.pdb_index)
-    # A missing triaged file is a gate, not an error: it means triage left this
-    # antibody nothing actionable, or the index phase skipped it. Either way
-    # exec 1 already named the reason and no variant can come from it, so the
-    # model call is pure waste. Filtered here rather than in the loop so a
-    # dataset where every antibody is gated out never pays the checkpoint load.
+    entries = parent_clonotypes.scan_parent_clonotypes(args.pdb_dir, parent_clonotypes.PDB_SUFFIX)
+    # A key absent from the triaged artifact is a gate, not an error: it means triage left
+    # this antibody nothing actionable, or the index phase skipped it. Either way exec 1
+    # already named the reason and no variant can come from it, so the model call is pure
+    # waste. Filtered here rather than in the loop so a dataset where every antibody is gated
+    # out never pays the checkpoint load.
+    residue_keys = set(keyed_artifact.keys_of(args.residues))
+    triaged_keys = set(keyed_artifact.keys_of(args.triaged))
     runnable = [
-        e
-        for e in entries
-        if (residues_dir / f"{e.stem}.json").is_file()
-        and (triaged_dir / f"{e.stem}.json").is_file()
-        and (pdb_dir / e.filename).is_file()
+        e for e in entries if e.clonotype_key in residue_keys and e.clonotype_key in triaged_keys
     ]
     # Nothing runnable means nothing to score, and loading the checkpoint
     # would buy a model no antibody uses.
     model = load_model(str(weights_path)) if runnable else None
 
-    def one(entry: pdb_index_store.Entry) -> str:
-        return process_one(
-            model,
-            str(pdb_dir / entry.filename),
-            str(residues_dir / f"{entry.stem}.json"),
-            str(out_dir / f"{entry.stem}.tsv"),
-            args.sapiens_weights,
-            str(out_dir / f"{entry.stem}{sapiens_prior.PRIOR_SUFFIX}"),
-        )
+    residues_reader = residue_store.open_residues(args.residues)
 
     # `error_reason` is passed here and nowhere else: AntiFold swallows its
     # own exceptions and exits 0, so this loop is the only place a backend
     # fault can still be attributed to the antibody that caused it.
-    return antibody_batch.run(runnable, one, args.out_skip, error_reason="backend-failed")
+    with tolerance_store.ToleranceWriter(args.out_tolerance) as tolerance_writer:
+
+        def one(entry: parent_clonotypes.ParentClonotype) -> list[tuple[str, str, str, str]]:
+            residues = residue_store.residues_from_payload(
+                residues_reader.take(entry.clonotype_key)
+            )
+            reason = process_one(
+                model,
+                str(pdb_dir / entry.filename),
+                residues,
+                entry.clonotype_key,
+                tolerance_writer,
+                args.sapiens_weights,
+                str(priors_dir / f"{entry.stem}{sapiens_prior.PRIOR_SUFFIX}"),
+            )
+            return [(reason, "", rejection_store.PARENT_REJECTED, run_mode.LIABILITY)]
+
+        return antibody_batch.process_every_parent(
+            runnable, one, args.out_rejected, error_reason="backend-failed"
+        )
 
 
 if __name__ == "__main__":

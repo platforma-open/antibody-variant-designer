@@ -32,25 +32,26 @@ buildVariants := import("@platforma-open/milaboratories.antibody-variant-designe
 
 self.validateInputs({
 	"__options__,closed": "",
-	// The PDB index, verbatim as `main.tpl.tengo` built it from the PDB
-	// ResourceMap's sorted keys.
-	pdbIndex: [{
-		"__options__,closed": "",
-		clonotypeKey: "string",
-		filename: "string"
-	}],
-	triaged: { any: validation.resource() },
-	tolerance: { any: validation.resource() },
-	residues: { any: validation.resource() },
+	triaged: validation.resource(),
+	tolerance: validation.resource(),
+	priors: { any: validation.resource() },
+	residues: validation.resource(),
 	definitions: validation.resource(),
+	// The parents step 1 staged. An upper bound on the parents this step
+	// reads, because step 1 rejects some — see `ramFor`.
+	parentCount: "number",
 	params: {
 		"__options__,closed": "",
 		runMode: "string",
-		maxEditsPerVariant: "number",
+		maxLiabilityEdits: "number",
+		maxFrameworkEdits: "number",
 		candidateResiduesPerPosition: "number",
-		wStruct: "number",
-		wObj: "number",
-		nonHumanPriorCutoff: "number",
+		structuralWeight: "number",
+		objectiveWeight: "number",
+		nonHumanPriorMargin: "number",
+		maxNewLiabilities: "number",
+		humanizationIgnoredLiabilities: "string",
+		frConfidenceThreshold: "number",
 		variantsPerParent: "number",
 		lowToleranceFloor: "number",
 		epistasisRescoreTopK: "number"
@@ -64,15 +65,18 @@ self.validateInputs({
 	}
 })
 
-self.defineOutputs("variants", "humanness", "skip", "skipContent")
+self.defineOutputs(
+	"variants", "humanness", "parentSequences", "rejected", "rejectedContent")
 
+// `parentCount` joins the inputs the body forwards wholesale.
 self.body(func(inputs) {
 	return buildVariants.run({
-		pdbIndex: inputs.pdbIndex,
 		triaged: inputs.triaged,
 		tolerance: inputs.tolerance,
+		priors: inputs.priors,
 		residues: inputs.residues,
 		definitions: inputs.definitions,
+		parentCount: inputs.parentCount,
 		params: inputs.params,
 		cpu: inputs.resources.cpu,
 		ram: is_undefined(inputs.resources.mem) ? undefined : string(inputs.resources.mem) + "GiB"

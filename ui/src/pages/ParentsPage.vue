@@ -5,13 +5,14 @@ import type { PTableKey } from "@platforma-sdk/model";
 import {
   PlAgDataTableV2,
   PlBlockPage,
+  PlSlideModal,
   PlTooltip,
   usePlDataTableSettingsV2,
 } from "@platforma-sdk/ui-vue";
 import { computed, ref } from "vue";
 import BlockSettings from "../components/BlockSettings.vue";
 import { useApp } from "../app";
-import { LIABILITY_VALUE_COLUMNS } from "../columns";
+import { LIABILITY_VALUE_COLUMNS, summaryLines } from "../columns";
 import { findRowByKey, useTableRows } from "../composables/useTableRows";
 
 const app = useApp();
@@ -30,7 +31,8 @@ const liabilitiesTableOutput = computed(() => app.model.outputs.liabilitiesTable
 // (`082-decision-the-liabilities-group-drops-to-one-axis`). v7 adds the
 // Humanness Verdict and Humanness Summary pair after Summary. v8 drops the
 // light-chain score, renames Verdict to Liability verdict, and leads with both
-// verdicts.
+// verdicts. v9 takes the two summary columns out of the default column set —
+// the side panel below reads them one entry per line instead.
 //
 // It is `undefined` until a run produces a table — see `VariantsPage.vue` for
 // why the running placeholder depends on that.
@@ -38,7 +40,7 @@ const liabilitiesTableSettings = usePlDataTableSettingsV2({
   model: () => liabilitiesTableOutput.value,
   sourceId: () =>
     liabilitiesTableOutput.value.ok && liabilitiesTableOutput.value.value
-      ? "avd-liabilities-v8"
+      ? "avd-liabilities-v9"
       : undefined,
 });
 
@@ -55,10 +57,28 @@ const selectedParentLabel = computed(() => {
   return String(row.values[LIABILITY_VALUE_COLUMNS.parentClonotypeId] ?? row.axesKey[0] ?? "");
 });
 
+const summaryOpen = ref(false);
+
+// The table hands a click back as the row's axis key alone, so the panel's
+// content is looked up in the full-table scan `liabilityRows` already holds.
 function selectParentRow(key?: PTableKey) {
   if (!key) return;
   selectedRowKey.value = key;
+  summaryOpen.value = true;
 }
+
+const liabilityVerdict = computed(() =>
+  String(selectedRow.value?.values[LIABILITY_VALUE_COLUMNS.verdict] ?? ""),
+);
+const humannessVerdict = computed(() =>
+  String(selectedRow.value?.values[LIABILITY_VALUE_COLUMNS.humannessVerdict] ?? ""),
+);
+const liabilitySummary = computed(() =>
+  summaryLines(selectedRow.value?.values[LIABILITY_VALUE_COLUMNS.summary]),
+);
+const humannessSummary = computed(() =>
+  summaryLines(selectedRow.value?.values[LIABILITY_VALUE_COLUMNS.humannessSummary]),
+);
 
 // No liabilities.tsv column carries a PDB file reference yet — the parent
 // axis has no structure to view until the workflow attaches one. This stays
@@ -89,7 +109,49 @@ const viewerProps = ref<PlStructureViewerProps>();
       not-ready-text="Run on a 3D structures dataset to see per-parent liabilities"
       running-text="Scanning liabilities and reading fold tolerance for each parent."
       no-rows-text="No liabilities"
+      :show-cell-button-for-axis-id="app.model.outputs.clonotypeAxisId"
       @row-double-clicked="selectParentRow"
+      @cell-button-clicked="selectParentRow"
     />
   </PlBlockPage>
+
+  <PlSlideModal v-model="summaryOpen" close-on-outside-click width="480px">
+    <template #title>{{ selectedParentLabel ?? "Parent" }}</template>
+
+    <div class="summary-section">
+      <span class="summary-heading">Liability verdict</span>
+      <span>{{ liabilityVerdict || "—" }}</span>
+    </div>
+    <div class="summary-section">
+      <span class="summary-heading">Liabilities</span>
+      <span v-for="entry in liabilitySummary" :key="entry">{{ entry }}</span>
+      <span v-if="liabilitySummary.length === 0">—</span>
+    </div>
+
+    <div class="summary-section">
+      <span class="summary-heading">Humanness verdict</span>
+      <span>{{ humannessVerdict || "—" }}</span>
+    </div>
+    <div class="summary-section">
+      <span class="summary-heading">Framework positions</span>
+      <span v-for="entry in humannessSummary" :key="entry">{{ entry }}</span>
+      <span v-if="humannessSummary.length === 0">—</span>
+    </div>
+  </PlSlideModal>
 </template>
+
+<style scoped>
+/* One entry per line: a summary cell joins its entries with a comma, and a
+   reader compares positions down a column rather than along a sentence. */
+.summary-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 20px;
+}
+.summary-heading {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+</style>

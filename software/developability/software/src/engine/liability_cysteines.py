@@ -8,7 +8,7 @@ counts instead of matching.
 
 from dataclasses import dataclass
 
-from engine import residue_store
+from engine import residue_index
 
 # 0-based, negative-from-the-end positions into a region's own residue
 # list, not the whole chain. FR1's conserved cysteine legally sits at
@@ -32,11 +32,11 @@ class DetectedCysteine:
     liability_type: str
     risk_level: str
     fixability: str
-    site: list[residue_store.Residue]
+    site: list[residue_index.Residue]
 
 
 def detect_all(
-    residues: list[residue_store.Residue], taxonomy: list[dict]
+    residues: list[residue_index.Residue], taxonomy: list[dict]
 ) -> list[DetectedCysteine]:
     """Evaluate FR1 and FR3 independently for every chain.
 
@@ -47,15 +47,17 @@ def detect_all(
     extra_def = by_id.get("extra_cysteines")
 
     hits: list[DetectedCysteine] = []
-    for chain in residue_store.in_scope_chains(residues):
+    for chain in residue_index.in_scope_chains(residues):
         by_region = chain.by_region()
         for region, expected_positions in EXPECTED_CYS_POSITIONS.items():
             region_residues = by_region[region].residues if region in by_region else ()
-            n = len(region_residues)
-            if n == 0:
+            residue_count = len(region_residues)
+            if residue_count == 0:
                 continue
-            allowed = [p for p in expected_positions if -n <= p < n]
-            if not allowed:
+            expected_in_region = [
+                p for p in expected_positions if -residue_count <= p < residue_count
+            ]
+            if not expected_in_region:
                 continue
 
             # FR1's two candidate offsets name one expected cysteine: either offset satisfies
@@ -66,8 +68,8 @@ def detect_all(
             # there, so both branches of `expected_count` below return the same number.
             expected_count = 1 if region == "FR1" else len(expected_positions)
 
-            missing = bool(allowed) and all(
-                region_residues[p].wild_type != "C" for p in allowed
+            missing = bool(expected_in_region) and all(
+                region_residues[p].wild_type != "C" for p in expected_in_region
             )
             actual_cys_count = sum(1 for r in region_residues if r.wild_type == "C")
             extra = (actual_cys_count > expected_count) or (
@@ -83,7 +85,7 @@ def detect_all(
                         fixability=missing_def["fixability"],
                         site=[
                             region_residues[p]
-                            for p in allowed
+                            for p in expected_in_region
                             if region_residues[p].wild_type != "C"
                         ],
                     )

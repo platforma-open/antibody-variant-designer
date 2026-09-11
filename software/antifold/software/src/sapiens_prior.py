@@ -14,7 +14,7 @@ import json
 import math
 from pathlib import Path
 
-from engine import residue_store, tolerance_store
+from engine import residue_index, tolerance_store
 
 # AntiFold's order, so the two rows combine elementwise without remapping.
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
@@ -80,10 +80,10 @@ def _predict_scores(sequence: str, chain_role: str, checkpoint_dir: str, tokeniz
 
 
 def _score_chain(
-    chain: residue_store.InScopeChain,
+    chain: residue_index.InScopeChain,
     checkpoint_dir: str,
     tokenizer_dir: str,
-) -> dict[residue_store.ResidueKey, dict[str, float]]:
+) -> dict[residue_index.ResidueKey, dict[str, float]]:
     """Scores `chain`'s whole in-scope sequence in one pass and returns each residue's
     twenty normalised values keyed by its join key, never by its position — no integer
     index into the model's returned frame leaves this function."""
@@ -117,7 +117,7 @@ def build_prior_rows(residues: list, weights_root: str) -> list[dict]:
     """
     tokenizer_dir = str(Path(weights_root) / "tokenizer")
     rows: list[dict] = []
-    for chain in residue_store.in_scope_chains(residues):
+    for chain in residue_index.in_scope_chains(residues):
         checkpoint_dir = _checkpoint_dir(weights_root, chain.chain_role)
         scored = _score_chain(chain, checkpoint_dir, tokenizer_dir)
         for residue in chain.select(_is_framework).residues:

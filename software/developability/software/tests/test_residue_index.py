@@ -1,19 +1,18 @@
-"""Tests for `residue_index.py`: PDB parsing, the IMGT-numbered check and the
+"""Tests for `residue_index.py`: the residue model, the IMGT-numbered check and the
 `(chain, offset)` residue index.
 
 The module has no CLI — it is the index phase of the `index-and-scan`
 entrypoint — so the end-to-end cases live in `test_index_and_scan.py`, and the format
 cases in `test_formats.py`."""
 
-from engine import residue_store
+from engine import residue_index
 from engine.residue_index import (
     AA_THREE_TO_ONE,
-    index_one,
     index_residues,
     is_imgt_numbered,
-    parse_pdb,
     region_for,
 )
+from engine.residue_store import parse_pdb
 from pdb_fixtures import make_chain, make_pdb, platforma_cdr_remark
 
 
@@ -140,52 +139,96 @@ class TestIndexResiduesRegionTagging:
         assert indexed[0].wild_type == "X"
 
 
-class TestArtifactsRoundTrip:
-    def test_residues_round_trip_through_json(self, tmp_path):
-        parsed = parse_pdb(make_pdb([("H", 111, "A", "ASN", 12.5)]))
-        indexed = index_residues(parsed)
-
-        path = tmp_path / "residues.json"
-        residue_store.write_residues(str(path), indexed)
-        read_back = residue_store.read_residues(str(path))
-
-        assert read_back == indexed
-        # The insertion-code label is exactly what came in, not "111.0" or
-        # an int that lost the "A".
-        assert read_back[0].imgt == "111A"
+def _residue(chain, offset, imgt, wild_type="A", region="FR1", chain_role="H"):
+    return residue_index.Residue(
+        chain=chain,
+        offset=offset,
+        imgt=imgt,
+        wild_type=wild_type,
+        res_name=wild_type,
+        b_factor=20.0,
+        region=region,
+        chain_role=chain_role,
+    )
 
 
-class TestIndexOneWritesOnlyOnSuccess:
-    """Absence, not emptiness, is how a skipped antibody is signalled — an
-    empty file would make every downstream `is_file()` guard a no-op and the
-    antibody would be counted twice."""
+class TestInScopeChains:
+    def test_a_minted_chain_holds_every_in_scope_residue_of_that_chain(self):
+        residues = [
+            _residue("H", 2, "3", region="CDR1"),
+            _residue("H", 0, "1"),
+            _residue("H", 1, "2"),
+            # Constant-domain tail: no region, so out of scope though the
+            # chain carries a role.
+            residue_index.Residue(
+                chain="H", offset=3, imgt="129", wild_type="A", res_name="ALA",
+                b_factor=20.0, region=None, chain_role="H",
+            ),
+            # A role-less second arm, in scope by neither test.
+            _residue("X", 0, "1", chain_role=None, region="FR1"),
+        ]
 
-    def test_a_passing_antibody_gets_its_residues_file(self, tmp_path):
-        text = (
-            platforma_cdr_remark("H", 1, "H", 27, 38)
-            + "\n"
-            + make_pdb(make_chain("H", 20))
-        )
-        pdb = tmp_path / "in.pdb"
-        pdb.write_text(text)
-        out = tmp_path / "residues.json"
+        [chain] = residue_index.in_scope_chains(residues)
 
-        assert index_one(str(pdb), str(out)) == ""
-        assert out.is_file()
-        assert residue_store.read_residues(str(out))
+        assert chain.chain == "H"
+        assert [r.offset for r in chain.residues] == [0, 1, 2]
 
-    def test_a_skipped_antibody_leaves_no_file_at_all(self, tmp_path):
-        pdb = tmp_path / "in.pdb"
-        pdb.write_text(make_pdb(make_chain("H", 5)))  # never reaches IMGT 10
-        out = tmp_path / "residues.json"
+    def test_a_role_less_chain_mints_no_chain(self):
+        residues = [
+            _residue("H", 0, "1"),
+            _residue("X", 0, "1", chain_role=None),
+            residue_index.Residue(
+                chain="Y", offset=0, imgt="1", wild_type="A", res_name="ALA",
+                b_factor=20.0, region=None, chain_role=None,
+            ),
+        ]
 
-        assert index_one(str(pdb), str(out)) == "structure-not-imgt"
-        assert not out.exists()
+        chains = residue_index.in_scope_chains(residues)
 
-    def test_an_unparseable_structure_leaves_no_file_at_all(self, tmp_path):
-        pdb = tmp_path / "in.pdb"
-        pdb.write_text("")
-        out = tmp_path / "residues.json"
+        assert len(chains) == 1
+        assert {r.chain for c in chains for r in c.residues} == {"H"}
 
-        assert index_one(str(pdb), str(out)) == "no-structure"
-        assert not out.exists()
+    def test_chains_are_ordered_heavy_before_light(self):
+        # "A" (light) sorts before "H" (letter) alphabetically — the letter
+        # order and the rendering order disagree, so this is the one input
+        # where the fix actually shows.
+        residues = [
+            _residue("A", 0, "1", chain_role="L"),
+            _residue("H", 0, "1", chain_role="H"),
+        ]
+
+        chains = residue_index.in_scope_chains(residues)
+
+        assert [c.chain_role for c in chains] == ["H", "L"]
+
+
+class TestSelectAndByRegion:
+    def test_a_selection_carries_the_chain_it_came_from(self):
+        residues = [_residue("H", 0, "1", region="FR1"), _residue("H", 1, "2", region="CDR1")]
+        [chain] = residue_index.in_scope_chains(residues)
+
+        selection = chain.select(lambda r: r.region == "FR1")
+
+        assert [r.offset for r in selection.residues] == [0]
+        assert selection.of_chain is chain
+
+    def test_a_region_group_covers_every_region_present(self):
+        residues = [
+            _residue("H", 0, "1", region="FR1"),
+            _residue("H", 1, "2", region="FR1"),
+            _residue("H", 2, "3", region="CDR1"),
+        ]
+        [chain] = residue_index.in_scope_chains(residues)
+
+        by_region = chain.by_region()
+
+        assert set(by_region) == {"FR1", "CDR1"}
+        assert [r.offset for r in by_region["FR1"].residues] == [0, 1]
+        assert [r.offset for r in by_region["CDR1"].residues] == [2]
+
+
+class TestJoinKey:
+    def test_the_join_key_is_the_chain_and_the_imgt_label(self):
+        residue = _residue("H", 0, "107A")
+
+        assert residue.join_key == ("H", "107A")
