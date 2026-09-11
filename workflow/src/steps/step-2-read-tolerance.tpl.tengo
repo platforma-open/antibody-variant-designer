@@ -30,10 +30,10 @@ readTolerance := import("@platforma-open/milaboratories.antibody-variant-designe
 self.validateInputs({
 	"__options__,closed": "",
 	pdbs: { any: validation.resource() },
-	residues: { any: validation.resource() },
+	residues: validation.resource(),
 	// Read only as a gate — never opened. An antibody absent here has no
 	// actionable liability, or was already named upstream.
-	triaged: { any: validation.resource() },
+	triaged: validation.resource(),
 	// Advanced Settings → Resource Allocation. Either may be unset — the recipe
 	// sizes the dimension the operator left empty from the data it is handed.
 	// `vram` is not exposed at all: it sizes to the checkpoint AntiFold loads,
@@ -45,7 +45,7 @@ self.validateInputs({
 	}
 })
 
-self.defineOutputs("tolerance", "rejected", "rejectedContent")
+self.defineOutputs("tolerance", "priors", "rejected", "rejectedContent")
 
 self.body(func(inputs) {
 	return readTolerance.run({

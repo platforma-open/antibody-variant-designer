@@ -1,10 +1,10 @@
-"""Unit tests for `liability_store.py` — the round trip for `triaged.json`
+"""Unit tests for `liability_store.py` — the round trip for the triaged keyed artifact
 and the write-only path for `liabilities.tsv`."""
 
 import csv
 import io
 
-from engine import liability_store, liability_triage, residue_index
+from engine import keyed_artifact, liability_store, liability_triage, residue_index
 
 
 def _residue(chain, offset, imgt=None, region="CDR1"):
@@ -37,33 +37,41 @@ def _rows_of(path):
     return list(csv.DictReader(io.StringIO(path.read_text()), delimiter="\t"))
 
 
-class TestTriagedJsonRoundTrips:
+def _write_triaged(path, clonotype_key, triaged_list):
+    with keyed_artifact.KeyedWriter(str(path)) as writer:
+        liability_store.write_triaged(writer, clonotype_key, triaged_list)
+
+
+class TestTriagedArtifactRoundTrips:
     def test_write_then_read_returns_an_equal_triaged(self, tmp_path):
         site = [_residue("H", 0, imgt="107"), _residue("H", 1, imgt="108")]
         original = _triaged(site)
-        path = tmp_path / "triaged.json"
+        path = tmp_path / "triaged.jsonl"
 
-        liability_store.write_triaged(str(path), [original])
-        [rehydrated] = liability_store.read_triaged(str(path))
+        _write_triaged(path, "clone-1", [original])
+        payload = liability_store.open_triaged(str(path)).take("clone-1")
+        [rehydrated] = liability_store.triaged_from_payload(payload)
 
         assert rehydrated == original
 
     def test_insertion_code_imgt_label_survives_the_round_trip(self, tmp_path):
         site = [_residue("H", 0, imgt="111A")]
         original = _triaged(site)
-        path = tmp_path / "triaged.json"
+        path = tmp_path / "triaged.jsonl"
 
-        liability_store.write_triaged(str(path), [original])
-        [rehydrated] = liability_store.read_triaged(str(path))
+        _write_triaged(path, "clone-1", [original])
+        payload = liability_store.open_triaged(str(path)).take("clone-1")
+        [rehydrated] = liability_store.triaged_from_payload(payload)
 
         assert rehydrated.site[0].imgt == "111A"
 
     def test_empty_list_round_trips_to_empty(self, tmp_path):
-        path = tmp_path / "triaged.json"
+        path = tmp_path / "triaged.jsonl"
 
-        liability_store.write_triaged(str(path), [])
+        _write_triaged(path, "clone-1", [])
 
-        assert liability_store.read_triaged(str(path)) == []
+        payload = liability_store.open_triaged(str(path)).take("clone-1")
+        assert liability_store.triaged_from_payload(payload) == []
 
 
 WEIGHTS = {"fixable": 3.0}

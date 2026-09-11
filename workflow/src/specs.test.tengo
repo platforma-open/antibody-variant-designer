@@ -300,10 +300,55 @@ TestParentsHumannessScore := func() {
 		byColumn.heavyHumannessScore.spec.annotations["pl7.app/description"], "OASis"))
 }
 
+TestAlignmentGroup := func() {
+	settings := specs.buildAlignmentSettings(BLOCK_ID)
+	byColumn := _byColumn(settings.columns)
+
+	// One axis holding both a parent's key and a variant's, which is the reason
+	// this group exists: the alignment viewer draws one row per key of one
+	// sequence column, so the two identities have to share a column to be two
+	// rows. Never `pl7.app/variantKey` — a parent row would then join onto the
+	// variant group's own columns.
+	test.isEqual(1, len(settings.axes))
+	test.isEqual("alignmentKey", settings.axes[0].column)
+	test.isEqual("String", settings.axes[0].spec.type)
+	test.isEqual(
+		"pl7.app/antibodyVariantDesigner/alignmentKey", settings.axes[0].spec.name)
+	// Two runs over one dataset hash the same sequences to the same keys.
+	test.isEqual(
+		BLOCK_ID,
+		settings.axes[0].spec.domain["pl7.app/antibodyVariantDesigner/designRunId"])
+
+	// The alphabet is what the viewer's colouring keys on; the feature tells this
+	// column apart from the variant group's own `pl7.app/sequence`.
+	test.isEqual("pl7.app/sequence", byColumn.sequence.spec.name)
+	test.isEqual("aminoacid", byColumn.sequence.spec.domain["pl7.app/alphabet"])
+	test.isEqual("alignment-row", byColumn.sequence.spec.domain["pl7.app/feature"])
+	test.isTrue(
+		byColumn.sequence.spec.domain["pl7.app/feature"] !=
+			_byColumn(specs.buildVariantsSettings(BLOCK_ID).columns).
+				variantSequence.spec.domain["pl7.app/feature"])
+
+	// Nothing a downstream block should discover and design against: this group
+	// feeds one rendering.
+	for a in ["pl7.app/isAnchor", "pl7.app/isMainSequence", "pl7.app/isAssemblingFeature"] {
+		test.isTrue(is_undefined(byColumn.sequence.spec.annotations[a]))
+	}
+
+	// The only thing on screen that says which row is the parent — the viewer
+	// sorts by axis value, a hash, and reads no ordering annotation.
+	// What makes it a label column is exactly this name over exactly one axis —
+	// `isLabelColumn` reads nothing else, and no `pl7.app/isLabelColumn`
+	// annotation exists in the SDK to declare it with.
+	test.isEqual("pl7.app/label", byColumn.label.spec.name)
+	test.isEqual(1, len(settings.axes))
+}
+
 TestEveryColumnCarriesTheBlockId := func() {
 	both := append(
 		specs.buildVariantsSettings(BLOCK_ID).columns,
 		specs.buildParentsSettings(BLOCK_ID, CLONOTYPE_AXIS).columns...)
+	both = append(both, specs.buildAlignmentSettings(BLOCK_ID).columns...)
 
 	// Reusing a shared segment is only safe because of this key: two blocks
 	// emit `pl7.app/liabilities/lowConfidence` and the block id keeps them
@@ -321,6 +366,7 @@ TestNoValueTypeIsBooleanOrObject := func() {
 	both := append(
 		specs.buildVariantsSettings(BLOCK_ID).columns,
 		specs.buildParentsSettings(BLOCK_ID, CLONOTYPE_AXIS).columns...)
+	both = append(both, specs.buildAlignmentSettings(BLOCK_ID).columns...)
 
 	// Booleans travel as "yes"/"no" strings and no column carries JSON.
 	for c in both {
@@ -338,11 +384,17 @@ TestEveryAxisAndColumnIsDescribed := func() {
 	// hidden parent axis, which a downstream consumer still reads.
 	variants := specs.buildVariantsSettings(BLOCK_ID)
 	parents := specs.buildParentsSettings(BLOCK_ID, CLONOTYPE_AXIS)
+	alignment := specs.buildAlignmentSettings(BLOCK_ID)
 
-	for a in append(variants.axes, parents.axes...) {
+	axes := append(variants.axes, parents.axes...)
+	axes = append(axes, alignment.axes...)
+	columns := append(variants.columns, parents.columns...)
+	columns = append(columns, alignment.columns...)
+
+	for a in axes {
 		test.isTrue(!is_undefined(a.spec.annotations["pl7.app/description"]))
 	}
-	for c in append(variants.columns, parents.columns...) {
+	for c in columns {
 		test.isTrue(!is_undefined(c.spec.annotations["pl7.app/label"]))
 		test.isTrue(!is_undefined(c.spec.annotations["pl7.app/description"]))
 	}

@@ -26,7 +26,10 @@ antifoldSw := assets.importSoftware("@platforma-open/milaboratories.antibody-var
 weightsAsset := assets.importAsset("@platforma-open/milaboratories.antifold-weights-assets:antifold")
 sapiensAsset := assets.importAsset("@platforma-open/milaboratories.sapiens-weights-assets:sapiens")
 
-TOLERANCE_DIR := "tolerance"
+TOLERANCE_FILE := "tolerance.tsv"
+// The human-repertoire prior is still one file per antibody, not a keyed artifact — this
+// row's format change reaches `residues`, `triaged` and `tolerance` alone.
+PRIOR_DIR := "priors"
 REJECTED_FILE := "rejected.tsv"
 
 // Where the weights asset is mounted, and the checkpoint path inside it that
@@ -41,7 +44,7 @@ WEIGHTS_FILE := "models/model.pt"
 SAPIENS_MOUNT := "sapiens"
 
 // The tag the RAM formula measures. Only the staged structures carry it: the
-// residues and triaged files are small per-antibody sidecars, and the model
+// residues and triaged artifacts are small dataset-wide blobs, and the model
 // never sees either of them.
 STRUCTURE_TAG := "structures"
 
@@ -102,14 +105,14 @@ ramFor := func(count) {
 // the developability piece's `index-and-scan.lib.tengo`.
 ARGS := {
 	"__options__,closed": "",
-	// Each a `workdir path -> blob` map, as `tpl.inputs()` flattens a staged
+	// A `workdir path -> blob` map, as `tpl.inputs()` flattens a staged
 	// directory.
 	pdbs: { any: validation.resource() },
-	residues: { any: validation.resource() },
+	residues: validation.resource(),
 	// Read only as a gate, never opened. An antibody absent here has no
 	// actionable liability, or was already named upstream, so the model call on
 	// it would be pure waste.
-	triaged: { any: validation.resource() },
+	triaged: validation.resource(),
 	// Both optional, and an override wins over the recipe: `ramFor` sizes the RAM
 	// and DEFAULT_CPU the cores for whichever dimension the caller leaves out.
 	// There is no `vram` — it sizes to the checkpoint, not to the
@@ -121,7 +124,7 @@ ARGS := {
 /**
  * Read AntiFold's per-position tolerance for every runnable antibody.
  *
- * @return {tolerance: fileSet, rejected: file, rejectedContent: content}
+ * @return {tolerance: file, priors: fileSet, rejected: file, rejectedContent: content}
  */
 run := func(args) {
 	validation.assertType(args, ARGS, "read-tolerance: bad args")
@@ -140,22 +143,25 @@ run := func(args) {
 		addAsset(weightsAsset, WEIGHTS_MOUNT).
 		addAsset(sapiensAsset, SAPIENS_MOUNT).
 		addFiles(args.pdbs, { tag: STRUCTURE_TAG }).
-		addFiles(args.residues).
-		addFiles(args.triaged).
+		addFile("residues.jsonl", args.residues).
+		addFile("triaged.jsonl", args.triaged).
 		arg("--pdb-dir").arg("pdbs").
-		arg("--residues-dir").arg("residues").
-		arg("--triaged-dir").arg("triaged").
+		arg("--residues").arg("residues.jsonl").
+		arg("--triaged").arg("triaged.jsonl").
 		arg("--weights").arg(WEIGHTS_FILE).
 		arg("--sapiens-weights").arg(SAPIENS_MOUNT).
-		arg("--out-tolerance-dir").arg(TOLERANCE_DIR).
+		arg("--out-tolerance").arg(TOLERANCE_FILE).
+		arg("--out-priors-dir").arg(PRIOR_DIR).
 		arg("--out-rejected").arg(REJECTED_FILE).
-		saveFileSet("tolerance", workdir.dirPattern(TOLERANCE_DIR)).
+		saveFile(TOLERANCE_FILE).
+		saveFileSet("priors", workdir.dirPattern(PRIOR_DIR)).
 		saveFile(REJECTED_FILE).
 		saveFileContent(REJECTED_FILE).
 		run()
 
 	return {
-		tolerance: result.getFileSet("tolerance"),
+		tolerance: result.getFile(TOLERANCE_FILE),
+		priors: result.getFileSet("priors"),
 		rejected: result.getFile(REJECTED_FILE),
 		rejectedContent: result.getFileContent(REJECTED_FILE)
 	}

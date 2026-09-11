@@ -1,20 +1,21 @@
-"""PDB text in, residues.json out — the two file formats around the residue index.
+"""PDB text in, the residues keyed artifact out — the two file formats around the residue
+index.
 
 `parse_pdb` reads ATOM records into `ParsedResidue` rows, and `residue_index.py` turns
-those into the `Residue` rows this module writes to residues.json. `index_and_scan.py`
-and `read_tolerance.py` read that file back independently.
+those into the `Residue` rows this module writes, one parent at a time, into the residues
+artifact. `index_and_scan.py` writes it; `read_tolerance.py` and `build_variants.py` read it
+back, one parent at a time, through the same store.
 
-Each boundary file gets one helper pair shared by producer and consumer. This ensures
+Each boundary artifact gets one helper pair shared by producer and consumer. This ensures
 reading and writing the same shape — a field added to one side cannot silently go missing
 on the other.
 """
 
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from engine import residue_index
+from engine import keyed_artifact, residue_index
 
 # The parsing shape below — `Atom`, `ParsedResidue`, `ParsedPdb`, `parse_pdb`
 # and the CDR regex — is copied from
@@ -216,10 +217,17 @@ def residue_from_json(row: dict) -> residue_index.Residue:
     )
 
 
-def write_residues(path: str, residues: list[residue_index.Residue]) -> None:
-    Path(path).write_text(json.dumps([residue_to_json(r) for r in residues]))
+def write_residues(
+    writer: keyed_artifact.KeyedWriter,
+    clonotype_key: str,
+    residues: list[residue_index.Residue],
+) -> None:
+    writer.write(clonotype_key, [residue_to_json(r) for r in residues])
 
 
-def read_residues(path: str) -> list[residue_index.Residue]:
-    rows = json.loads(Path(path).read_text())
-    return [residue_from_json(row) for row in rows]
+def open_residues(path: str) -> keyed_artifact.KeyedReader:
+    return keyed_artifact.read_jsonl(path)
+
+
+def residues_from_payload(payload: object) -> list[residue_index.Residue]:
+    return [residue_from_json(row) for row in payload]

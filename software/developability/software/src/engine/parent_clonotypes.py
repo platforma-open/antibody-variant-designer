@@ -1,20 +1,25 @@
-"""The clonotypes one run processes, recovered from a staged directory listing.
+"""The clonotypes one run processes.
 
-The workflow stages one file per clonotype and names it after the clonotype key,
-so the listing carries them and no separate index file has to. A workflow
-that wrote the list out instead would hold every key in one value resource,
-which the platform caps at 3 MiB — about 40k clonotypes.
+Steps 1 and 2 stage one PDB blob per clonotype, named after the clonotype key, so a directory
+listing recovers the roster with no separate index file. Step 3 stages no PDBs; its roster is
+the keys the triaged artifact already carries, in the order it carries them.
+
+A roster written as its own file would once have held every key in one value resource, capped
+by the platform at 3 MiB — about 40k clonotypes. That reasoning does not reach a saved file,
+which is a blob with no such cap, so step 3 reads its roster off the triaged artifact instead of
+a directory listing.
 
 A clonotype the upstream Structure Prediction block failed for has no entry in
 its PDB ResourceMap at all, so nothing stages a file for it and it is absent
-from this list. Absence upstream and absence here mean the same thing.
+from both rosters. Absence upstream and absence here mean the same thing.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
 
+from engine import keyed_artifact
+
 PDB_SUFFIX = ".pdb"
-ARTIFACT_SUFFIX = ".json"
 
 
 @dataclass(frozen=True)
@@ -55,3 +60,10 @@ def scan_parent_clonotypes(directory: str, suffix: str) -> list[ParentClonotype]
             if entry.is_file() and entry.name.endswith(suffix)
         )
     ]
+
+
+def read_parent_clonotypes(path: str) -> list[ParentClonotype]:
+    """The parents a keyed artifact carries, in the order it carries them — which is
+    clonotype-key order. Step 3 stages no PDBs, so the triaged artifact is its roster and its
+    gate, as the triaged directory was."""
+    return [ParentClonotype(clonotype_key=key) for key in keyed_artifact.keys_of(path)]

@@ -21,6 +21,7 @@ from engine import (
     liability_store,
     liability_triage,
     parent_clonotypes,
+    parent_sequence_store,
     rejection_store,
     residue_index,
     residue_store,
@@ -76,12 +77,15 @@ class ParentDesignResult:
     humanness_targets: list[residue_index.Residue] | None
     humanness_cleared: list[variant_candidates.Candidate]
     humanness_parent_scores: dict[str, float | None]
+    # The unedited V-domain string every variant of this parent is a substitution of,
+    # measured in every mode so a parent that shipped nothing still has one.
+    parent_sequence: str
 
 
 def process_one(
-    triaged_path: str,
-    tolerance_path: str,
-    residues_path: str,
+    triaged: list[liability_triage.Triaged],
+    tolerance_lookup: dict,
+    residues: list[residue_index.Residue],
     taxonomy: list[dict],
     mode: str,
     prior_path: str,
@@ -111,10 +115,6 @@ def process_one(
     liability edits still counts a framework position as humanised. Its parent scores are
     measured in every mode, so the score every variant carries has a baseline to be read
     against."""
-    tolerance_lookup = tolerance_store.read_tolerance_tsv(tolerance_path)
-    residues = residue_store.read_residues(residues_path)
-    triaged = liability_store.read_triaged(triaged_path)
-
     # The parent's own baseline, one score per in-scope chain, through the same gate a
     # candidate is judged by. Measured in every mode, before any objective runs: a liability
     # variant is scored too, and a score it cannot be compared against says nothing.
@@ -223,6 +223,7 @@ def process_one(
         # it ran and cleared nothing from — matching `humanness_targets`.
         humanness_cleared=cleared if run_mode.HUMANNESS in objectives else [],
         humanness_parent_scores=humanness_parent_scores,
+        parent_sequence=variant_ranking.build_variant_sequence(residues, ()),
     )
 
 
@@ -231,13 +232,12 @@ def main(argv: list[str] | None = None) -> int:
         description="Build candidate substitutions, re-scan each for new liabilities, and rank "
         "what survives."
     )
+    parser.add_argument("--triaged", required=True, help="index_and_scan.py's --out-triaged")
+    parser.add_argument("--tolerance", required=True, help="read_tolerance.py's --out-tolerance")
+    parser.add_argument("--residues", required=True, help="index_and_scan.py's --out-residues")
     parser.add_argument(
-        "--triaged-dir", required=True, help="index_and_scan.py's --out-triaged-dir"
+        "--priors-dir", required=True, help="read_tolerance.py's --out-priors-dir"
     )
-    parser.add_argument(
-        "--tolerance-dir", required=True, help="read_tolerance.py's --out-tolerance-dir"
-    )
-    parser.add_argument("--residues-dir", required=True, help="residue_index.py's output directory")
     parser.add_argument(
         "--definitions",
         required=True,
@@ -246,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out-variants", required=True)
     parser.add_argument("--out-rejected", required=True)
     parser.add_argument("--out-humanness", required=True)
+    parser.add_argument("--out-parent-sequences", required=True)
     parser.add_argument(
         "--fr-confidence-threshold",
         type=float,
@@ -342,21 +343,23 @@ def main(argv: list[str] | None = None) -> int:
         v for v in args.humanization_ignored_liabilities.split(",") if v
     )
 
-    triaged_dir = Path(args.triaged_dir)
-    tolerance_dir = Path(args.tolerance_dir)
-    residues_dir = Path(args.residues_dir)
+    triaged_reader = liability_store.open_triaged(args.triaged)
+    tolerance_reader = tolerance_store.open_tolerance(args.tolerance)
+    residues_reader = residue_store.open_residues(args.residues)
+    priors_dir = Path(args.priors_dir)
     variant_store.write_variants_header(args.out_variants)
     humanness_store.write_humanness_header(args.out_humanness)
+    parent_sequence_store.write_parent_sequences_header(args.out_parent_sequences)
 
     def one(entry: parent_clonotypes.ParentClonotype) -> list[tuple[str, str, str, str]] | None:
-        triaged_path = triaged_dir / f"{entry.stem}.json"
-        tolerance_path = tolerance_dir / f"{entry.stem}.tsv"
-        residues_path = residues_dir / f"{entry.stem}.json"
-        prior_path = tolerance_dir / f"{entry.stem}{PRIOR_SUFFIX}"
-        # The parent-clonotype scan already proves the triaged file, so these two are what is
-        # left to check. Either step may have named this antibody's rejection reason
+        triaged_payload = triaged_reader.take(entry.clonotype_key)
+        tolerance_payload = tolerance_reader.take(entry.clonotype_key)
+        residues_payload = residues_reader.take(entry.clonotype_key)
+        prior_path = priors_dir / f"{entry.stem}{PRIOR_SUFFIX}"
+        # The parent-clonotype roster already proves the triaged entry, so these two are what
+        # is left to check. Either step may have named this antibody's rejection reason
         # already. A row here would then count it twice.
-        if not (tolerance_path.is_file() and residues_path.is_file()):
+        if tolerance_payload is None or residues_payload is None:
             return None
         runs_humanness = args.run_mode in (
             run_mode.HUMANIZATION, run_mode.LIABILITIES_AND_HUMANIZATION,
@@ -365,9 +368,9 @@ def main(argv: list[str] | None = None) -> int:
             return None
 
         result = process_one(
-            str(triaged_path),
-            str(tolerance_path),
-            str(residues_path),
+            liability_store.triaged_from_payload(triaged_payload),
+            tolerance_store.lookup_from_payload(tolerance_payload),
+            residue_store.residues_from_payload(residues_payload),
             taxonomy,
             args.run_mode,
             str(prior_path),
@@ -400,14 +403,17 @@ def main(argv: list[str] | None = None) -> int:
             result.humanness_cleared,
             result.humanness_parent_scores,
         )
+        parent_sequence_store.append_parent_sequences_tsv(
+            args.out_parent_sequences,
+            entry.clonotype_key,
+            result.parent_sequence,
+        )
         return result.contribution_rows
 
-    # This step stages no PDBs, so `triaged` carries its parent clonotypes. It is also the
-    # gate `one` reads: an antibody triage left out can produce no variant, and
+    # This step stages no PDBs, so the triaged artifact carries its parent clonotypes. It is
+    # also the gate `one` reads: an antibody triage left out can produce no variant, and
     # an earlier step already named its reason.
-    parents = parent_clonotypes.scan_parent_clonotypes(
-        args.triaged_dir, parent_clonotypes.ARTIFACT_SUFFIX
-    )
+    parents = parent_clonotypes.read_parent_clonotypes(args.triaged)
     rc = antibody_batch.process_every_parent(parents, one, args.out_rejected)
     # This runs after the loop, not inside it, once every antibody's
     # working state is already released. Only the small survivor set

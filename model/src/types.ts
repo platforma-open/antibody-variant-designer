@@ -1,4 +1,8 @@
-import type { DatasetSelection, PlDataTableStateV2 } from "@platforma-sdk/model";
+import type {
+  DatasetSelection,
+  PlDataTableStateV2,
+  PlMultiSequenceAlignmentModel,
+} from "@platforma-sdk/model";
 
 /** A single dataset column reference, derived structurally from
  *  `DatasetSelection["primary"]["column"]` rather than imported by name —
@@ -50,6 +54,10 @@ export type BlockData = {
   /** Results-table sort / filter / column state, one per page. */
   variantsTableState: PlDataTableStateV2;
   liabilitiesTableState: PlDataTableStateV2;
+  /** The comparison view alignment: which sequence and label columns are shown,
+   *  the colour scheme, and which widgets are on. UI-only — the component owns
+   *  every key, and an empty object is what it reads as "the current defaults". */
+  alignmentModel: PlMultiSequenceAlignmentModel;
   /** Advanced Settings → Resource Allocation. Unset means the workflow's
    *  own fixed size for that step; set overrides it. Never data-scaled —
    *  the pipeline itself never derives these from input size, so a value

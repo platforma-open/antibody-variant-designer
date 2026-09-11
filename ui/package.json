@@ -11,6 +11,7 @@
     "check": "ts-builder check --target block-ui"
   },
   "dependencies": {
+    "@milaboratories/multi-sequence-alignment": "catalog:",
     "@milaboratories/structure-viewer": "catalog:",
     "@platforma-open/milaboratories.antibody-variant-designer.model": "workspace:*",
     "@platforma-sdk/model": "catalog:",

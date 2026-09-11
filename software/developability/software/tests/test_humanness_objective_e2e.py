@@ -12,11 +12,9 @@ import build_variants
 from engine import (
     design_objective,
     humanness_objective,
-    liability_store,
     liability_triage,
     rejection_store,
     residue_index,
-    residue_store,
     run_mode,
     tolerance_store,
     variant_store,
@@ -101,8 +99,8 @@ def _stage(batch, clonotype_key, offset, favored_aa):
     residues = _heavy_chain_residues()
     site_residue = next(r for r in residues if r.offset == offset)
 
-    liability_store.write_triaged(
-        str(Path(batch.dir("triaged"), f"{entry.stem}.json")),
+    batch.append_triaged(
+        entry.clonotype_key,
         [
             liability_triage.Triaged(
                 definition_id="framework_liability",
@@ -117,12 +115,11 @@ def _stage(batch, clonotype_key, offset, favored_aa):
             )
         ],
     )
-    tolerance_store.write_tolerance_tsv(
-        str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
-        [_steered_tolerance_row(site_residue, favored_aa)],
+    batch.append_tolerance(
+        entry.clonotype_key, [_steered_tolerance_row(site_residue, favored_aa)]
     )
-    residue_store.write_residues(str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues)
-    Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}").write_text(
+    batch.append_residues(entry.clonotype_key, residues)
+    Path(batch.dir("priors"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}").write_text(
         "chain\timgt\n"
     )
     return entry
@@ -177,13 +174,15 @@ def _run(batch, extra_args=None):
     out_rejected = batch.path("rejected.tsv")
 
     argv = [
-        "--triaged-dir", batch.dir("triaged"),
-        "--tolerance-dir", batch.dir("tolerance"),
-        "--residues-dir", batch.dir("residues"),
+        "--triaged", batch.path("triaged.jsonl"),
+        "--tolerance", batch.path("tolerance.tsv"),
+        "--residues", batch.path("residues.jsonl"),
+        "--priors-dir", batch.dir("priors"),
         "--definitions", definitions,
         "--out-variants", out_variants,
         "--out-rejected", out_rejected,
         "--out-humanness", batch.path("humanness.tsv"),
+        "--out-parent-sequences", batch.path("parent-sequences.tsv"),
         # Asking for more than the top-ranked substitution would let a
         # second, unsteered amino acid into the candidate set too.
         "--candidate-residues-per-position", "1",

@@ -8,7 +8,7 @@ not in `CLAUDE.md` must reach a named rejection here, never a partial index.
 import json
 from pathlib import Path
 
-from engine import liability_cysteines, liability_motifs, residue_store
+from engine import keyed_artifact, liability_cysteines, liability_motifs
 from index_and_scan import index_one
 from pdb_fixtures import make_pdb, platforma_cdr_remark
 
@@ -66,15 +66,12 @@ def run_structure(batch, text):
     cases assert the index phase's own contract — which reason a format gets
     and which residues come out researchable — not how a later phase reads
     it. `residues` is empty when the phase rejected it, because a rejected
-    antibody deliberately leaves no file."""
+    antibody deliberately leaves no entry in the artifact."""
     entry = batch.add("clonotype-1", text)
-    out_residues = Path(batch.dir("residues"), f"{entry.stem}.json")
-
-    reason = index_one(str(Path(batch.pdb_dir, entry.filename)), str(out_residues))
-
-    residues = (
-        residue_store.read_residues(str(out_residues)) if out_residues.is_file() else []
-    )
+    with keyed_artifact.KeyedWriter(batch.path("residues.jsonl")) as writer:
+        reason, residues = index_one(
+            str(Path(batch.pdb_dir, entry.filename)), writer, entry.clonotype_key
+        )
     return reason, residues
 
 
@@ -262,17 +259,18 @@ class TestCase6HalfMab:
 
 
 class TestBoundaryFileCarriesTheRole:
-    """`chain_role` crosses the boundary file — `index_and_scan.py` and `read_tolerance.py`
-    both re-read `residues.json` and apply the same scope rule the writer
+    """`chain_role` crosses the boundary artifact — `index_and_scan.py` and `read_tolerance.py`
+    both re-read the residues artifact and apply the same scope rule the writer
     applied."""
 
-    def test_chain_role_round_trips_through_residues_json(self, batch):
+    def test_chain_role_round_trips_through_the_residues_artifact(self, batch):
         _, residues = run_structure(
             batch,
             remarks("H", "H") + "\n" + make_pdb(v_domain("H") + c_domain("X", 129)),
         )
 
-        rows = json.loads(Path(batch.dir("residues"), "clonotype-1.json").read_text())
+        [line] = Path(batch.path("residues.jsonl")).read_text().splitlines()
+        rows = json.loads(line)["payload"]
 
         assert {row["chainRole"] for row in rows} == {"H", None}
         assert [r.chain_role for r in residues] == [row["chainRole"] for row in rows]

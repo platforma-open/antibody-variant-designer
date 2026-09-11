@@ -488,6 +488,99 @@ buildVariantsSettings := func(blockId) {
 }
 
 /**
+	* The PFrame `alignment-rows.tsv` becomes — the sequences the comparison
+	* view stacks, one row per parent and one per variant.
+	*
+	* One axis carrying BOTH identities, which is the whole reason this group
+	* exists rather than the variant group serving the view: the alignment viewer
+	* draws one row per key of one sequence column, so a parent keyed on its own
+	* axis could never be a row beside its variant. The `pl7.app/label` column is
+	* what tells the two apart on screen — the viewer sorts by axis value, a
+	* hash, and reads no ordering annotation.
+	*
+	* @param blockId: string - this run's block id, which the axis's domain and
+	*                 every column's context domain carry
+	*/
+buildAlignmentSettings := func(blockId) {
+	return {
+		axes: [
+			{
+				column: "alignmentKey",
+				// A name of this block's own, deliberately NOT `pl7.app/variantKey`:
+				// the column holds parent keys beside variant keys, so it is not the
+				// variant identity, and spelling it as one would join a parent row
+				// onto the variant group's columns.
+				//
+				// The `designRunId` domain is here for the reason
+				// `_variantKeyAxis` gives: two runs over one dataset hash the same
+				// sequences to the same keys, and without it their rows merge.
+				spec: {
+					type: "String",
+					name: "pl7.app/antibodyVariantDesigner/alignmentKey",
+					domain: {
+						"pl7.app/antibodyVariantDesigner/designRunId": blockId
+					},
+					annotations: {
+						"pl7.app/label": "Alignment row key",
+						"pl7.app/description": "Either a parent's clonotype key or a designed variant's, whichever this row's sequence belongs to. One column, because the comparison view stacks the two.",
+						"pl7.app/table/fontFamily": "monospace"
+					}
+				}
+			}
+		],
+		columns: [
+			{
+				column: "sequence",
+				// `pl7.app/alphabet: aminoacid` is what the viewer's column
+				// predicate and its chemical-property colouring key on. The feature
+				// domain differs from the variant group's `designed-variant` so the
+				// two `pl7.app/sequence` columns stay distinct specs.
+				//
+				// None of `variantColumns`' `isAnchor` / `isMainSequence` /
+				// `isAssemblingFeature` annotations belong here: this group is an
+				// input to one rendering, not a sequence a downstream block should
+				// discover and design against.
+				spec: {
+					name: "pl7.app/sequence",
+					valueType: "String",
+					domain: {
+						"pl7.app/feature": "alignment-row",
+						"pl7.app/alphabet": "aminoacid"
+					},
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "V-domain aa",
+						"pl7.app/description": "The V-domain sequence this row contributes to the alignment — a parent's wild type, or one designed variant of it. Every row of one parent's comparison is the same length: a design substitutes residues and never inserts or deletes.",
+						"pl7.app/table/visibility": "hidden"
+					}
+				}
+			},
+			{
+				column: "label",
+				// The viewer's row name, and the only thing on screen that says
+				// whether a row is the parent or the design.
+				//
+				// Being a label column is the name and the single axis, nothing
+				// else: `pl-model-common`'s `isLabelColumn` is
+				// `axesSpec.length === 1 && name === "pl7.app/label"`. There is no
+				// `pl7.app/isLabelColumn` annotation in the SDK — a column that
+				// declares one is read by nothing.
+				spec: {
+					name: "pl7.app/label",
+					valueType: "String",
+					contextDomain: { "pl7.app/blockId": blockId },
+					annotations: {
+						"pl7.app/label": "Alignment row",
+						"pl7.app/description": "`Parent <id>` or `Variant <id>` — which side of the comparison this row is."
+					}
+				}
+			}
+		],
+		storageFormat: "Parquet"
+	}
+}
+
+/**
 	* The PFrame `variant-parent-link.tsv` becomes — the variant-to-parent edge,
 	* one row per variant, value the sentinel `1`.
 	*
@@ -751,6 +844,7 @@ csvColumnOrder := func(blockId) {
 
 export ll.toStrict({
 	buildVariantsSettings: buildVariantsSettings,
+	buildAlignmentSettings: buildAlignmentSettings,
 	buildParentLinkSettings: buildParentLinkSettings,
 	buildParentsSettings: buildParentsSettings,
 	csvColumnOrder: csvColumnOrder

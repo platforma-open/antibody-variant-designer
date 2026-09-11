@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { PTableKey } from "@platforma-sdk/model";
+import { PlMultiSequenceAlignment } from "@milaboratories/multi-sequence-alignment";
+import type { PColumnIdAndSpec, PlSelectionModel, PTableKey } from "@platforma-sdk/model";
 import {
   PlAgDataTableV2,
   PlBlockPage,
@@ -93,6 +94,29 @@ function measuredNumber(cell: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// The two rows the alignment shows: the clicked variant and the parent it was
+// designed from, both already on the clicked row — the variant key is the
+// table's own axis value, the parent key one of the row's value columns.
+//
+// An incomplete state must collapse to the empty model rather than to a
+// one-key selection. An empty `selectedKeys` makes the viewer apply no filter
+// at all and render every sequence in the run, and a single surviving row makes
+// it render nothing; only the empty model reads as "nothing to compare".
+const msaSelection = computed<PlSelectionModel>(() => {
+  const row = selectedRow.value;
+  const axis = app.model.outputs.alignmentAxisSpec;
+  const parentKey = row?.values[VARIANT_VALUE_COLUMNS.parentClonotypeKey];
+  const variantKey = row?.axesKey[0];
+  if (!axis || parentKey === null || parentKey === undefined || variantKey === undefined) {
+    return { axesSpec: [], selectedKeys: [] };
+  }
+  return { axesSpec: [axis], selectedKeys: [[String(parentKey)], [String(variantKey)]] };
+});
+
+// The alignment frame carries exactly one sequence column, so the name alone
+// picks it out.
+const isSequenceColumn = (column: PColumnIdAndSpec) => column.spec?.name === "pl7.app/sequence";
+
 const comparisonProps = computed(() => {
   const row = selectedRow.value;
   if (!row) return undefined;
@@ -154,13 +178,37 @@ const comparisonProps = computed(() => {
       @row-double-clicked="openComparison"
     />
 
+    <!-- Full width, not the 60% a text-only detail panel needed: a paired Fv
+         alignment is two 480-residue rows side by side. -->
     <PlSlideModal
       :model-value="selectedRow !== undefined"
-      width="60%"
+      width="100%"
       @update:model-value="handleComparisonVisibility"
     >
       <template #title>Variant comparison</template>
       <VariantComparison v-if="comparisonProps" v-bind="comparisonProps" />
+      <div class="alignment">
+        <PlMultiSequenceAlignment
+          v-model="app.model.data.alignmentModel"
+          :sequence-column-predicate="isSequenceColumn"
+          :p-frame="app.model.outputs.alignmentPf"
+          :selection="msaSelection"
+        />
+      </div>
     </PlSlideModal>
   </PlBlockPage>
 </template>
+
+<style scoped>
+/* The viewer's own root is `flex: 1 1 0%`, and this modal is a column that the
+   comparison document already overflows — so a growing child is offered no
+   free space and resolves to zero height, rendering the rows into nothing.
+   A definite size on a non-growing wrapper is what gives it room; the modal
+   scrolls the rest. */
+.alignment {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  block-size: 520px;
+}
+</style>

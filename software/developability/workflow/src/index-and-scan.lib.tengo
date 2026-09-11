@@ -19,14 +19,12 @@ exec := import("@platforma-sdk/workflow-tengo:exec")
 execConstants := import("@platforma-sdk/workflow-tengo:exec.constants")
 validation := import("@platforma-sdk/workflow-tengo:validation")
 
-workdir := import(":workdir")
-
 f := exec.formula
 
 scanSw := assets.importSoftware("@platforma-open/milaboratories.antibody-variant-designer.software-developability:index-and-scan")
 
-RESIDUES_DIR := "residues"
-TRIAGED_DIR := "triaged"
+RESIDUES_FILE := "residues.jsonl"
+TRIAGED_FILE := "triaged.jsonl"
 LIABILITIES_FILE := "liabilities.tsv"
 REJECTED_FILE := "rejected.tsv"
 
@@ -119,7 +117,7 @@ ARGS := {
 /**
  * Index, scan and triage every antibody in the PDB index.
  *
- * @return {residues: fileSet, triaged: fileSet, liabilities: file,
+ * @return {residues: file, triaged: file, liabilities: file,
  *          rejected: file, rejectedContent: content}
  */
 run := func(args) {
@@ -139,8 +137,8 @@ run := func(args) {
 		addFile("definitions.json", args.definitions).
 		arg("--pdb-dir").arg("pdbs").
 		arg("--definitions").arg("definitions.json").
-		arg("--out-residues-dir").arg(RESIDUES_DIR).
-		arg("--out-triaged-dir").arg(TRIAGED_DIR).
+		arg("--out-residues").arg(RESIDUES_FILE).
+		arg("--out-triaged").arg(TRIAGED_FILE).
 		arg("--out-liabilities").arg(LIABILITIES_FILE).
 		arg("--out-rejected").arg(REJECTED_FILE).
 		arg("--rsasa-buried-cutoff").arg(string(args.params.rsasaBuriedCutoff)).
@@ -164,16 +162,16 @@ run := func(args) {
 	}
 
 	result := cmd.
-		saveFileSet("residues", workdir.dirPattern(RESIDUES_DIR)).
-		saveFileSet("triaged", workdir.dirPattern(TRIAGED_DIR)).
+		saveFile(RESIDUES_FILE).
+		saveFile(TRIAGED_FILE).
 		saveFile(LIABILITIES_FILE).
 		saveFile(REJECTED_FILE).
 		saveFileContent(REJECTED_FILE).
 		run()
 
 	return {
-		residues: result.getFileSet("residues"),
-		triaged: result.getFileSet("triaged"),
+		residues: result.getFile(RESIDUES_FILE),
+		triaged: result.getFile(TRIAGED_FILE),
 		liabilities: result.getFile(LIABILITIES_FILE),
 		rejected: result.getFile(REJECTED_FILE),
 		rejectedContent: result.getFileContent(REJECTED_FILE)

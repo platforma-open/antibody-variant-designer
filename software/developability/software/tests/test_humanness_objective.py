@@ -24,8 +24,8 @@ from engine import (
     liability_triage,
     parent_summary,
     residue_index,
-    residue_store,
     run_mode,
+    tolerance_store,
     variant_candidates,
 )
 
@@ -396,8 +396,6 @@ class TestPredictScoresReceivesLocalPaths:
 class TestNetworkGuardWrapsThePriorCall:
     def test_network_is_blocked_around_the_call(self, monkeypatch, tmp_path):
         residues = _two_chain_residues()
-        residues_path = tmp_path / "residues.json"
-        residue_store.write_residues(str(residues_path), residues)
 
         h_l_residues = [r for r in residues if r.chain_role in ("H", "L")]
         monkeypatch.setattr(
@@ -419,12 +417,16 @@ class TestNetworkGuardWrapsThePriorCall:
 
         monkeypatch.setattr(sapiens_prior, "_predict_scores", _open_a_socket)
 
-        with pytest.raises(RuntimeError, match="network access is disabled"):
+        with (
+            pytest.raises(RuntimeError, match="network access is disabled"),
+            tolerance_store.ToleranceWriter(str(tmp_path / "tolerance.tsv")) as writer,
+        ):
             read_tolerance.process_one(
                 "loaded-model",
                 "unused.pdb",
-                str(residues_path),
-                str(tmp_path / "tolerance.tsv"),
+                residues,
+                "clone-1",
+                writer,
                 str(tmp_path / "sapiens"),
                 str(tmp_path / "prior.tsv"),
             )

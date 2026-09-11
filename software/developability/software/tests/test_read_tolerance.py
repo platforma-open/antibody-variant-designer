@@ -19,14 +19,7 @@ import pytest
 import read_tolerance
 import sapiens_prior
 
-from engine import (
-    liability_store,
-    liability_triage,
-    rejection_store,
-    residue_index,
-    residue_store,
-    tolerance_store,
-)
+from engine import liability_triage, rejection_store, residue_index, tolerance_store
 
 AMINO_ACIDS = tolerance_store.AMINO_ACIDS
 
@@ -231,16 +224,12 @@ def _actionable(site):
 def _stage(batch, clonotype_key, residues=None, triaged=True):
     """Stage one antibody's PDB, residue index and triaged liabilities, as
     `index-and-scan` would. `triaged=False` is the antibody whose triage left
-    nothing actionable — indexed, but never written to `triaged/`."""
+    nothing actionable — indexed, but never carried into the triaged artifact."""
     entry = batch.add(clonotype_key, "ATOM")
     residues = residues if residues is not None else [_residue("H", 0, imgt="1", role="H")]
-    residue_store.write_residues(
-        str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
-    )
+    batch.append_residues(entry.clonotype_key, residues)
     if triaged:
-        liability_store.write_triaged(
-            str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_actionable(residues[:1])]
-        )
+        batch.append_triaged(entry.clonotype_key, [_actionable(residues[:1])])
     return entry
 
 
@@ -250,24 +239,34 @@ def _weights(batch):
     return str(path)
 
 
+def _tolerance_has(out_tolerance, clonotype_key):
+    return tolerance_store.open_tolerance(str(out_tolerance)).take(clonotype_key) is not None
+
+
 def _run(batch, weights):
-    out_dir = batch.dir("tolerance")
+    # Production code always opens a writer for each artifact, even over zero parents.
+    for name in ("residues.jsonl", "triaged.jsonl"):
+        path = Path(batch.path(name))
+        if not path.exists():
+            path.touch()
+    out_tolerance = batch.path("tolerance.tsv")
     out_rejected = batch.path("rejected.tsv")
 
     rc = read_tolerance.main(
         [
             "--pdb-dir", str(batch.pdb_dir),
-            "--residues-dir", batch.dir("residues"),
-            "--triaged-dir", batch.dir("triaged"),
+            "--residues", batch.path("residues.jsonl"),
+            "--triaged", batch.path("triaged.jsonl"),
             "--weights", weights,
             "--sapiens-weights", batch.dir("sapiens"),
-            "--out-tolerance-dir", out_dir,
+            "--out-tolerance", out_tolerance,
+            "--out-priors-dir", batch.dir("priors"),
             "--out-rejected", out_rejected,
         ]
     )
 
     assert rc == 0
-    return rejection_store.read_rejections(out_rejected), out_dir
+    return rejection_store.read_rejections(out_rejected), out_tolerance
 
 
 class TestMissingWeightsRaisesBeforeAnyModelCall:
@@ -284,11 +283,12 @@ class TestMissingWeightsRaisesBeforeAnyModelCall:
             read_tolerance.main(
                 [
                     "--pdb-dir", str(batch.pdb_dir),
-                    "--residues-dir", batch.dir("residues"),
-                    "--triaged-dir", batch.dir("triaged"),
+                    "--residues", batch.path("residues.jsonl"),
+                    "--triaged", batch.path("triaged.jsonl"),
                     "--weights", missing_weights,
                     "--sapiens-weights", batch.dir("sapiens"),
-                    "--out-tolerance-dir", batch.dir("tolerance"),
+                    "--out-tolerance", batch.path("tolerance.tsv"),
+                    "--out-priors-dir", batch.dir("priors"),
                     "--out-rejected", batch.path("rejected.tsv"),
                 ]
             )
@@ -312,18 +312,15 @@ class TestMainWiresTheJoinAndWritesTheTsv:
         monkeypatch.setattr(read_tolerance, "load_model", lambda _w: "loaded-model")
         monkeypatch.setattr(read_tolerance, "_run_model", _fake_run_model)
 
-        rejections, out_dir = _run(batch, _weights(batch))
+        rejections, out_tolerance = _run(batch, _weights(batch))
 
         assert rejections == [("clone-1", "", "", "parent", "liability")]
         assert captured["chains"].heavy == "H"
         assert captured["chains"].light is None
         assert captured["chains"].nanobody is True
 
-        rows = list(
-            csv.DictReader(
-                io.StringIO(Path(out_dir, f"{entry.stem}.tsv").read_text()), delimiter="\t"
-            )
-        )
+        rows = list(csv.DictReader(io.StringIO(Path(out_tolerance).read_text()), delimiter="\t"))
+        assert rows[0]["clonotypeKey"] == entry.clonotype_key
         assert rows[0]["chain"] == "H"
         assert rows[0]["imgt"] == "1"
         assert rows[0]["perplexity"] == "4.2"
@@ -376,16 +373,16 @@ class TestBatchCli:
         monkeypatch.setattr(read_tolerance, "load_model", lambda _w: "loaded-model")
         monkeypatch.setattr(read_tolerance, "_run_model", _fake_run_model)
 
-        rejections, out_dir = _run(batch, _weights(batch))
+        rejections, out_tolerance = _run(batch, _weights(batch))
 
         assert rejections == [
             ("a-first", "", "", "parent", "liability"),
             ("b-middle", "backend-failed", "torch exploded", "parent", "liability"),
             ("c-last", "", "", "parent", "liability"),
         ]
-        assert Path(out_dir, "a-first.tsv").is_file()
-        assert not Path(out_dir, "b-middle.tsv").exists()
-        assert Path(out_dir, "c-last.tsv").is_file()
+        assert _tolerance_has(out_tolerance, "a-first")
+        assert not _tolerance_has(out_tolerance, "b-middle")
+        assert _tolerance_has(out_tolerance, "c-last")
         # AntiFold swallows its own exceptions and exits 0, so the clonotype
         # key reaching stderr is the only trace back to the cause.
         assert "b-middle" in capsys.readouterr().err
@@ -428,11 +425,11 @@ class TestBatchCli:
             or [_logits_row("H", "1", perplexity=4.2)],
         )
 
-        rejections, out_dir = _run(batch, _weights(batch))
+        rejections, out_tolerance = _run(batch, _weights(batch))
 
         assert rejections == [("actionable", "", "", "parent", "liability")]
         assert [Path(p).stem for p in seen] == ["actionable"]
-        assert not Path(out_dir, "nothing-to-fix.tsv").exists()
+        assert not _tolerance_has(out_tolerance, "nothing-to-fix")
 
     def test_a_batch_gated_out_in_full_never_loads_the_checkpoint(self, batch, monkeypatch):
         _stage(batch, "nothing-to-fix", triaged=False)

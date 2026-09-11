@@ -97,22 +97,35 @@ def _tolerance_rows():
     ]
 
 
+def _read_staged(batch, entry):
+    """The three predecessors `build_variants.process_one` now takes as objects, read back
+    exactly as `build_variants.main` reads them — through each store's own reader."""
+    triaged_payload = liability_store.open_triaged(batch.path("triaged.jsonl")).take(
+        entry.clonotype_key
+    )
+    tolerance_payload = tolerance_store.open_tolerance(batch.path("tolerance.tsv")).take(
+        entry.clonotype_key
+    )
+    residues_payload = residue_store.open_residues(batch.path("residues.jsonl")).take(
+        entry.clonotype_key
+    )
+    return (
+        liability_store.triaged_from_payload(triaged_payload),
+        tolerance_store.lookup_from_payload(tolerance_payload),
+        residue_store.residues_from_payload(residues_payload),
+    )
+
+
 def _stage(batch, clonotype_key, with_prior=False):
     """Stage one antibody's triaged liabilities, tolerance table and residue
     index — the three predecessors this step joins. `with_prior` also
     stages the (real, if uninformative) prior TSV mode 2 requires."""
     entry = batch.add(clonotype_key)
-    liability_store.write_triaged(
-        str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_triaged(_ng_site())]
-    )
-    tolerance_store.write_tolerance_tsv(
-        str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")), _tolerance_rows()
-    )
-    residue_store.write_residues(
-        str(Path(batch.dir("residues"), f"{entry.stem}.json")), _ng_site()
-    )
+    batch.append_triaged(entry.clonotype_key, [_triaged(_ng_site())])
+    batch.append_tolerance(entry.clonotype_key, _tolerance_rows())
+    batch.append_residues(entry.clonotype_key, _ng_site())
     if with_prior:
-        Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}").write_text(
+        Path(batch.dir("priors"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}").write_text(
             "chain\timgt\n"
         )
     return entry
@@ -165,18 +178,14 @@ def _stage_paired(batch, clonotype_key, non_human_prior_score):
     antibody, for the two humanness-score columns to tell apart."""
     entry = batch.add(clonotype_key)
     residues = [_framework_residue(), *_ng_site(), _light_framework_residue()]
-    liability_store.write_triaged(
-        str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_triaged(_ng_site())]
-    )
-    tolerance_store.write_tolerance_tsv(
-        str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+    batch.append_triaged(entry.clonotype_key, [_triaged(_ng_site())])
+    batch.append_tolerance(
+        entry.clonotype_key,
         [*_tolerance_rows(), {"imgt": "1", **_row(["D", "Q", "A"], "N", 3.0)}],
     )
-    residue_store.write_residues(
-        str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
-    )
+    batch.append_residues(entry.clonotype_key, residues)
     _write_prior_tsv(
-        Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"),
+        Path(batch.dir("priors"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"),
         non_human_prior_score,
     )
     return entry
@@ -194,41 +203,49 @@ def _stage_mixed(
     triaged liability at all, leaving the liability objective nothing to design against."""
     entry = batch.add(clonotype_key)
     residues = [_framework_residue(), *_ng_site()]
-    liability_store.write_triaged(
-        str(Path(batch.dir("triaged"), f"{entry.stem}.json")),
+    batch.append_triaged(
+        entry.clonotype_key,
         [_triaged(_ng_site())] if with_liability else [],
     )
     framework_rows = (
         [{"imgt": "1", **_row(["D", "Q", "A"], "N", 3.0)}] if score_framework_position else []
     )
-    tolerance_store.write_tolerance_tsv(
-        str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+    batch.append_tolerance(
+        entry.clonotype_key,
         [*_tolerance_rows(), *framework_rows],
     )
-    residue_store.write_residues(
-        str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
-    )
+    batch.append_residues(entry.clonotype_key, residues)
     _write_prior_tsv(
-        Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"),
+        Path(batch.dir("priors"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"),
         non_human_prior_score,
     )
     return entry
 
 
 def _run(batch, extra_args=None):
+    # Production code always opens a writer for each artifact, even over zero parents. A test
+    # that never staged anyone must see the same empty-but-present files.
+    for name in ("triaged.jsonl", "tolerance.tsv", "residues.jsonl"):
+        path = Path(batch.path(name))
+        if not path.exists():
+            path.touch()
+    batch.dir("priors")
+
     definitions = batch.definitions(TAXONOMY)
     out_variants = batch.path("variants.tsv")
     out_rejected = batch.path("rejected.tsv")
 
     rc = build_variants.main(
         [
-            "--triaged-dir", batch.dir("triaged"),
-            "--tolerance-dir", batch.dir("tolerance"),
-            "--residues-dir", batch.dir("residues"),
+            "--triaged", batch.path("triaged.jsonl"),
+            "--tolerance", batch.path("tolerance.tsv"),
+            "--residues", batch.path("residues.jsonl"),
+            "--priors-dir", batch.dir("priors"),
             "--definitions", definitions,
             "--out-variants", out_variants,
             "--out-rejected", out_rejected,
             "--out-humanness", batch.path("humanness.tsv"),
+            "--out-parent-sequences", batch.path("parent-sequences.tsv"),
         ]
         + (extra_args or [])
     )
@@ -371,16 +388,14 @@ class TestTheTwoEditCapFlags:
             _residue("H", 23, "H", imgt="23", region="FR1"),
         ]
         all_residues = [*liability_residues, *framework_residues]
-        liability_store.write_triaged(str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [])
-        tolerance_store.write_tolerance_tsv(
-            str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+        batch.append_triaged(entry.clonotype_key, [])
+        batch.append_tolerance(
+            entry.clonotype_key,
             [{"imgt": r.imgt, **_row(["D", "Q", "A"], r.wild_type, 3.0)} for r in all_residues],
         )
-        residue_store.write_residues(
-            str(Path(batch.dir("residues"), f"{entry.stem}.json")), all_residues
-        )
+        batch.append_residues(entry.clonotype_key, all_residues)
         _write_prior_tsv(
-            Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"), 0.9
+            Path(batch.dir("priors"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"), 0.9
         )
         return liability_residues, framework_residues
 
@@ -502,16 +517,55 @@ class TestDatasetWideVariantsTsv:
         assert written == []
 
 
+def _parent_sequences(batch):
+    with Path(batch.path("parent-sequences.tsv")).open(newline="") as fh:
+        rows = csv.DictReader(fh, delimiter="\t")
+        return {row["clonotypeKey"]: row["parentSequence"] for row in rows}
+
+
+class TestParentSequencesTsv:
+    """The wild-type string the comparison view stacks above a variant. Its whole
+    value is being readable against `variantSequence`, so that is what is pinned."""
+
+    def test_a_parents_sequence_differs_from_its_variants_only_where_the_edits_are(self, batch):
+        _stage(batch, "clone-1")
+
+        _, written = _run(batch)
+        parents = _parent_sequences(batch)
+
+        assert set(parents) == {"clone-1"}
+        parent = parents["clone-1"]
+        assert len(written) > 0
+        for _, _, variant in written:
+            designed = variant.variant_sequence
+            # Equal length is what lets a reader set the two side by side: a design
+            # substitutes residues and never inserts or deletes.
+            assert len(designed) == len(parent)
+            differing = [i for i in range(len(parent)) if parent[i] != designed[i]]
+            assert len(differing) == len(variant.changed_positions.split(","))
+
+    def test_a_parent_that_ships_no_variant_still_has_a_row(self, batch):
+        # Same fixture the rejection case uses: the objective finds a target and no
+        # candidate clears the gate. A parent invisible here would be a parent the
+        # comparison view could never name.
+        _stage(batch, "clone-1")
+        _, written = _run(batch, ["--candidate-residues-per-position", "0"])
+
+        assert written == []
+        assert set(_parent_sequences(batch)) == {"clone-1"}
+
+    def test_an_empty_index_leaves_a_header_only_file(self, batch):
+        _run(batch)
+
+        assert _parent_sequences(batch) == {}
+
+
 class TestNoReReportingAcrossPredecessors:
     def test_an_antibody_missing_any_predecessors_file_gets_no_row(self, batch):
         _stage(batch, "complete")
         partial = batch.add("no-tolerance")
-        liability_store.write_triaged(
-            str(Path(batch.dir("triaged"), f"{partial.stem}.json")), [_triaged(_ng_site())]
-        )
-        residue_store.write_residues(
-            str(Path(batch.dir("residues"), f"{partial.stem}.json")), _ng_site()
-        )
+        batch.append_triaged(partial.clonotype_key, [_triaged(_ng_site())])
+        batch.append_residues(partial.clonotype_key, _ng_site())
 
         rejections, written = _run(batch)
 
@@ -526,13 +580,15 @@ class TestMainRequiresTheTaxonomy:
         with pytest.raises(SystemExit, match=missing):
             build_variants.main(
                 [
-                    "--triaged-dir", batch.dir("triaged"),
-                    "--tolerance-dir", batch.dir("tolerance"),
-                    "--residues-dir", batch.dir("residues"),
+                    "--triaged", batch.path("triaged.jsonl"),
+                    "--tolerance", batch.path("tolerance.tsv"),
+                    "--residues", batch.path("residues.jsonl"),
+                    "--priors-dir", batch.dir("priors"),
                     "--definitions", missing,
                     "--out-variants", batch.path("variants.tsv"),
                     "--out-rejected", batch.path("rejected.tsv"),
                     "--out-humanness", batch.path("humanness.tsv"),
+                    "--out-parent-sequences", batch.path("parent-sequences.tsv"),
                 ]
             )
 
@@ -569,13 +625,15 @@ class TestRunModeSelectsObjectives:
         with pytest.raises(SystemExit):
             build_variants.main(
                 [
-                    "--triaged-dir", batch.dir("triaged"),
-                    "--tolerance-dir", batch.dir("tolerance"),
-                    "--residues-dir", batch.dir("residues"),
+                    "--triaged", batch.path("triaged.jsonl"),
+                    "--tolerance", batch.path("tolerance.tsv"),
+                    "--residues", batch.path("residues.jsonl"),
+                    "--priors-dir", batch.dir("priors"),
                     "--definitions", batch.definitions(TAXONOMY),
                     "--out-variants", out_variants,
                     "--out-rejected", batch.path("rejected.tsv"),
                     "--out-humanness", batch.path("humanness.tsv"),
+                    "--out-parent-sequences", batch.path("parent-sequences.tsv"),
                     "--run-mode", "misspelled-mode",
                 ]
             )
@@ -610,11 +668,9 @@ class TestRunModeSelectsObjectives:
             ],
         )
 
-        triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
-        tolerance_path = str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv"))
-        residues_path = str(Path(batch.dir("residues"), f"{entry.stem}.json"))
+        triaged_list, tolerance_lookup, residues = _read_staged(batch, entry)
         result = build_variants.process_one(
-            triaged_path, tolerance_path, residues_path, TAXONOMY,
+            triaged_list, tolerance_lookup, residues, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
             10, 20, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
@@ -632,16 +688,12 @@ class TestRunModeSelectsObjectives:
         entry = batch.add("clone-1")
         cdr_site = _ng_site()
         framework = _residue("H", 20, "K", imgt="21", region="FR1")
-        liability_store.write_triaged(
-            str(Path(batch.dir("triaged"), f"{entry.stem}.json")), [_triaged(cdr_site)]
-        )
-        tolerance_store.write_tolerance_tsv(
-            str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+        batch.append_triaged(entry.clonotype_key, [_triaged(cdr_site)])
+        batch.append_tolerance(
+            entry.clonotype_key,
             [*_tolerance_rows(), {"imgt": "21", **_row(["R", "T", "V"], "K", 4.0)}],
         )
-        residue_store.write_residues(
-            str(Path(batch.dir("residues"), f"{entry.stem}.json")), [*cdr_site, framework]
-        )
+        batch.append_residues(entry.clonotype_key, [*cdr_site, framework])
 
         clearing = design_objective.Objective(
             select_target_positions=lambda residues, taxonomy: [],
@@ -674,10 +726,9 @@ class TestRunModeSelectsObjectives:
             ],
         )
 
+        triaged_list, tolerance_lookup, residues = _read_staged(batch, entry)
         result = build_variants.process_one(
-            str(Path(batch.dir("triaged"), f"{entry.stem}.json")),
-            str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
-            str(Path(batch.dir("residues"), f"{entry.stem}.json")),
+            triaged_list, tolerance_lookup, residues,
             TAXONOMY,
             "liabilities + humanization",
             "unused-prior-path",
@@ -723,11 +774,9 @@ class TestRunModeSelectsObjectives:
             ],
         )
 
-        triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
-        tolerance_path = str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv"))
-        residues_path = str(Path(batch.dir("residues"), f"{entry.stem}.json"))
+        triaged_list, tolerance_lookup, residues = _read_staged(batch, entry)
         result = build_variants.process_one(
-            triaged_path, tolerance_path, residues_path, TAXONOMY,
+            triaged_list, tolerance_lookup, residues, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
             10, 20, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
@@ -769,11 +818,9 @@ class TestRunModeSelectsObjectives:
             ),
         )
 
-        triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
-        tolerance_path = str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv"))
-        residues_path = str(Path(batch.dir("residues"), f"{entry.stem}.json"))
+        triaged_list, tolerance_lookup, residues = _read_staged(batch, entry)
         result = build_variants.process_one(
-            triaged_path, tolerance_path, residues_path, TAXONOMY,
+            triaged_list, tolerance_lookup, residues, TAXONOMY,
             "liabilities + humanization", "unused-prior-path",
             10, 20, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
@@ -787,11 +834,9 @@ class TestRunModeSelectsObjectives:
     def test_a_mode_that_never_runs_humanization_leaves_the_targets_absent(self, batch):
         entry = _stage(batch, "clone-1")
 
-        triaged_path = str(Path(batch.dir("triaged"), f"{entry.stem}.json"))
-        tolerance_path = str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv"))
-        residues_path = str(Path(batch.dir("residues"), f"{entry.stem}.json"))
+        triaged_list, tolerance_lookup, residues = _read_staged(batch, entry)
         result = build_variants.process_one(
-            triaged_path, tolerance_path, residues_path, TAXONOMY,
+            triaged_list, tolerance_lookup, residues, TAXONOMY,
             "liabilities", "unused-prior-path",
             10, 20, 3, 1.0, 1.0, 0.05, 10, 3.0, 20,
         )
@@ -940,18 +985,14 @@ def _stage_liability_mix(batch, clonotype_key, triaged):
     selects nothing and every emitted variant is the liability objective's own."""
     entry = batch.add(clonotype_key)
     residues = [_framework_residue(), *_ng_site()]
-    liability_store.write_triaged(
-        str(Path(batch.dir("triaged"), f"{entry.stem}.json")), triaged
-    )
-    tolerance_store.write_tolerance_tsv(
-        str(Path(batch.dir("tolerance"), f"{entry.stem}.tsv")),
+    batch.append_triaged(entry.clonotype_key, triaged)
+    batch.append_tolerance(
+        entry.clonotype_key,
         [*_tolerance_rows(), {"imgt": "1", **_row(["D", "Q", "A"], "N", 3.0)}],
     )
-    residue_store.write_residues(
-        str(Path(batch.dir("residues"), f"{entry.stem}.json")), residues
-    )
+    batch.append_residues(entry.clonotype_key, residues)
     _write_prior_tsv(
-        Path(batch.dir("tolerance"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"), 0.9
+        Path(batch.dir("priors"), f"{entry.stem}{build_variants.PRIOR_SUFFIX}"), 0.9
     )
     return entry
 

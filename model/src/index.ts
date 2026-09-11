@@ -1,5 +1,6 @@
 import type {
   AxisId,
+  AxisSpec,
   BlockRenderCtx,
   DatasetOption,
   InferOutputsType,
@@ -65,6 +66,7 @@ const dataModel = new DataModelBuilder().from<BlockData>("v1").init(() => ({
   ...BLOCK_DATA_DEFAULTS,
   variantsTableState: createPlDataTableStateV2(),
   liabilitiesTableState: createPlDataTableStateV2(),
+  alignmentModel: {},
 }));
 
 const STRUCTURE_PDB_COLUMN = "pl7.app/structure/pdb";
@@ -191,6 +193,14 @@ function tableFromAccessorOutput(
     },
     tableState,
   });
+}
+
+/** The alignment group's PColumns, or undefined when the result was computed by
+ *  a build that did not yet write this output. */
+function alignmentColumns(ctx: BlockRenderCtx<BlockArgs, BlockData>) {
+  return ctx.outputs
+    ?.resolve({ field: "alignmentData", assertFieldType: "Input", allowPermanentAbsence: true })
+    ?.getPColumns();
 }
 
 export const platforma = BlockModelV3.create(dataModel)
@@ -365,6 +375,31 @@ export const platforma = BlockModelV3.create(dataModel)
     const axis = pCols?.[0]?.spec.axesSpec[0];
     if (axis === undefined) return undefined;
     return getAxisId(axis);
+  })
+  // The comparison view's alignment frame: one row per parent and one per
+  // variant, on the single axis `buildAlignmentSettings` declares.
+  //
+  // `ctx.createPFrame`, not `createPFrameForGraphs`: the latter auto-enriches
+  // from the result pool, which is the reach that crashes this block's renders
+  // with `Key not found ctl/file/blobInfo` (see `tableFromAccessorOutput`
+  // above). Nothing needs enriching here — the group ships its own label column.
+  //
+  // `allowPermanentAbsence`, unlike the two table outputs above: this output
+  // name is newer than the results already in some projects, and a bare
+  // `resolve` of a name the computing build never wrote throws "Service or
+  // input field not found" and takes the whole render down — see
+  // `rejectedClonotypes` below for the same guard and the reason
+  // `assertFieldType` must be `Input`.
+  .output("alignmentPf", (ctx): PFrameHandle | undefined => {
+    const pCols = alignmentColumns(ctx);
+    if (pCols === undefined || pCols.length === 0) return undefined;
+    return ctx.createPFrame(pCols);
+  })
+  // The full axis spec, not an `AxisId`: it is what the page hands the viewer as
+  // `PlSelectionModel.axesSpec`, and a selection whose axis does not match the
+  // frame's own silently selects nothing.
+  .output("alignmentAxisSpec", (ctx): AxisSpec | undefined => {
+    return alignmentColumns(ctx)?.[0]?.spec.axesSpec[0];
   })
   .sections(() => [
     { type: "link", href: "/parents", label: "Parents" },

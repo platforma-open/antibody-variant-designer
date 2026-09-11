@@ -19,8 +19,9 @@ variantsSw := assets.importSoftware("@platforma-open/milaboratories.antibody-var
 VARIANTS_FILE := "variants.tsv"
 REJECTED_FILE := "rejected.tsv"
 HUMANNESS_FILE := "humanness.tsv"
+PARENT_SEQUENCES_FILE := "parent-sequences.tsv"
 
-// The tag the RAM formula measures. All three staged directories carry it: an
+// The tag the RAM formula measures. All three staged blobs carry it: an
 // iteration reads one antibody's tolerance matrix, its residues and its triaged
 // liabilities together, and none of the three dominates the other two.
 PER_ANTIBODY_TAG := "per-antibody"
@@ -60,7 +61,7 @@ FALLBACK_RAM := "4GiB"
 DEFAULT_CPU := 2
 
 /**
- * The RAM to ask for, given how many antibodies the staged files hold and how
+ * The RAM to ask for, given how many antibodies the run holds and how
  * many variants each is allowed to keep.
  *
  * Two terms, because the step has two peaks. `antibody_batch.py` runs one
@@ -89,12 +90,16 @@ ramFor := func(count, variantsPerParent) {
 // `index-and-scan.lib.tengo`.
 ARGS := {
 	"__options__,closed": "",
-	// Each a `workdir path -> blob` map, as `tpl.inputs()` flattens a staged
-	// directory.
-	triaged: { any: validation.resource() },
-	tolerance: { any: validation.resource() },
-	residues: { any: validation.resource() },
+	triaged: validation.resource(),
+	tolerance: validation.resource(),
+	residues: validation.resource(),
+	// The human-repertoire prior is still a directory of per-antibody files, staged as a
+	// fileSet the same way every input here was staged before this row.
+	priors: { any: validation.resource() },
 	definitions: validation.resource(),
+	// The parents step 1 staged. An upper bound on the parents this step
+	// reads, because step 1 rejects some — see `ramFor`.
+	parentCount: "number",
 	params: {
 		"__options__,closed": "",
 		runMode: "string",
@@ -156,12 +161,13 @@ paramArgsFor := func(params) {
 /**
  * Build, gate and rank the variants of every antibody in the PDB index.
  *
- * @return {variants: file, humanness: file, rejected: file, rejectedContent: content}
+ * @return {variants: file, humanness: file, parentSequences: file, rejected: file,
+ *          rejectedContent: content}
  */
 run := func(args) {
 	validation.assertType(args, ARGS, "build-variants: bad args")
 
-	recipeRam := ramFor(len(args.triaged), args.params.variantsPerParent)
+	recipeRam := ramFor(args.parentCount, args.params.variantsPerParent)
 
 	cmd := exec.builder().
 		software(variantsSw).
@@ -173,17 +179,20 @@ run := func(args) {
 			}
 		}).
 		printErrStreamToStdout().
-		addFiles(args.triaged, { tag: PER_ANTIBODY_TAG }).
-		addFiles(args.tolerance, { tag: PER_ANTIBODY_TAG }).
-		addFiles(args.residues, { tag: PER_ANTIBODY_TAG }).
+		addFile("triaged.jsonl", args.triaged, { tag: PER_ANTIBODY_TAG }).
+		addFile("tolerance.tsv", args.tolerance, { tag: PER_ANTIBODY_TAG }).
+		addFile("residues.jsonl", args.residues, { tag: PER_ANTIBODY_TAG }).
+		addFiles(args.priors).
 		addFile("definitions.json", args.definitions).
-		arg("--triaged-dir").arg("triaged").
-		arg("--tolerance-dir").arg("tolerance").
-		arg("--residues-dir").arg("residues").
+		arg("--triaged").arg("triaged.jsonl").
+		arg("--tolerance").arg("tolerance.tsv").
+		arg("--residues").arg("residues.jsonl").
+		arg("--priors-dir").arg("priors").
 		arg("--definitions").arg("definitions.json").
 		arg("--out-variants").arg(VARIANTS_FILE).
 		arg("--out-rejected").arg(REJECTED_FILE).
-		arg("--out-humanness").arg(HUMANNESS_FILE)
+		arg("--out-humanness").arg(HUMANNESS_FILE).
+		arg("--out-parent-sequences").arg(PARENT_SEQUENCES_FILE)
 
 	for a in paramArgsFor(args.params) {
 		cmd = cmd.arg(a)
@@ -192,6 +201,7 @@ run := func(args) {
 	result := cmd.
 		saveFile(VARIANTS_FILE).
 		saveFile(HUMANNESS_FILE).
+		saveFile(PARENT_SEQUENCES_FILE).
 		saveFile(REJECTED_FILE).
 		saveFileContent(REJECTED_FILE).
 		run()
@@ -199,6 +209,7 @@ run := func(args) {
 	return {
 		variants: result.getFile(VARIANTS_FILE),
 		humanness: result.getFile(HUMANNESS_FILE),
+		parentSequences: result.getFile(PARENT_SEQUENCES_FILE),
 		rejected: result.getFile(REJECTED_FILE),
 		rejectedContent: result.getFileContent(REJECTED_FILE)
 	}

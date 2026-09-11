@@ -1,7 +1,7 @@
 """The `index-and-scan` entrypoint: indexes residues, scans them for
 liabilities, and triages each hit.
 
-Writes the residue index, one `triaged.json` per antibody, and the
+Writes the residues and triaged keyed artifacts, and the
 dataset-wide `liabilities.tsv`.
 
 The four phases run in one exec because a verdict needs exposure and
@@ -19,6 +19,7 @@ from pathlib import Path
 from engine import (
     antibody_batch,
     design_objective,
+    keyed_artifact,
     liability_objective,
     liability_store,
     liability_triage,
@@ -136,40 +137,48 @@ def _confidence_lookup(
     return lookup
 
 
-def index_one(pdb_path: str, out_residues: str) -> str:
-    """Index one antibody and return the rejection reason, or empty string on success.
+def index_one(
+    pdb_path: str, residues_writer: keyed_artifact.KeyedWriter, clonotype_key: str
+) -> tuple[str, list[residue_index.Residue]]:
+    """Index one antibody and return its rejection reason (empty on success) alongside its
+    residues — `[]` on a rejection.
 
-    out_residues is written only on success. A missing file indicates an
-    earlier phase rejected this antibody; an empty file would break that
-    pattern (double-counting).
-    """
+    A rejected antibody gets no row in the residues artifact. A missing entry indicates an
+    earlier phase rejected this antibody; an empty one would break that pattern
+    (double-counting)."""
     parsed = residue_store.read_pdb(pdb_path)
     if not parsed.chain_order:
-        return "no-structure"
+        return "no-structure", []
 
     if not residue_index.is_imgt_numbered(parsed):
-        return "structure-not-imgt"
+        return "structure-not-imgt", []
 
     if residue_index.multi_domain_chain(parsed) is not None:
-        return "structure-multi-domain-chain"
+        return "structure-multi-domain-chain", []
 
     residues = residue_index.index_residues(parsed)
     # The index keeps every residue, including a constant-domain, antigen,
     # or second-arm residue, so exposure and AntiFold still see it. The
-    # rejection fires only when nothing at all is researchable. A file of pure
+    # rejection fires only when nothing at all is researchable. A parent of pure
     # constant region therefore never reaches the scan phase as a silent
     # empty scan.
     if not any(r.in_scope for r in residues):
-        return "no-researchable-residue"
+        return "no-researchable-residue", []
 
-    residue_store.write_residues(out_residues, residues)
-    return ""
+    residue_store.write_residues(residues_writer, clonotype_key, residues)
+    # Read back through the same store rather than from a path — there is no longer a
+    # per-parent file to open, only the shared writer's own conversion.
+    reread = residue_store.residues_from_payload(
+        [residue_store.residue_to_json(r) for r in residues]
+    )
+    return "", reread
 
 
 def process_one(
     pdb_path: str,
-    out_residues: str,
-    out_triaged: str,
+    residues_writer: keyed_artifact.KeyedWriter,
+    triaged_writer: keyed_artifact.KeyedWriter,
+    clonotype_key: str,
     taxonomy: list[dict],
     objective: design_objective.Objective,
     confidence_records: list[dict] | None,
@@ -181,19 +190,17 @@ def process_one(
     """Index, scan, and triage one antibody.
 
     Returns rejection reason (empty on pass) and every triaged liability (the
-    Parents page needs declined ones too). out_triaged holds only "exposed"
+    Parents page needs declined ones too). The triaged artifact holds only "exposed"
     verdicts — the set the re-scan gate reads.
 
     Index phase short-circuits scan; a non-indexable antibody carries only
     the index reason.
 
-    Skipped antibodies write no residues.json or triaged.json. A missing
-    file indicates "already rejected"; an empty file would double-count."""
-    index_reason = index_one(pdb_path, out_residues)
+    A rejected antibody gets no row in the residues or triaged artifact. A missing entry
+    indicates "already rejected"; an empty one would double-count."""
+    index_reason, residues = index_one(pdb_path, residues_writer, clonotype_key)
     if index_reason:
         return index_reason, []
-
-    residues = residue_store.read_residues(out_residues)
 
     rsasa_lookup = residue_exposure.annotate(residues, pdb_path)
     confidence_lookup = _confidence_lookup(residues, confidence_records)
@@ -210,7 +217,7 @@ def process_one(
     )
     actionable = [t for t in triaged if liability_triage.generates_for(t)]
 
-    liability_store.write_triaged(out_triaged, actionable)
+    liability_store.write_triaged(triaged_writer, clonotype_key, actionable)
     return ("" if actionable else "no-liability-survived-triage"), triaged
 
 
@@ -224,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="the staged blobs — the index phase parses them and freesasa reads them again",
     )
-    parser.add_argument("--out-residues-dir", required=True)
+    parser.add_argument("--out-residues", required=True)
     parser.add_argument(
         "--definitions", required=True, help="taxonomy JSON from the shared package"
     )
@@ -242,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         help="optional dataset-wide TSV naming the subset to process; omitted means the "
         "every parent clonotype",
     )
-    parser.add_argument("--out-triaged-dir", required=True)
+    parser.add_argument("--out-triaged", required=True)
     parser.add_argument("--out-liabilities", required=True)
     parser.add_argument("--out-rejected", required=True)
     parser.add_argument("--rsasa-buried-cutoff", type=float, default=DEFAULT_RSASA_BURIED_CUTOFF)
@@ -262,50 +269,56 @@ def main(argv: list[str] | None = None) -> int:
     pdb_dir = Path(args.pdb_dir)
     confidence_by_clonotype = _load_confidence_tsv(args.per_residue_confidence)
     keep_clonotypes = _load_clonotype_filter(args.clonotype_filter)
-    residues_dir = Path(args.out_residues_dir)
-    residues_dir.mkdir(parents=True, exist_ok=True)
-    out_dir = Path(args.out_triaged_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
     liability_store.write_liabilities_header(args.out_liabilities)
 
-    def one(entry: parent_clonotypes.ParentClonotype) -> list[tuple[str, str, str, str]] | None:
-        # A picked filter narrows which parents this step attempts. A
-        # filtered-out clonotype was never in scope, so it gets no rejection
-        # row at all.
-        if keep_clonotypes is not None and entry.clonotype_key not in keep_clonotypes:
-            return None
-        pdb_path = pdb_dir / entry.filename
+    with (
+        keyed_artifact.KeyedWriter(args.out_residues) as residues_writer,
+        keyed_artifact.KeyedWriter(args.out_triaged) as triaged_writer,
+    ):
 
-        reason, triaged = process_one(
-            str(pdb_path),
-            str(residues_dir / f"{entry.stem}.json"),
-            str(out_dir / f"{entry.stem}.json"),
-            taxonomy,
-            liability_objective.OBJECTIVE,
-            confidence_by_clonotype.get(entry.clonotype_key),
-            args.rsasa_buried_cutoff,
-            args.fr_confidence_threshold,
-            args.cdr_confidence_threshold,
-            act_on_fixability,
-        )
-        # Appended for every antibody that reached triage, so a
-        # zero-variant antibody still gets Parents-page data. An antibody
-        # that failed at the index phase never scanned, so appending its
-        # absence here would read as a false "none" verdict.
-        if reason in _REACHED_TRIAGE_REASONS:
-            liability_store.append_liabilities_tsv(
-                args.out_liabilities, entry.clonotype_key, triaged, fixability_weights
+        def one(
+            entry: parent_clonotypes.ParentClonotype,
+        ) -> list[tuple[str, str, str, str]] | None:
+            # A picked filter narrows which parents this step attempts. A
+            # filtered-out clonotype was never in scope, so it gets no rejection
+            # row at all.
+            if keep_clonotypes is not None and entry.clonotype_key not in keep_clonotypes:
+                return None
+            pdb_path = pdb_dir / entry.filename
+
+            reason, triaged = process_one(
+                str(pdb_path),
+                residues_writer,
+                triaged_writer,
+                entry.clonotype_key,
+                taxonomy,
+                liability_objective.OBJECTIVE,
+                confidence_by_clonotype.get(entry.clonotype_key),
+                args.rsasa_buried_cutoff,
+                args.fr_confidence_threshold,
+                args.cdr_confidence_threshold,
+                act_on_fixability,
             )
-        # The design step, not this one, decides whether a parent with no triaged
-        # liability still ships a variant — it owns this reason's row, and only when
-        # `mode` actually runs the liability objective (a `humanization`-only run never
-        # reaches this reason with a row worth writing).
-        if reason == "no-liability-survived-triage":
-            return []
-        return [(reason, "", rejection_store.PARENT_REJECTED, run_mode.LIABILITY)]
+            # Appended for every antibody that reached triage, so a
+            # zero-variant antibody still gets Parents-page data. An antibody
+            # that failed at the index phase never scanned, so appending its
+            # absence here would read as a false "none" verdict.
+            if reason in _REACHED_TRIAGE_REASONS:
+                liability_store.append_liabilities_tsv(
+                    args.out_liabilities, entry.clonotype_key, triaged, fixability_weights
+                )
+            # The design step, not this one, decides whether a parent with no triaged
+            # liability still ships a variant — it owns this reason's row, and only when
+            # `mode` actually runs the liability objective (a `humanization`-only run never
+            # reaches this reason with a row worth writing).
+            if reason == "no-liability-survived-triage":
+                return []
+            return [(reason, "", rejection_store.PARENT_REJECTED, run_mode.LIABILITY)]
 
-    parents = parent_clonotypes.scan_parent_clonotypes(args.pdb_dir, parent_clonotypes.PDB_SUFFIX)
-    return antibody_batch.process_every_parent(parents, one, args.out_rejected)
+        parents = parent_clonotypes.scan_parent_clonotypes(
+            args.pdb_dir, parent_clonotypes.PDB_SUFFIX
+        )
+        return antibody_batch.process_every_parent(parents, one, args.out_rejected)
 
 
 if __name__ == "__main__":

@@ -32,10 +32,14 @@ buildVariants := import("@platforma-open/milaboratories.antibody-variant-designe
 
 self.validateInputs({
 	"__options__,closed": "",
-	triaged: { any: validation.resource() },
-	tolerance: { any: validation.resource() },
-	residues: { any: validation.resource() },
+	triaged: validation.resource(),
+	tolerance: validation.resource(),
+	priors: { any: validation.resource() },
+	residues: validation.resource(),
 	definitions: validation.resource(),
+	// The parents step 1 staged. An upper bound on the parents this step
+	// reads, because step 1 rejects some — see `ramFor`.
+	parentCount: "number",
 	params: {
 		"__options__,closed": "",
 		runMode: "string",
@@ -61,14 +65,18 @@ self.validateInputs({
 	}
 })
 
-self.defineOutputs("variants", "humanness", "rejected", "rejectedContent")
+self.defineOutputs(
+	"variants", "humanness", "parentSequences", "rejected", "rejectedContent")
 
+// `parentCount` joins the inputs the body forwards wholesale.
 self.body(func(inputs) {
 	return buildVariants.run({
 		triaged: inputs.triaged,
 		tolerance: inputs.tolerance,
+		priors: inputs.priors,
 		residues: inputs.residues,
 		definitions: inputs.definitions,
+		parentCount: inputs.parentCount,
 		params: inputs.params,
 		cpu: inputs.resources.cpu,
 		ram: is_undefined(inputs.resources.mem) ? undefined : string(inputs.resources.mem) + "GiB"

@@ -1,10 +1,12 @@
 // How every entrypoint of this block expects its workdir to be laid out.
 //
 // It lives in the developability piece rather than in the block's own workflow
-// because it is this software's command-line contract: each entrypoint's
-// `--out-*-dir` flag writes the directory that `dirPattern` captures. The two
-// recipes next to this file use it, and so does the AntiFold recipe, whose
-// package depends on this one.
+// because it is this software's command-line contract: an entrypoint's
+// `--out-*-dir` flag writes the directory that `dirPattern` captures. Residues,
+// triaged liabilities and tolerance moved off this mechanism onto one file each
+// per boundary; the human-repertoire prior is the one artifact still staged
+// this way, and its caller is the AntiFold recipe, whose package depends on
+// this one.
 //
 // **A directory crossing a step boundary is a file set.** The SDK has no
 // directory primitive: no `addDir`, no file-set *input* type, and an exec's

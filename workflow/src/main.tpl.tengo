@@ -31,7 +31,6 @@ definitionsSw := assets.importSoftware("@platforma-open/milaboratories.software-
 step1ScanLiabilitiesTpl := assets.importTemplate(":steps.step-1-index-and-scan")
 step2ReadToleranceTpl := assets.importTemplate(":steps.step-2-read-tolerance")
 step3BuildVariantsTpl := assets.importTemplate(":steps.step-3-build-variants")
-materializeFileSetTpl := assets.importTemplate(":materialize-fileset")
 
 /**
  * Advanced Settings → Resource Allocation, as the render options every step
@@ -103,12 +102,14 @@ _readTolerance := func(pdbs, residues, triaged, args) {
  * domain applied after this exec, never as an exec input, so two blocks over one
  * dataset share this run.
  */
-_buildVariants := func(triaged, tolerance, residues, definitions, args) {
+_buildVariants := func(triaged, tolerance, priors, residues, definitions, parentCount, args) {
 	return render.create(step3BuildVariantsTpl, {
 		triaged: triaged,
 		tolerance: tolerance,
+		priors: priors,
 		residues: residues,
 		definitions: definitions,
+		parentCount: parentCount,
 		params: {
 			runMode: args.runMode,
 			maxLiabilityEdits: args.maxLiabilityEdits,
@@ -126,16 +127,6 @@ _buildVariants := func(triaged, tolerance, residues, definitions, args) {
 			epistasisRescoreTopK: args.epistasisRescoreTopK
 		}
 	}, _resourceRail(args.buildVariantsCpu, args.buildVariantsMem))
-}
-
-/**
- * A copy of every file in `fileSet`, put into primary storage as soon as the
- * step that produced it is done — see `materialize-fileset.tpl.tengo` for why a
- * step output needs this and why wiring it into the next step does not provide
- * it.
- */
-_materialize := func(fileSet) {
-	return render.createEphemeral(materializeFileSetTpl, { fileSet: fileSet }).output("copies")
 }
 
 wf.prepare(func(args) {
@@ -215,8 +206,10 @@ wf.body(func(args) {
 	variants := _buildVariants(
 		liabilities.output("triaged"),
 		tolerance.output("tolerance"),
+		tolerance.output("priors"),
 		liabilities.output("residues"),
 		definitions,
+		len(pdbs),
 		args)
 
 	// The parent's label as a two-column frame `pt` can join on, with both
@@ -241,6 +234,7 @@ wf.body(func(args) {
 		variants.output("variants"),
 		variants.output("humanness"),
 		liabilities.output("liabilities"),
+		variants.output("parentSequences"),
 		parentLabels,
 		blockId)
 	variantsXsv := xsv.importFile(
@@ -252,6 +246,12 @@ wf.body(func(args) {
 	parentLinkXsv := xsv.importFile(
 		variantsBuilt.parentLink, "tsv",
 		specs.buildParentLinkSettings(blockId, clonotypeAxis),
+		{ splitDataAndSpec: true })
+	// The comparison view's own sequences, on an axis that holds both a parent's
+	// key and a variant's — see `specs.buildAlignmentSettings`.
+	alignmentXsv := xsv.importFile(
+		variantsBuilt.alignmentRows, "tsv",
+		specs.buildAlignmentSettings(blockId),
 		{ splitDataAndSpec: true })
 	liabilitiesXsv := xsv.importFile(
 		specHelpers.withParentIdOnLiabilities(
@@ -279,6 +279,15 @@ wf.body(func(args) {
 	}
 	variantsPf := variantsPfBuilder.build()
 
+	// Its own frame, not folded into `variantsPf`: a different axis, and the
+	// Variants table discovers its columns by enrichment over everything
+	// `variantsData` holds, which would drag this sequence column into the grid.
+	alignmentPfBuilder := pframes.pFrameBuilder()
+	for k, v in alignmentXsv {
+		alignmentPfBuilder.add(k, trace.inject(v.spec), v.data)
+	}
+	alignmentPf := alignmentPfBuilder.build()
+
 	liabilitiesPfBuilder := pframes.pFrameBuilder()
 	for k, v in liabilitiesXsv {
 		liabilitiesPfBuilder.add(k, trace.inject(v.spec), v.data)
@@ -296,21 +305,27 @@ wf.body(func(args) {
 			variantsRejected: variants.output("rejectedContent"),
 			variantsData: pframes.exportFrame(variantsPf),
 			liabilitiesData: pframes.exportFrame(liabilitiesPf),
+			alignmentData: pframes.exportFrame(alignmentPf),
 			synthesisCsv: file.exportFile(synthesisCsv),
 
-			// The three artifacts the steps hand to each other — `residues` and
-			// `triaged` out of step 1, `tolerance` out of step 2. Nothing reads them
-			// here. They are attached because their bytes live in work storage, held
-			// by a one-minute pin, and the step that consumes them cannot ask for a
+			// Every artifact that crosses an exec boundary: the three the steps hand
+			// to each other, and the four TSVs the `pt.workflow()` execs read.
+			// Nothing reads them here. They are attached because their bytes live in
+			// work storage, held by a one-minute pin, and no consumer can ask for a
 			// durable copy until it has a compute allocation — step 2 queues for a
-			// GPU, so that ask lands long after the pin lapsed and fails with "lost
-			// blob ... no incarnations found in any of storages". `_materialize`
-			// makes the copy on the producing side instead, the moment each fileSet
-			// locks, and attaching the result keeps it for as long as the block lives.
+			// GPU and every pt exec queues behind the scheduler, so that ask lands
+			// long after the pin lapsed and fails with "lost blob ... no incarnations
+			// found in any of storages". The copy is made on the producing side
+			// instead, as soon as the output locks, and attaching the result keeps it
+			// for as long as the block lives.
 			resultsToCache: smart.createMapResource({
-				residues: _materialize(liabilities.output("residues")),
-				triaged: _materialize(liabilities.output("triaged")),
-				tolerance: _materialize(tolerance.output("tolerance"))
+				residues: file.exportFile(liabilities.output("residues")),
+				triaged: file.exportFile(liabilities.output("triaged")),
+				tolerance: file.exportFile(tolerance.output("tolerance")),
+				liabilities: file.exportFile(liabilities.output("liabilities")),
+				variants: file.exportFile(variants.output("variants")),
+				humanness: file.exportFile(variants.output("humanness")),
+				parentSequences: file.exportFile(variants.output("parentSequences"))
 			})
 		},
 		exports: {}

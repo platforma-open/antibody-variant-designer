@@ -1,7 +1,7 @@
 """Unit tests for `parent_clonotypes.py` — recovering the parent clonotypes from a staged
-directory listing, and the artifact names an entry carries."""
+directory listing or from a keyed artifact's own keys, and the artifact names an entry carries."""
 
-from engine import parent_clonotypes
+from engine import keyed_artifact, parent_clonotypes
 
 
 class TestScanParentClonotypes:
@@ -57,3 +57,22 @@ class TestParentClonotype:
 
         assert entry.stem == "clone-1"
         assert entry.filename == "clone-1.pdb"
+
+
+class TestReadParentClonotypes:
+    def test_it_recovers_the_keys_in_the_artifacts_own_order(self, tmp_path):
+        path = tmp_path / "triaged.jsonl"
+        with keyed_artifact.KeyedWriter(str(path)) as writer:
+            writer.write("clone-1", [])
+            writer.write("clone-2", [])
+
+        parents = parent_clonotypes.read_parent_clonotypes(str(path))
+
+        assert [e.clonotype_key for e in parents] == ["clone-1", "clone-2"]
+
+    def test_an_empty_artifact_holds_no_parent_clonotype(self, tmp_path):
+        path = tmp_path / "triaged.jsonl"
+        with keyed_artifact.KeyedWriter(str(path)):
+            pass
+
+        assert parent_clonotypes.read_parent_clonotypes(str(path)) == []
