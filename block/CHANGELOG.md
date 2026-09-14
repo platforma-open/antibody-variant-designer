@@ -1,5 +1,13 @@
 # @platforma-open/milaboratories.antibody-variant-designer.block
 
+## 1.2.0
+
+### Minor Changes
+
+- e33a975: Adopt the block-kind contract and the current SDK. The block now declares its
+  init params, so a project template can create it pre-configured with the
+  structures dataset, the run mode and the whole design recipe.
+
 ## 1.1.0
 
 ### Minor Changes
