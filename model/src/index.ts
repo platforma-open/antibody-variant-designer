@@ -19,6 +19,8 @@ import {
   DataModelBuilder,
   getAxisId,
 } from "@platforma-sdk/model";
+import type { BlockParams } from "@platforma-open/milaboratories.antibody-variant-designer.kind";
+import { kind } from "@platforma-open/milaboratories.antibody-variant-designer.kind";
 import type {
   BlockArgs,
   BlockData,
@@ -28,6 +30,9 @@ import type {
   RejectedType,
 } from "./types";
 
+export type { BlockParams } from "@platforma-open/milaboratories.antibody-variant-designer.kind";
+import { deriveTemplateParams } from "./templateParams";
+export { deriveTemplateParams };
 export type {
   BlockArgs,
   BlockData,
@@ -61,13 +66,46 @@ export const BLOCK_DATA_DEFAULTS = {
   epistasisRescoreTopK: 20,
 } satisfies Partial<BlockData>;
 
-const dataModel = new DataModelBuilder().from<BlockData>("v1").init(() => ({
-  dataset: undefined,
-  ...BLOCK_DATA_DEFAULTS,
+/**
+ * A fresh block's data, seeded by whatever the creator or template supplied. Every param the
+ * contract carries is honoured here, and every field it does not carry falls back to
+ * `BLOCK_DATA_DEFAULTS` — so a block created without params is exactly the block this returns.
+ *
+ * The two lists are copied rather than handed over: `BLOCK_DATA_DEFAULTS` is one shared object,
+ * and a block holding the very array the constant holds would let one project's edit reach
+ * every project created afterwards.
+ */
+export const initBlockData = (params?: BlockParams): BlockData => ({
+  dataset: params?.dataset,
+  runMode: params?.runMode ?? BLOCK_DATA_DEFAULTS.runMode,
+  rsasaBuriedCutoff: params?.rsasaBuriedCutoff ?? BLOCK_DATA_DEFAULTS.rsasaBuriedCutoff,
+  actOnFixability: [...(params?.actOnFixability ?? BLOCK_DATA_DEFAULTS.actOnFixability)],
+  maxLiabilityEdits: params?.maxLiabilityEdits ?? BLOCK_DATA_DEFAULTS.maxLiabilityEdits,
+  maxFrameworkEdits: params?.maxFrameworkEdits ?? BLOCK_DATA_DEFAULTS.maxFrameworkEdits,
+  frConfidenceThreshold: params?.frConfidenceThreshold ?? BLOCK_DATA_DEFAULTS.frConfidenceThreshold,
+  cdrConfidenceThreshold:
+    params?.cdrConfidenceThreshold ?? BLOCK_DATA_DEFAULTS.cdrConfidenceThreshold,
+  variantsPerParent: params?.variantsPerParent ?? BLOCK_DATA_DEFAULTS.variantsPerParent,
+  candidateResiduesPerPosition:
+    params?.candidateResiduesPerPosition ?? BLOCK_DATA_DEFAULTS.candidateResiduesPerPosition,
+  structuralWeight: params?.structuralWeight ?? BLOCK_DATA_DEFAULTS.structuralWeight,
+  objectiveWeight: params?.objectiveWeight ?? BLOCK_DATA_DEFAULTS.objectiveWeight,
+  nonHumanPriorMargin: params?.nonHumanPriorMargin ?? BLOCK_DATA_DEFAULTS.nonHumanPriorMargin,
+  maxNewLiabilities: params?.maxNewLiabilities ?? BLOCK_DATA_DEFAULTS.maxNewLiabilities,
+  humanizationIgnoredLiabilities: [
+    ...(params?.humanizationIgnoredLiabilities ??
+      BLOCK_DATA_DEFAULTS.humanizationIgnoredLiabilities),
+  ],
+  lowToleranceFloor: params?.lowToleranceFloor ?? BLOCK_DATA_DEFAULTS.lowToleranceFloor,
+  epistasisRescoreTopK: params?.epistasisRescoreTopK ?? BLOCK_DATA_DEFAULTS.epistasisRescoreTopK,
   variantsTableState: createPlDataTableStateV2(),
   liabilitiesTableState: createPlDataTableStateV2(),
   alignmentModel: {},
-}));
+});
+
+const dataModel = new DataModelBuilder({ kind })
+  .from<BlockData>("v1")
+  .init(({ params }) => initBlockData(params));
 
 const STRUCTURE_PDB_COLUMN = "pl7.app/structure/pdb";
 
@@ -203,7 +241,9 @@ function alignmentColumns(ctx: BlockRenderCtx<BlockArgs, BlockData>) {
     ?.getPColumns();
 }
 
-export const platforma = BlockModelV3.create(dataModel)
+export const platforma = BlockModelV3.create({ dataModel, kind })
+  .templateParams(deriveTemplateParams)
+
   .args<BlockArgs>((data) => {
     if (!data.dataset?.primary?.column) {
       throw new Error("Pick a 3D structures dataset");

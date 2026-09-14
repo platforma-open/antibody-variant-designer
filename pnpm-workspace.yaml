@@ -32,3 +32,4 @@ catalog:
   ag-grid-enterprise: ~34.1.2
   ag-grid-vue3: ~34.1.2
   "@platforma-sdk/block-kind": 1.1.0
+  "es-toolkit": 1.41.0

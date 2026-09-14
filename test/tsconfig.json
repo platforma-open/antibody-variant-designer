@@ -1,5 +1,14 @@
 {
   "extends": "@milaboratories/ts-configs/block/test",
+  "compilerOptions": {
+    // The shared block/test config sets `types: []`. The fixture checks inspect files, gzip streams
+    // and CSV text directly, which no SDK helper covers, so node's own types are needed back.
+    //
+    // Kept by hand, together with the `@types/node` devDependency: `block-tools structure refresh`
+    // regenerates this file and strips both, and this package does not typecheck without them. So
+    // `structure check` reports these two files out of date on purpose.
+    "types": ["node"]
+  },
   "include": ["src/**/*"],
   "files": []
 }
