@@ -1,3 +1,4 @@
+import type { RunMode } from "@platforma-open/milaboratories.antibody-variant-designer.kind";
 import type {
   DatasetSelection,
   PlDataTableStateV2,
@@ -10,9 +11,9 @@ import type {
  *  a `PlRef` type. */
 export type PlRef = NonNullable<DatasetSelection["primary"]>["column"];
 
-/** Which objectives a run designs against: liability removal alone, humanization alone, or
- *  liability removal together with humanization. */
-export type RunMode = "liabilities" | "humanization" | "liabilities + humanization";
+/** Which objectives a run designs against. Owned by the kind, because the init-params
+ *  contract carries it. */
+export type { RunMode } from "@platforma-open/milaboratories.antibody-variant-designer.kind";
 
 /** Unified user-editable state persisted by the model. */
 export type BlockData = {

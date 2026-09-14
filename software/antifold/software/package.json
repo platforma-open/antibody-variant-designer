@@ -1,21 +1,22 @@
 {
   "name": "@platforma-open/milaboratories.antibody-variant-designer.software-antifold",
   "version": "1.0.0",
-  "description": "AntiFold wrapper: loads the mounted checkpoint once and reads per-position tolerance",
   "private": true,
+  "description": "AntiFold wrapper: loads the mounted checkpoint once and reads per-position tolerance",
   "type": "module",
   "scripts": {
     "build": "bash scripts/stage-build.sh && block-tools software build",
     "deps:export": "bash scripts/deps-export.sh",
-    "prepublishOnly": "pl-pkg prepublish"
+    "do-pack": "shx rm -f *.tgz && pnpm run build && pnpm pack && shx mv platforma-open*.tgz package.tgz",
+    "changeset": "changeset",
+    "version-packages": "changeset version"
   },
   "dependencies": {
     "@platforma-open/milaboratories.antibody-variant-designer.software-developability": "workspace:*"
   },
   "devDependencies": {
     "@platforma-open/milaboratories.runenv-python-3": "catalog:",
-    "@platforma-sdk/block-tools": "catalog:",
-    "@platforma-sdk/package-builder": "catalog:"
+    "@platforma-sdk/block-tools": "catalog:"
   },
   "block-software": {
     "artifacts": {
