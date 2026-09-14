@@ -7,7 +7,7 @@
   "scripts": {
     "build": "bash scripts/stage-build.sh && block-tools software build",
     "deps:export": "bash scripts/deps-export.sh",
-    "do-pack": "shx rm -f *.tgz && block-tools software build && pnpm pack && shx mv platforma-open*.tgz package.tgz",
+    "do-pack": "shx rm -f *.tgz && pnpm run build && pnpm pack && shx mv platforma-open*.tgz package.tgz",
     "changeset": "changeset",
     "version-packages": "changeset version"
   },
