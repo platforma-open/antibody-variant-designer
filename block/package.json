@@ -26,7 +26,10 @@
   "devDependencies": {
     "@milaboratories/ts-builder": "catalog:",
     "@milaboratories/ts-configs": "catalog:",
+    "@platforma-open/milaboratories.antibody-variant-designer.kind": "workspace:*",
     "@platforma-open/milaboratories.antibody-variant-designer.model": "workspace:*",
+    "@platforma-open/milaboratories.antibody-variant-designer.software-antifold.workflow": "workspace:*",
+    "@platforma-open/milaboratories.antibody-variant-designer.software-developability.workflow": "workspace:*",
     "@platforma-open/milaboratories.antibody-variant-designer.ui": "workspace:*",
     "@platforma-open/milaboratories.antibody-variant-designer.workflow": "workspace:*",
     "@platforma-sdk/block-tools": "catalog:",
