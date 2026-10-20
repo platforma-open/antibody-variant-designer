@@ -1,6 +1,6 @@
 {
   "name": "@platforma-open/milaboratories.antibody-variant-designer.software-antifold.workflow",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Exec recipe for the AntiFold tolerance read, with its weights asset",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@platforma-open/milaboratories.antibody-variant-designer.software-developability",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Residue indexing, liability scan and triage, candidate generation and ranking",
   "type": "module",

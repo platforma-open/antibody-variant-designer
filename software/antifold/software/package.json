@@ -1,6 +1,6 @@
 {
   "name": "@platforma-open/milaboratories.antibody-variant-designer.software-antifold",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "AntiFold wrapper: loads the mounted checkpoint once and reads per-position tolerance",
   "type": "module",

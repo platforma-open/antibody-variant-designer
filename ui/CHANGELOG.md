@@ -1,0 +1,9 @@
+# @platforma-open/milaboratories.antibody-variant-designer.ui
+
+## 1.0.1
+
+### Patch Changes
+
+- 9a0c443: Release every package through npm trusted publishing (OIDC) so each package's trusted publisher is used before it expires.
+- Updated dependencies [9a0c443]
+  - @platforma-open/milaboratories.antibody-variant-designer.model@1.0.1
