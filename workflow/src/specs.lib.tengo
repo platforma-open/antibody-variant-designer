@@ -69,7 +69,7 @@ variantColumns := func(blockId) {
 			spec: {
 				name: "pl7.app/label",
 				valueType: "String",
-				contextDomain: { "pl7.app/blockId": blockId },
+				domain: { "pl7.app/blockId": blockId },
 				annotations: {
 					"pl7.app/label": "Variant Clone Id",
 					"pl7.app/description": "`C-XXXXX`, derived from the variant clonotype key the way upstream derives a clonotype id — digits dropped, first five characters, uppercased, with a rank suffix when two keys share the prefix."

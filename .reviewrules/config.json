@@ -1,0 +1,671 @@
+{
+  "strictness": 2,
+  "commentTypes": [
+    "logic",
+    "syntax",
+    "style"
+  ],
+  "instructions": "The repo is a Platforma block. workflow/src holds Tengo templates (*.tpl.tengo, *.lib.tengo, *.test.tengo); model/src holds the BlockModelV3 definition (TypeScript); ui/src holds the Vue 3 app; block/ is the published facade package; software/ holds packaged tools (python, R, java); test/ holds private integration tests; .changeset/ holds release notes. block-tools structure owns every generated package.json field, turbo.json, tsconfig, lint config, and CI workflow: a hand edit to them is a finding. A pattern that sibling blocks share is not evidence that it is correct.",
+  "ignorePatterns": "**/node_modules/**\n**/dist/**\n**/block-pack/**\n**/.turbo/**\n**/*.tgz\n**/CHANGELOG.md\nsoftware/**/uv.lock\nsoftware/**/src/requirements.txt\nsoftware/**/tests/data/corpus/**\ntest/fixtures/data/**\n**/__pycache__/**\n.reviewrules/**",
+  "rules": [
+    {
+      "id": "map-iteration-unsorted-in-template",
+      "rule": "Do not build a sub-resource, an ordered output, or any order-sensitive value with `for k, v in m` over a map, and do not `json.encode` a map into a template input or key. Tengo map order is not guaranteed, so equivalent inputs give different resource handles and dedup silently breaks. Use `maps.forEach(m, ...)` or `for k in maps.getKeys(m)`, and `canonical.lib.tengo` for JSON encoding.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "software/**/*.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "array-loop-with-blank-index",
+      "rule": "Do not write `for _, x in arr` over an array. It looks like map iteration and makes the reader ask whether the order is canonical. Write `for x in arr`, or `for i, x in arr` only when the index is used.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "software/**/*.tengo"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "hash-override-on-semantic-change",
+      "rule": "Flag a template that keeps or adds `//tengo:hash_override <UUID>` while the diff changes what the template produces. The override pins the cache identity, so old cached results are served for new behavior. Remove or regenerate the UUID on a semantic change; the directive must be on the first line, and a new override needs a fresh UUID, not a copied one.",
+      "scope": [
+        "workflow/src/**/*.tpl.tengo",
+        "software/**/*.tpl.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "side-effect-in-pure-template",
+      "rule": "A pure template must not read time, call the network, or use randomness. Its body must be deterministic for the same inputs, or dedup returns wrong cached results. Move the non-deterministic step out, or canonicalize its output before pure consumers.",
+      "scope": [
+        "workflow/src/**/*.tpl.tengo",
+        "software/**/*.tpl.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "ephemeral-template-without-reason",
+      "rule": "Do not declare a template ephemeral by default. Ephemeral opts out of cross-project dedup. Keep it pure unless fresh execution per project is required or the body cannot be made deterministic, and state which one applies.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "software/**/*.tengo"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "inline-branch-on-unrun-output",
+      "rule": "Do not read or branch on the value of an output (getFileContent, getDataAsJson, etc.) that the same template body creates with exec or another resource. The body finishes building the graph before the tool runs. Move the dependent logic into a child template that takes the output as an input.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "software/**/*.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "prepare-awaits-unneeded-data",
+      "rule": "Put in the `wf.prepare` bundle only the columns the body needs to build the graph. The bundle awaits spec and data in full, which delays this block's spec emission and every downstream dropdown. If the body uses only a spec, resolve it in the body (e.g. `wf.anchoredQuery` with `specOnly`).",
+      "scope": [
+        "workflow/src/**/*.tengo"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "savefile-getfilecontent-mismatch",
+      "rule": "Pair `saveFile` with `getFile` (a file handle) and `saveFileContent` with `getFileContent` (inline data). Also match the model side: `getFileContent` resolves with `getDataAsJson`, `getStdoutStream` with `getLogHandle`. A mismatch gives the wrong handle type.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "software/**/*.tengo",
+        "model/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "nested-json-encode-without-string-cast",
+      "rule": "Wrap every inner `json.encode(...)` or `canonical.encode(...)` that goes into a structure that is encoded again in `string(...)`. Encode returns bytes, and the outer encoder base64s them with no error, so the cell value has the wrong shape.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "software/**/*.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "producer-identity-in-domain",
+      "rule": "Do not put producer identity (`pl7.app/blockId`, block id, run id) in a spec `domain`. Every consumer then needs the producer run id to select the column. Put it in `contextDomain`; keep `domain` for keys a consumer matches on, such as `pl7.app/vdj/feature`. Many sibling blocks do this wrong; they are not evidence.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "model/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "presentation-hint-in-domain",
+      "rule": "Do not put labels, display hints, or arbitrary tags in `domain`; domain is part of column identity. Put presentation in `annotations`, which do not affect identity.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "model/src/**/*.ts"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "new-axis-duplicates-existing",
+      "rule": "Do not mint a new axis name for a dimension that an input already has (e.g. `my.block/sampleId` beside `pl7.app/sampleId`). Copy the input's axis spec verbatim so other blocks can join. Create a new axis only for a new dimension, with a namespaced name and a label annotation.",
+      "scope": [
+        "workflow/src/**/*.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "inputs-by-spec-not-block-id",
+      "rule": "Do not select input columns by an upstream block id, a hardcoded ref, or platform internals. Query the result pool by spec (name, axes, annotations, anchors; e.g. getOptions, getPColumnSpecByRef, getAnchoredPColumns), so any producer of a matching spec works.",
+      "scope": [
+        "model/src/**/*.ts",
+        "workflow/src/**/*.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "trace-built-by-hand",
+      "rule": "Do not build or edit `pl7.app/trace` JSON by hand. Create it with `pSpec.makeTrace(inputSpec, {type, label})` and apply it with `trace.inject(spec)`.",
+      "scope": [
+        "workflow/src/**/*.tengo"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "derived-column-without-trace",
+      "rule": "Every new output p-column derived from an input column must get its spec through `trace.inject` from `pSpec.makeTrace` of that input. Without trace the UI labels it wrongly and result-pool lineage breaks.",
+      "scope": [
+        "workflow/src/**/*.tengo"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "annotation-value-invalid",
+      "rule": "Use only recognized annotation values: `pl7.app/table/visibility` is `\"optional\"` or `\"hidden\"` (`\"default\"` does nothing), `pl7.app/table/orderPriority` is a JSON number string, and `pl7.app/format` goes on numeric columns only.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "model/src/**/*.ts"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "anchored-id-stored-without-plref",
+      "rule": "When args or UI state store an `SUniversalPColumnId` (e.g. from `getCanonicalOptions`), also store the `PlRef` that defines its anchor and rebuild the anchor map from that same ref. Do not pass anchored ids to another block. Without the ref the id can silently match a different column.",
+      "scope": [
+        "model/src/**/*.ts",
+        "ui/src/**/*.{ts,vue}"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "frame-local-id-persisted-or-recast",
+      "rule": "Do not persist an `AnchoredIdDeriver` from `resolveAnchorCtx`, or the plain `PObjectId`s from `getAnchoredPColumns` / `findColumns`; rebuild them each render. Do not feed `findColumns` ids into `getCanonicalOptions`-shaped consumers or the reverse; a cast to `SUniversalPColumnId` hides the mismatch.",
+      "scope": [
+        "model/src/**/*.ts",
+        "ui/src/**/*.{ts,vue}"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "selector-partial-axes-implicit",
+      "rule": "Set `partialAxesMatch` explicitly on a selector whose axis list is meant to be complete, above all when moving it from `matchPColumn` (default exact) to `matchMultiColumnSelector` (default partial). Otherwise it silently matches columns with extra axes.",
+      "scope": [
+        "model/src/**/*.ts",
+        "ui/src/**/*.{ts,vue}"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "manual-loop-instead-of-process-column",
+      "rule": "Do not loop over the values of a file-valued p-column to run a tool per sample or per axis group. Use `pframes.processColumn` with aggregation axes and a separate body template; the manual loop loses dedup and parallelism.",
+      "scope": [
+        "workflow/src/**/*.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "exec-formula-without-fallback-or-bounds",
+      "rule": "Every `exec.formula` dimension in `.resources` must end in `.staticFallback(v)` sized for the expected input, and must be bounded with `.between` or `.atLeast`. A backend that cannot evaluate formulas errors without the fallback, and an empty input drives an unbounded formula to zero.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "software/**/*.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "gpu-request-shape",
+      "rule": "Request a GPU with `.resources({onGPU: {cpu, ram, vram}})`, not the legacy `.gpuMemory()`, which fails late with a message that does not name the cause. `onGPU` without `vram` is rejected. Declare `onCPU` too only when a CPU run is acceptable.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "software/**/*.tengo"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "software-ref-not-literal-import",
+      "rule": "Pass `.software()` the value of `assets.importSoftware(\"@scope/pkg:entrypoint\")` with a literal string name, not a plain string or a computed name. A string is rejected, and the build-time scan cannot see a computed name.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "software/**/*.tengo"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "cli-args-and-parser-drift",
+      "rule": "When a diff changes `.arg(...)` calls on an exec, or the CLI argument parser of the software, change the other side in the same diff. Nothing typechecks this boundary; drift shows only at run time as `unrecognized arguments`.",
+      "scope": [
+        "workflow/src/**/*.tengo",
+        "software/**/*.tengo",
+        "software/**/*.py",
+        "software/**/*.R"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "hand-written-python-dockerfile",
+      "rule": "Do not add a hand-written Dockerfile or `docker` artifact for a python entrypoint; the toolset generates it. Allow it only for a base image autogen cannot express, such as CUDA. A `docker` artifact has `context` and `dockerfile`, and no `environment` or `registry`.",
+      "scope": [
+        "software/**/package.json",
+        "software/**/Dockerfile"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "ui-no-output-to-data-watcher",
+      "rule": "A watch/watchEffect that reads app.model.outputs.* and writes app.model.data.* is a hairpin, and it races between clients. Derive the value as a model output, keep it in a local ref/computed, or write data only from an explicit user-gesture handler. The only tolerated case is the default block-label watcher guarded by blockLabelIsManual.",
+      "scope": [
+        "ui/src/**/*.vue",
+        "ui/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "args-lambda-reads-only-data",
+      "rule": "The .args(data => …) and .prerunArgs(data => …) lambdas must read only their data parameter: no ctx, result pool, upstream spec lookup, or outer mutable state. When validation needs upstream facts, snapshot them into data in the UI gesture handler and validate from data.",
+      "scope": [
+        "model/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "blockdata-new-field-needs-migrate-step",
+      "rule": "A new field in BlockData needs a DataModelBuilder .migrate('vN', …) step that sets its default, not only a value in .init(). Existing projects otherwise read undefined, and the workflow rejects the step. A `data.field ?? DEFAULT` in .args() does not replace the migration.",
+      "scope": [
+        "model/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "migration-version-keys-unique",
+      "rule": "Each version key in a DataModelBuilder chain (.from/.migrate) must be unique. A duplicate key makes the builder throw at runtime.",
+      "scope": [
+        "model/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "shipped-migrations-unchanged",
+      "rule": "Do not delete or rewrite a .migrate/.upgradeLegacy step that has shipped in a release. Persisted customer projects depend on it. Add a new migrate step on top instead; fold only steps that never left the current development series.",
+      "scope": [
+        "model/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "v1-to-v3-needs-upgrade-legacy",
+      "rule": "When a model moves from BlockModel.create() to BlockModelV3.create(), the data model must declare .upgradeLegacy(({ args, uiState }) => …) that maps every V1 args and uiState field into BlockData. Without it, existing V1 projects lose their state.",
+      "scope": [
+        "model/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "no-mixed-v1-v3-model-api",
+      "rule": "Do not mix the V1 and V3 APIs in one block. A BlockModelV3 model must not call .withArgs, .withUiState, .argsValid, or .done(n); validate by throwing in .args(). Its UI must use defineAppV3 and app.model.data, not defineApp, app.model.args, app.model.ui, app.updateArgs, or app.updateUiState.",
+      "scope": [
+        "model/src/**/*.ts",
+        "ui/src/**/*.ts",
+        "ui/src/**/*.vue"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "model-derivations-pure",
+      "rule": "Callbacks of .args, .prerunArgs, .output, .title, .subtitle, .tags, and .sections must be pure: no fetch, no mutation of shared state, no Date.now/new Date, no Math.random. The runtime memoizes them and assumes the same inputs give the same result.",
+      "scope": [
+        "model/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "output-key-matches-workflow",
+      "rule": "A key passed to ctx.outputs.resolve(...) or ctx.prerun.resolve(...) must exactly match a key that the workflow body returns in outputs. A mismatch gives a silent undefined. Check both sides when either one is renamed.",
+      "scope": [
+        "model/src/**/*.ts",
+        "workflow/src/**/*.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "plain-objects-in-block-data",
+      "rule": "BlockData must hold only plain objects, arrays, and primitives. Do not put Map, Set, class instances, or markRaw values in data: Vue deep-watch loses tracking and the edits are not persisted.",
+      "scope": [
+        "model/src/**/*.ts",
+        "ui/src/**/*.vue",
+        "ui/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "args-projects-not-identity",
+      "rule": "Do not pass data to the workflow unchanged (`.args(data => data)`) or define BlockData as BlockArgs & UiFields. The args lambda must strip UI-only fields (tab, modal, expansion, table and plot state) and canonicalize the rest.",
+      "scope": [
+        "model/src/**/*.ts"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "plref-key-canonicalized",
+      "rule": "Do not use a PlRef directly as an object key or build the key with JSON.stringify or a template string. Use canonicalize(ref) (RFC 8785) to get a deterministic string key.",
+      "scope": [
+        "model/src/**/*.ts",
+        "ui/src/**/*.vue",
+        "ui/src/**/*.ts"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "upload-output-is-active",
+      "rule": "An output that calls getImportProgress() on upload resources must set { isActive: true }. Without it, the upload never starts until the user opens the block, and the prerun never resolves.",
+      "scope": [
+        "model/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "is-active-only-for-side-effects",
+      "rule": "Set isActive: true only on an output whose lambda calls a side-effecting accessor (today, getImportProgress). Do not use it on pure reads such as getDataAsJson or getFileHandle, or to force recomputation.",
+      "scope": [
+        "model/src/**/*.ts"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "import-progress-in-dedicated-output",
+      "rule": "Call getImportProgress() only in the dedicated upload-driving output (fileImports / prerunFileImports). Do not mix it into an output that computes another value, and do not use the progress value as authoritative state.",
+      "scope": [
+        "model/src/**/*.ts"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "uploads-through-desktop-flow",
+      "rule": "Do not read local files or start uploads with fetch() or file paths in block code. Use the desktop file-dialog API, store the signed ImportFileHandle in data, project it into prerunArgs, and drive the transfer with getImportProgress().",
+      "scope": [
+        "ui/src/**/*.vue",
+        "ui/src/**/*.ts",
+        "model/src/**/*.ts"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "with-status-only-when-consumed",
+      "rule": "Use plain output() by default. Use withStatus / outputWithStatus only when the value feeds an SDK component that consumes OutputWithStatus (PlAgDataTableV2, GraphMaker) or custom UI that renders loading and error states.",
+      "scope": [
+        "model/src/**/*.ts"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "pl-ag-data-table-no-v-if",
+      "rule": "Do not put v-if on PlAgDataTableV2. Mount it unconditionally and pass the output through usePlDataTableSettingsV2, which handles undefined. A v-if removes its not-ready, running, loading, and no-rows states.",
+      "scope": [
+        "ui/src/**/*.vue"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "guard-undefined-outputs",
+      "rule": "Guard every app.model.outputs.X (v-if, ?. or a null check) before it is dereferenced, because an output can be undefined. In the model, null-check ctx.outputs?.resolve(...) and its accessors before use. PlAgDataTableV2 is the exception.",
+      "scope": [
+        "ui/src/**/*.vue",
+        "ui/src/**/*.ts",
+        "model/src/**/*.ts"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "no-v-model-on-outputs",
+      "rule": "Do not bind v-model to app.model.outputs.* or assign to it. Outputs are read-only; bind editable state to app.model.data.*.",
+      "scope": [
+        "ui/src/**/*.vue",
+        "ui/src/**/*.ts"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "no-derived-state-in-data",
+      "rule": "Do not store a value in app.model.data that can be derived from data, workflow outputs, or the result pool. Expose it as a model output instead.",
+      "scope": [
+        "ui/src/**/*.vue",
+        "ui/src/**/*.ts",
+        "model/src/**/*.ts"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "sdk-components-not-custom",
+      "rule": "Do not build custom tables, dropdowns, modals, accordions, log views, file pickers, or form fields. Import the Pl* component from @platforma-sdk/ui-vue (it re-exports uikit). For a non-p-frame table, use AgGridVue with useAgGridOptions, not a bare ag-grid setup.",
+      "scope": [
+        "ui/src/**/*.vue"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "required-fields-outside-accordion",
+      "rule": "A field that makes .args() throw when unset must render outside every PlAccordionSection. A field with a default belongs in the collapsed Advanced Settings section.",
+      "scope": [
+        "ui/src/**/*.vue"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "collapsed-field-has-default",
+      "rule": "Every field rendered inside a collapsed PlAccordionSection must have a default in .init() and, for an existing block, in a migrate step. An empty collapsed field is invisible until the workflow rejects it.",
+      "scope": [
+        "ui/src/**/*.vue",
+        "model/src/**/*.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "import-wasm-literal-arg",
+      "rule": "The first argument of assets.importWasm(...) must be a string literal on the same line as importWasm(, not a variable, constant, or concatenation. Otherwise tengo-builder bundles no wasm bytes and the call traps at runtime.",
+      "scope": [
+        "workflow/src/**/*.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "v3-migration-changeset-minor",
+      "rule": "A change that migrates a block model to BlockModelV3 must add a changeset with a minor bump for the .model, .ui, and root block packages.",
+      "scope": [
+        ".changeset/*.md"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "no-hand-edit-generated-config",
+      "rule": "Do not hand-edit files that block-tools structure owns: tsconfig, .oxlintrc.json, .oxfmtrc.json, .vscode/settings.json, turbo.json, pnpm-workspace.yaml, ui/index.html, block/src/AGENTS.ts, and the CI workflows. Flag such an edit unless the commit is the output of `block-tools structure refresh`. Change the structurer rule or run the refresh instead.",
+      "scope": [
+        "**/tsconfig*.json",
+        "**/.oxlintrc.json",
+        "**/.oxfmtrc.json",
+        ".vscode/settings.json",
+        "turbo.json",
+        "pnpm-workspace.yaml",
+        "ui/index.html",
+        "block/src/AGENTS.ts",
+        ".github/workflows/**"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "no-hand-edit-structurer-package-json-fields",
+      "rule": "A package.json edit may only add or remove dependencies, scripts, or exports. Do not hand-change fields that the structurer manages (build/test scripts, files, type, private, SDK devDependencies); run `block-tools structure refresh` and commit its output.",
+      "scope": [
+        "**/package.json"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "no-manual-version-bump",
+      "rule": "Do not edit the `version` field in any package.json by hand. Changesets and CI bump versions on merge; a manual bump causes merge conflicts. Add a changeset instead.",
+      "scope": [
+        "**/package.json"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "changeset-required",
+      "rule": "Every block PR that changes released code (workflow, model, ui, software, block) must add a markdown file in `.changeset/`. Without it no release happens.",
+      "scope": [
+        "workflow/**",
+        "model/**",
+        "ui/**",
+        "software/**",
+        "block/**",
+        ".changeset/**"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "changeset-lists-every-touched-package",
+      "rule": "The changeset frontmatter must list each touched package: workflow/** -> `.workflow`, model/** -> `.model`, ui/** -> `.ui`, software/** -> `.software`, software/<name>/** -> `.<name>` (no `.software.` infix), block/** -> root package. A missing package is not released. Do not list test/**; it is private.",
+      "scope": [
+        ".changeset/**",
+        "workflow/**",
+        "model/**",
+        "ui/**",
+        "software/**",
+        "block/**"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "changeset-minor-major-lists-root-block",
+      "rule": "When a changeset gives a child package a `minor` or `major` bump, it must also list the root block package with the same bump. Changesets propagates only `patch` to the parent, so the block version gets only a patch.",
+      "scope": [
+        ".changeset/**"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "lockfile-with-workspace-change",
+      "rule": "When pnpm-workspace.yaml or a package.json dependency changes, pnpm-lock.yaml must change in the same PR. CI rejects a PR without the matching lock file update.",
+      "scope": [
+        "pnpm-workspace.yaml",
+        "**/package.json",
+        "pnpm-lock.yaml"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "software-build-uses-block-tools",
+      "rule": "A block's software module package.json must have `scripts.build` = `block-tools software build`, not `pl-pkg build`, and must not depend on `@platforma-sdk/package-builder`. With pl-pkg the root PL_BUILD_* scripts are ignored, nothing is uploaded, and remote runs fail with `not found in any of endpoints`.",
+      "scope": [
+        "software/**/package.json"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "software-package-not-private",
+      "rule": "A software module package.json must not set `private`, must set `type: module` and `files: [\"./dist/**/*\"]`, and must not have `prepublishOnly`. A private software package builds its docker image but never pushes it, and the block 404s at runtime.",
+      "scope": [
+        "software/**/package.json"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "block-facade-not-private",
+      "rule": "block/package.json is the published facade and must not set `\"private\": true`. A private facade never publishes and gives no error. The structurer does not guard this.",
+      "scope": [
+        "block/package.json"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "block-meta-filled",
+      "rule": "`block.meta` in block/package.json must fill title, description, logo, and organization. It is the only block-level validation, and the structurer does not guard it.",
+      "scope": [
+        "block/package.json"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "cross-block-dep-uses-facade",
+      "rule": "To use another block in tests or as input, depend on its published facade package and import its `<Block>BlockPointer`. Never depend on its private `.model`, `.ui`, or `.workflow` package.",
+      "scope": [
+        "test/**",
+        "**/package.json",
+        "pnpm-workspace.yaml"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "v3-block-test-uses-mutate-block-storage",
+      "rule": "To set data of a V3 (modelAPIVersion 2) block in a test, call `mutateBlockStorage({ operation: 'update-block-data', value })` with the whole BlockData. Do not call `setBlockArgs`; it throws ModelAPIVersionMismatchError.",
+      "scope": [
+        "test/src/**"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "tengo-test-lib-only-in-test-files",
+      "rule": "Import `@platforma-sdk/workflow-tengo:test` only from a `*.test.tengo` file. An import from a `.lib.tengo` or `.tpl.tengo` file breaks the workflow build.",
+      "scope": [
+        "workflow/src/**/*.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "tengo-tests-keep-a-runner",
+      "rule": "When a PR adds `workflow/src/**/*.test.ts` to a workflow that has `*.test.tengo` files, the structurer replaces the `test` script and the Tengo tests stop running. Make CI run `pnpm exec pl-tengo test` explicitly in the same PR.",
+      "scope": [
+        "workflow/src/**",
+        ".github/workflows/**"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "model-ui-test-wiring-from-refresh",
+      "rule": "When a PR adds the first `*.test.ts` to model/ or ui/, the `test` script and vitest devDependency must come from `block-tools structure refresh` in the same PR. Do not hand-write the wiring, and do not leave it out.",
+      "scope": [
+        "model/**",
+        "ui/**"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "turbo-test-passes-backend-env",
+      "rule": "turbo.json must list PL_ADDRESS, PL_TEST_USER, and PL_TEST_PASSWORD under the `test` task `passThroughEnv`. A change that drops them makes every backend test fail as if no server runs.",
+      "scope": [
+        "turbo.json"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "python-tests-workflow-for-software",
+      "rule": "A block with a `software/` module and pytest tests must have `.github/workflows/python-tests.yaml` with `working-directory` set to that module. pytest is not in the turbo graph, so without this workflow the tests never run.",
+      "scope": [
+        "software/**",
+        ".github/workflows/**"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "pytest-pythonpath-config",
+      "rule": "A software module with a flat `src/` must set `[tool.pytest.ini_options]` with `testpaths = [\"tests\"]` and `pythonpath = [\"src\"]` in pyproject.toml. The reference states this block is required.",
+      "scope": [
+        "software/**/pyproject.toml"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "no-skeleton-tests",
+      "rule": "Do not ship a scaffold test such as `expect(true).toBe(true)` or a list of `it.todo(...)` as the test of a behavior. Both pass and test nothing. Write a real assertion or mark the behavior as untested in the test plan.",
+      "scope": [
+        "test/src/**",
+        "model/src/**/*.test.ts",
+        "ui/src/**/*.test.ts",
+        "workflow/src/**/*.test.ts"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "block-test-asserts-ranges",
+      "rule": "In a block integration test, assert ranges and classes, not exact float values from fitters, clustering, or threaded code. Put exact numbers in the tool's pytest suite.",
+      "scope": [
+        "test/src/**"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "wf-body-returns-exports",
+      "rule": "The map that `wf.body` returns must contain an `exports` key, even `exports: {}` when the block exports nothing. Otherwise the run fails with `expected only results and exports in the returned map`.",
+      "scope": [
+        "workflow/src/**/*.tpl.tengo"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "exec-step-states-resources",
+      "rule": "Every `exec` step must state its queue and its legs (`onCPU`, `onGPU`, or both).",
+      "scope": [
+        "workflow/src/**/*.tengo"
+      ],
+      "severity": "high"
+    }
+  ]
+}
