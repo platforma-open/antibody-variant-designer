@@ -31,7 +31,7 @@ e2e = [
 [package.metadata]
 requires-dist = [
     { name = "biopython", marker = "extra == 'antifold'", specifier = "==1.83" },
-    { name = "biotite", marker = "extra == 'antifold'", specifier = "==0.38.*" },
+    { name = "biotite", marker = "extra == 'antifold'", specifier = "==0.39.*" },
     { name = "numpy", marker = "extra == 'antifold'", specifier = "==1.26.*" },
     { name = "pandas", marker = "extra == 'antifold'", specifier = "==2.*" },
     { name = "sapiens", marker = "extra == 'antifold'", specifier = "==1.1.*" },
@@ -64,7 +64,7 @@ wheels = [
 
 [[package]]
 name = "biotite"
-version = "0.38.0"
+version = "0.39.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "msgpack" },
@@ -72,7 +72,13 @@ dependencies = [
     { name = "numpy" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/44/8f60f04ad5a2d3a0eb4c961f3de869f70c597a3e3ee6616c633d8e7af2dc/biotite-0.38.0.tar.gz", hash = "sha256:6194f2281f9e6e3fb3c3064f851b46add19704fc6c11de5d289cda2f4dcf8213", size = 32674188, upload-time = "2023-09-09T18:01:04.254Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/40/5295d7e2f182dfb5236b20f74cfce3eabf9c0a2613b4a63d5409d5f03efd/biotite-0.39.0.tar.gz", hash = "sha256:9fa8b02e72f3ca47af39befad6e18a53ed7ede653298936e3d359dba03d85e13", size = 33164318, upload-time = "2024-01-07T11:55:24.441Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/30/42/1ab20e36d8113b3f5960c2775f608a418b45038ceac7c5b2830bb4000cd4/biotite-0.39.0-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:9c9f82f0ebff66bc4b610cf2f582e53a1075988f65efda456b0496524b7305e7", size = 37162571, upload-time = "2024-01-07T11:53:22.279Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/a9/c6c3c259e2fcc7afd107e483f0b8314b1ea106951c6efedfe29ae008cdaf/biotite-0.39.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:c6def8c214724df542406b59aa7d1d8e26172e03abf0ce4727a00374090167e3", size = 36848159, upload-time = "2024-01-07T11:55:15.723Z" },
+    { url = "https://files.pythonhosted.org/packages/59/f3/433401057ec659f87da178bac856627f1942cfeb49dd0c5941a5b9166144/biotite-0.39.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7b2e79cef19ee6f5af5428a30fb46ad94a3c6f11d20a5fdf72a6b0403e5517f7", size = 53863641, upload-time = "2024-01-07T11:54:21.055Z" },
+    { url = "https://files.pythonhosted.org/packages/15/28/9aaed80685093a36dd8cbd68f691942ffc49a29a51af7192dcc391fb6249/biotite-0.39.0-cp312-cp312-win_amd64.whl", hash = "sha256:54b24e9d64b8ef4669e90a207c14321de253637e7dac8ea242fc7566f018635f", size = 36502818, upload-time = "2024-01-07T11:53:33.842Z" },
+]
 
 [[package]]
 name = "certifi"
