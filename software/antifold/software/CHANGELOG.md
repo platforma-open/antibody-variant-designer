@@ -1,5 +1,12 @@
 # @platforma-open/milaboratories.antibody-variant-designer.software-antifold
 
+## 1.0.2
+
+### Patch Changes
+
+- Updated dependencies [0571843]
+  - @platforma-open/milaboratories.antibody-variant-designer.software-developability@1.0.2
+
 ## 1.0.1
 
 ### Patch Changes
