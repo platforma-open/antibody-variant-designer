@@ -31,8 +31,8 @@ catalogs:
       specifier: 1.1.1
       version: 1.1.1
     '@platforma-sdk/block-tools':
-      specifier: 2.19.1
-      version: 2.19.1
+      specifier: 2.20.0
+      version: 2.20.0
     '@platforma-sdk/model':
       specifier: 1.88.16
       version: 1.88.16
@@ -92,7 +92,7 @@ importers:
         version: 1.8.0(@microsoft/api-extractor@7.58.12(@types/node@26.1.2))(@types/node@26.1.2)(@volar/typescript@2.4.28)(@vue/language-core@3.3.10)(esbuild@0.28.1)(rollup@4.62.4)(vue@3.5.44(typescript@7.0.2))(yaml@2.9.1)
       '@platforma-sdk/block-tools':
         specifier: 'catalog:'
-        version: 2.19.1(@types/node@26.1.2)
+        version: 2.20.0(@types/node@26.1.2)
       shx:
         specifier: 'catalog:'
         version: 0.4.0
@@ -128,7 +128,7 @@ importers:
         version: link:../workflow
       '@platforma-sdk/block-tools':
         specifier: 'catalog:'
-        version: 2.19.1(@types/node@26.1.2)
+        version: 2.20.0(@types/node@26.1.2)
       '@platforma-sdk/model':
         specifier: 'catalog:'
         version: 1.88.16
@@ -165,7 +165,7 @@ importers:
         version: 1.4.1
       '@platforma-sdk/block-tools':
         specifier: 'catalog:'
-        version: 2.19.1(@types/node@26.1.2)
+        version: 2.20.0(@types/node@26.1.2)
       vitest:
         specifier: 'catalog:'
         version: 4.0.18(@types/node@26.1.2)(lightningcss@1.33.0)(yaml@2.9.1)
@@ -193,7 +193,7 @@ importers:
         version: 1.4.1
       '@platforma-sdk/block-tools':
         specifier: 'catalog:'
-        version: 2.19.1(@types/node@26.1.2)
+        version: 2.20.0(@types/node@26.1.2)
       '@types/node':
         specifier: '*'
         version: 26.1.2
@@ -212,7 +212,7 @@ importers:
         version: 1.8.2
       '@platforma-sdk/block-tools':
         specifier: 'catalog:'
-        version: 2.19.1(@types/node@26.1.2)
+        version: 2.20.0(@types/node@26.1.2)
 
   software/antifold/workflow:
     dependencies:
@@ -252,7 +252,7 @@ importers:
         version: 1.8.2
       '@platforma-sdk/block-tools':
         specifier: 'catalog:'
-        version: 2.19.1(@types/node@26.1.2)
+        version: 2.20.0(@types/node@26.1.2)
 
   software/developability/workflow:
     dependencies:
@@ -302,7 +302,7 @@ importers:
     dependencies:
       '@milaboratories/multi-sequence-alignment':
         specifier: 'catalog:'
-        version: 1.47.18(@milaboratories/pl-model-common@1.55.2)(@platforma-sdk/model@1.88.16)(@platforma-sdk/ui-vue@1.88.16(@bytecodealliance/preview2-shim@0.17.9)(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(typescript@7.0.2))(d3-dispatch@3.0.1)(d3-path@3.1.0)(d3-scale-chromatic@3.1.0)(typescript@7.0.2)
+        version: 1.47.18(@milaboratories/pl-model-common@1.56.0)(@platforma-sdk/model@1.88.16)(@platforma-sdk/ui-vue@1.88.16(@bytecodealliance/preview2-shim@0.17.9)(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(typescript@7.0.2))(d3-dispatch@3.0.1)(d3-path@3.1.0)(d3-scale-chromatic@3.1.0)(typescript@7.0.2)
       '@milaboratories/structure-viewer':
         specifier: 'catalog:'
         version: 0.3.1(@platforma-sdk/model@1.88.16)(@platforma-sdk/ui-vue@1.88.16(@bytecodealliance/preview2-shim@0.17.9)(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(typescript@7.0.2))(@types/react@19.2.18)(fp-ts@2.16.11)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vue@3.5.44(typescript@7.0.2))
@@ -1177,6 +1177,10 @@ packages:
     resolution: {integrity: sha512-xT/cvavIeS3CAn2JM8ao30GddUGOjOb5CUQ2XulK0VHKAh/AWEbuYy2elCuubfyBozMHGf2FyIGjJisYOIwmvw==}
     engines: {node: '>=24'}
 
+  '@milaboratories/pl-client@3.24.0':
+    resolution: {integrity: sha512-RPz5HOY82kkGmbCTdmRfmXClXBrHz5o/mxkZ17yY2qLEIRtztFx3c/8pfMKYXHf9GJ2yjwZSEHsZU/mCnyopaA==}
+    engines: {node: '>=24'}
+
   '@milaboratories/pl-crash-recorder@0.3.11':
     resolution: {integrity: sha512-i6YD66yOt0ZqHBshn6+yPItZWeghTS27719VSLj4aMng3E116j2q3moXsAr8d2gsrrk9ozF4GunSY+zbYHb4Og==}
 
@@ -1200,11 +1204,20 @@ packages:
   '@milaboratories/pl-model-backend@1.4.46':
     resolution: {integrity: sha512-XHKEme6suEDMzYxrBkEaLIKx8ig+2s5rCIyne43nnvF/2dMsRkC0EL5s3AiuA/xZ23cWqt44Fo7QR6WwYreSdA==}
 
+  '@milaboratories/pl-model-backend@1.4.49':
+    resolution: {integrity: sha512-MCG+69j4M58/vHEGkCh1pm+AgujpkZcc0creJQmpN6D5UYBViK6Uw7ssnG2jJe+pe48KscwbKKVCbjXklbtjAg==}
+
   '@milaboratories/pl-model-common@1.55.2':
     resolution: {integrity: sha512-4CZyluLF7bx+xVUVwh4/3p28D6FzbGT3nugJEg0A10qjLs0GqlSYuxqj/msRwVcZu3NGseWUZAR8GF73IY+fBQ==}
 
+  '@milaboratories/pl-model-common@1.56.0':
+    resolution: {integrity: sha512-djVZUZ+BBHjA2NDF3/XyFmFVBizZtquIirHkTKNH1fdHCl4tNTvTL7UDcw0tsRCoRpfsqovk8H3cawhNzoIqRA==}
+
   '@milaboratories/pl-model-middle-layer@1.39.0':
     resolution: {integrity: sha512-PaDWit3b+r9SxV5QdKIFlnVO91jRuHAKdh3tHCoSI+memzvGkgwuznpl27jhw+6ydiVuKnscMRfqtJhNHb/5eg==}
+
+  '@milaboratories/pl-model-middle-layer@1.40.0':
+    resolution: {integrity: sha512-8QEefIBTN8UA6gTlin8ms/3+CfZdmUrXq0QB4+61gIHVbXI/yGFxMhabqimP0gvs9gvUAMP0OA99EwKe+yWwPA==}
 
   '@milaboratories/pl-tree@1.18.0':
     resolution: {integrity: sha512-ZkmRQlmmkTqIJEWzM8mKQ5mo1kJ9CkO+fbT1lqQl+pO7kThrEzMPlB3jlYDpnBkc/BdoXV/gi48wkOGD5mEDNA==}
@@ -1860,6 +1873,10 @@ packages:
     resolution: {integrity: sha512-hKqsMXUFS6HZRaHx8qpxPpjOb18AoM/hpDWpTh5+oHxqLOOc1bcSSPSn550h/WHJ5QmOWXc08imFAgRVWEe5tw==}
     hasBin: true
 
+  '@platforma-sdk/block-tools@2.20.0':
+    resolution: {integrity: sha512-c3y0CPthwIuiBOGFxyEfX2/+Svy4y3xDmRF9bCdZW7d2U4HArlnF0s5OZWbnrPklx7XOJm3jZk3ta6yTHKH5nw==}
+    hasBin: true
+
   '@platforma-sdk/blocks-deps-updater@2.2.2':
     resolution: {integrity: sha512-++kzgnKybXirVsHsTNTgkAN4y/LZyFLtmtOH99bXhEveiHygC1iInWqofj9FKjGhcIsQvfFz6DocxfDQMPBWVA==}
     hasBin: true
@@ -1869,6 +1886,9 @@ packages:
 
   '@platforma-sdk/package-builder-lib@1.6.0':
     resolution: {integrity: sha512-8sYnPd/7MFAMLE4PKzXZ/wJ5Jn1ekqsAO45RZBi2mT7G9IhvtmJgojDmkR7lYrBzIuBrHKXTxMGHUGdbytFRfw==}
+
+  '@platforma-sdk/package-builder-lib@1.7.0':
+    resolution: {integrity: sha512-Ylp+ROkQm7npcDSrxCj9YHE/WE05a2c7Y207psltfSd6a+y6/2SFwW3vCflvEzVRQs7fTPlucbdPmTA6Fme/xg==}
 
   '@platforma-sdk/tengo-builder@4.1.21':
     resolution: {integrity: sha512-s13RuVwSWtXWUpd0fi6yxcvTa6blm/6LQtrL8vm+LiSsMVijbuoIgjucsvOdk0TyfgPfmUbxZFPGzPonb/cCQw==}
@@ -4428,121 +4448,145 @@ packages:
     resolution: {integrity: sha512-jrOY5WM+AaAqkv51fHP1x28ifto4WgcZVzodLUyMU1jMWn5Sq+VciRdk/n8E0Ey5w4p4cWWE+m5GfXWOYh7Kzw==}
     cpu: [arm64]
     os: [android]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-darwin-arm64@0.9.5':
     resolution: {integrity: sha512-4O4lkCQIzPZGjiNB1GORSI6hBECbiiSBS/APZXPvNKYH+nhY4uuqv03LNXA+SET3hoBjvr95P5rIhY8KQaQUBA==}
     cpu: [arm64]
     os: [darwin]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-darwin-x64@0.9.5':
     resolution: {integrity: sha512-9EvoUO0SEhD6/d8VHdWuPerepPMSR1y84+UEgz8Un1Ope14Oe7xMvePpEQLTLovoIFZ8Zg3iZ8z8E11pZMqC3g==}
     cpu: [x64]
     os: [darwin]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-freebsd-x64@0.9.5':
     resolution: {integrity: sha512-HqT78WwgHTmp8lwujoUa9CrIortX4DdpuiVC18ZPSGvuuJf4ylpIEI6QrQEM78Zwz3muhAWAOXZ5irdiYY+AyA==}
     cpu: [x64]
     os: [freebsd]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm-gnu@0.9.5':
     resolution: {integrity: sha512-QJXwIW6Ms3QIawbcBIedmrmXnfdpuAOjZJ/eAABq5XTzWvSxZ7lutu9W5yIHahlaTaFnBo7ikrVMD1szLTpPUw==}
     cpu: [arm]
     os: [linux]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm-musl@0.9.5':
     resolution: {integrity: sha512-eHbFy3IHGb+IYarrYwAo0yWSEQV3eAmEn6VrsKA6I1Wy1YPJxWqSJlV69JhqsHtJuJlljUIF3ex0y46yaKIu9w==}
     cpu: [arm]
     os: [linux]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm64-gnu@0.9.5':
     resolution: {integrity: sha512-ByoJMbySTaDhjAXSu8q6Lh7HKg3YoesXpcT72aYk0Aiw4PCznmY4ybpLTq0RCvp0RIPhFm/6yECFiGBwyCC1nw==}
     cpu: [arm64]
     os: [linux]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm64-musl@0.9.5':
     resolution: {integrity: sha512-gD9vfXIoBw1toSxhO9rgmSu/FEfy3PMznJAxVjIuH8DrWEiDKXmJO0pJKfj1Ltbe/TmtWVZR+TjISqeSIGQzMg==}
     cpu: [arm64]
     os: [linux]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-x64-gnu@0.9.5':
     resolution: {integrity: sha512-BARvdnvqMGjOr5Iel2JH+9H5vAIE0R6H0Z2fsT02xrvmI/1ZXNB8lkuX+ZGevPhZb3zJ9WeC/R8JZstrsUOK5g==}
     cpu: [x64]
     os: [linux]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-x64-musl@0.9.5':
     resolution: {integrity: sha512-x8flcevS1fbb7ESrmpOY/pON4eInSaE/7Ktjqx2udOE2W33BNSZmJuwpyUgo54AoHNqrcaM7szqydyJn5fNvew==}
     cpu: [x64]
     os: [linux]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-win32-arm64@0.9.5':
     resolution: {integrity: sha512-KOL/rBatWqH4ZpCNoF8ZtSNdOJbAxBJLmk/VeRciepGROPTbPum1A9t67GpFgOU7qrkUWlPJdJ+KHKbvbmOt+w==}
     cpu: [arm64]
     os: [win32]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-win32-x64@0.9.5':
     resolution: {integrity: sha512-FxENahEjWSan59Syh/us/Kf4wNq8qrJLFJ3R2N4Oiwtb6yNdz/rWLNTIoNSssnsp7IoWJdUP6o/Z8ppg7lXMcg==}
     cpu: [x64]
     os: [win32]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-parser/binding-android-arm64@0.9.5':
     resolution: {integrity: sha512-A2JCFCSHfnficqYEw4Iujpx7XrkMM3UfFcgJFmYpZSo9zM4nyhmdIIE0FogSduuU60lhM0/UcfuUBXIVNBMlGQ==}
     cpu: [arm64]
     os: [android]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-darwin-arm64@0.9.5':
     resolution: {integrity: sha512-3PiyU+Eare4YuKaQ22N98/yAiROPY5o/NQJHraICzDvk4pgS+m+bgLKOvkGBRn33OnV95Vdv1Mn38b+MQHpULQ==}
     cpu: [arm64]
     os: [darwin]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-darwin-x64@0.9.5':
     resolution: {integrity: sha512-blFMAFI7AInI83XaiOF8cIeiRM46Nz9EfpZtZPRLbKxSA9aAr5v8aHYpmfN6NoyXxAv/10pwS4gsAuc1W6fy5Q==}
     cpu: [x64]
     os: [darwin]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-freebsd-x64@0.9.5':
     resolution: {integrity: sha512-TsNuL4qsZdO0tHp5GW43Y5fHeLPpPHA675wdcPNTcdq2ZO5AvsQWFFoiDg8CH4oBktfsQ9tdvKhjLnLYwKvp4g==}
     cpu: [x64]
     os: [freebsd]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-arm-gnu@0.9.5':
     resolution: {integrity: sha512-b0afYK5gHeV8RdmOcqAlgM8ONsye4cax4DMnIBaoJyPMd1UTGvTbpkqQcPVdhmHlcfcGVGMV1laeVovlr/dscw==}
     cpu: [arm]
     os: [linux]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-arm-musl@0.9.5':
     resolution: {integrity: sha512-fD3lKzl+r6j6n8DwiMY53qnh5DLqD8KJjCp+NbVud54Nnh3Q9Wprqss3YzyMHP3NSJk663Wlg1E1X5qOuFVFig==}
     cpu: [arm]
     os: [linux]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-arm64-gnu@0.9.5':
     resolution: {integrity: sha512-aRU/aCphV1MWCl/lvI6NX8LgucHQ68Fx+vz7NBb/5MEr2EuzCxiPOQqeFcMdWh+2AED/p0AvAREch0c+cSnlhA==}
     cpu: [arm64]
     os: [linux]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-arm64-musl@0.9.5':
     resolution: {integrity: sha512-5+Guro0l8H473YXlEjVNBRLN/IbPbJdnQh1zo0OLt49xxnON+XMJRRaEyTOTfkn9QSRg0+BhEKGR4W9Gu2uZJQ==}
     cpu: [arm64]
     os: [linux]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-x64-gnu@0.9.5':
     resolution: {integrity: sha512-pwwSyV9q+GlvzSXlsMZBMlgk22L5bud714/vqZCdeUTivzeUVltQzUaf3IQXOGXdpc59JYTeuMCtbGquaAUoCA==}
     cpu: [x64]
     os: [linux]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-x64-musl@0.9.5':
     resolution: {integrity: sha512-z18j6JN3lBHH8vzN7gG1M8fI0nlgItSfnC9PfbmUbt97iHViKfw2iA2G9fGwRMe5LyPRZBrejIlapbygPbpdaw==}
     cpu: [x64]
     os: [linux]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-win32-arm64@0.9.5':
     resolution: {integrity: sha512-s6Gwttb1dQvtPX6Bgkw+UPC9IO3UBDXc6Zezog8MMgvu3UfJBBB9TQqKBX/2quu0Eyh+lLSAyNlIyyecaagUPg==}
     cpu: [arm64]
     os: [win32]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-win32-x64@0.9.5':
     resolution: {integrity: sha512-FrERt9YWatY3bJfSUdi4YWY+6iQcyo3MzCC821BxlWM5TFZEHijnpz/bknR79VHlXY/9CvXz8ZlaAGPsTtN3nw==}
     cpu: [x64]
     os: [win32]
+    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-toolchain/types@0.9.5':
     resolution: {integrity: sha512-KiuLNNgX9uNealaWAR+G3/cMXnRk9x4TY2EkYe/KIag+UPdwiA0RRf1hr1WAxzTP8KGzCTkqUdLPvqh32sEO3w==}
@@ -8299,11 +8343,11 @@ snapshots:
       - d3-scale-chromatic
       - supports-color
 
-  '@milaboratories/multi-sequence-alignment@1.47.18(@milaboratories/pl-model-common@1.55.2)(@platforma-sdk/model@1.88.16)(@platforma-sdk/ui-vue@1.88.16(@bytecodealliance/preview2-shim@0.17.9)(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(typescript@7.0.2))(d3-dispatch@3.0.1)(d3-path@3.1.0)(d3-scale-chromatic@3.1.0)(typescript@7.0.2)':
+  '@milaboratories/multi-sequence-alignment@1.47.18(@milaboratories/pl-model-common@1.56.0)(@platforma-sdk/model@1.88.16)(@platforma-sdk/ui-vue@1.88.16(@bytecodealliance/preview2-shim@0.17.9)(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(typescript@7.0.2))(d3-dispatch@3.0.1)(d3-path@3.1.0)(d3-scale-chromatic@3.1.0)(typescript@7.0.2)':
     dependencies:
       '@milaboratories/biowasm-tools': 2.0.3
       '@milaboratories/miplots4': 1.2.3(d3-dispatch@3.0.1)(d3-path@3.1.0)(d3-scale-chromatic@3.1.0)
-      '@milaboratories/pf-plots': 1.4.6(@milaboratories/pl-model-common@1.55.2)(@platforma-sdk/model@1.88.16)
+      '@milaboratories/pf-plots': 1.4.6(@milaboratories/pl-model-common@1.56.0)(@platforma-sdk/model@1.88.16)
       '@platforma-sdk/model': 1.88.16
       '@platforma-sdk/ui-vue': 1.88.16(@bytecodealliance/preview2-shim@0.17.9)(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(typescript@7.0.2)
       vue: 3.5.44(typescript@7.0.2)
@@ -8330,10 +8374,10 @@ snapshots:
       - encoding
       - supports-color
 
-  '@milaboratories/pf-plots@1.4.6(@milaboratories/pl-model-common@1.55.2)(@platforma-sdk/model@1.88.16)':
+  '@milaboratories/pf-plots@1.4.6(@milaboratories/pl-model-common@1.56.0)(@platforma-sdk/model@1.88.16)':
     dependencies:
       '@milaboratories/helpers': 1.14.5
-      '@milaboratories/pl-model-common': 1.55.2
+      '@milaboratories/pl-model-common': 1.56.0
       '@platforma-sdk/model': 1.88.16
       canonicalize: 2.1.0
       lodash: 4.18.1
@@ -8380,6 +8424,24 @@ snapshots:
       '@grpc/grpc-js': 1.14.7
       '@milaboratories/pl-http': 1.2.6
       '@milaboratories/pl-model-common': 1.55.2
+      '@milaboratories/ts-helpers': 1.9.1
+      '@protobuf-ts/grpc-transport': 2.11.1(@grpc/grpc-js@1.14.7)
+      '@protobuf-ts/runtime': 2.11.1
+      '@protobuf-ts/runtime-rpc': 2.11.1
+      canonicalize: 2.1.0
+      denque: 2.1.0
+      long: 5.3.2
+      lru-cache: 11.5.3
+      openapi-fetch: 0.15.2
+      undici: 7.30.2
+      utility-types: 3.11.0
+      yaml: 2.9.1
+
+  '@milaboratories/pl-client@3.24.0':
+    dependencies:
+      '@grpc/grpc-js': 1.14.7
+      '@milaboratories/pl-http': 1.2.6
+      '@milaboratories/pl-model-common': 1.56.0
       '@milaboratories/ts-helpers': 1.9.1
       '@protobuf-ts/grpc-transport': 2.11.1(@grpc/grpc-js@1.14.7)
       '@protobuf-ts/runtime': 2.11.1
@@ -8484,7 +8546,21 @@ snapshots:
       canonicalize: 2.1.0
       zod: 3.25.76
 
+  '@milaboratories/pl-model-backend@1.4.49':
+    dependencies:
+      '@milaboratories/pl-client': 3.24.0
+      canonicalize: 2.1.0
+      zod: 3.25.76
+
   '@milaboratories/pl-model-common@1.55.2':
+    dependencies:
+      '@milaboratories/helpers': 1.14.7
+      '@milaboratories/pl-error-like': 1.12.11
+      canonicalize: 2.1.0
+      es-toolkit: 1.50.0
+      zod: 3.25.76
+
+  '@milaboratories/pl-model-common@1.56.0':
     dependencies:
       '@milaboratories/helpers': 1.14.7
       '@milaboratories/pl-error-like': 1.12.11
@@ -8496,6 +8572,14 @@ snapshots:
     dependencies:
       '@milaboratories/helpers': 1.14.7
       '@milaboratories/pl-model-common': 1.55.2
+      es-toolkit: 1.50.0
+      utility-types: 3.11.0
+      zod: 3.25.76
+
+  '@milaboratories/pl-model-middle-layer@1.40.0':
+    dependencies:
+      '@milaboratories/helpers': 1.14.7
+      '@milaboratories/pl-model-common': 1.56.0
       es-toolkit: 1.50.0
       utility-types: 3.11.0
       zod: 3.25.76
@@ -9132,6 +9216,33 @@ snapshots:
       - react-native-b4a
       - supports-color
 
+  '@platforma-sdk/block-tools@2.20.0(@types/node@26.1.2)':
+    dependencies:
+      '@aws-sdk/client-ecr-public': 3.1157.0
+      '@inquirer/prompts': 7.10.1(@types/node@26.1.2)
+      '@milaboratories/pl-http': 1.2.6
+      '@milaboratories/pl-model-backend': 1.4.49
+      '@milaboratories/pl-model-common': 1.56.0
+      '@milaboratories/pl-model-middle-layer': 1.40.0
+      '@milaboratories/resolve-helper': 1.1.3
+      '@milaboratories/ts-helpers': 1.9.1
+      '@platforma-sdk/blocks-deps-updater': 2.2.2
+      '@platforma-sdk/package-builder-lib': 1.7.0
+      canonicalize: 2.1.0
+      commander: 15.0.0
+      lru-cache: 11.5.3
+      mime-types: 2.1.35
+      tar: 7.5.22
+      undici: 7.30.2
+      yaml: 2.9.1
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - '@types/node'
+      - bare-abort-controller
+      - bare-buffer
+      - react-native-b4a
+      - supports-color
+
   '@platforma-sdk/blocks-deps-updater@2.2.2':
     dependencies:
       yaml: 2.9.1
@@ -9151,6 +9262,23 @@ snapshots:
       zod: 3.25.76
 
   '@platforma-sdk/package-builder-lib@1.6.0':
+    dependencies:
+      '@aws-sdk/client-s3': 3.1157.0
+      '@aws-sdk/lib-storage': 3.1157.0(@aws-sdk/client-s3@3.1157.0)
+      '@google-cloud/storage': 8.4.0
+      '@milaboratories/resolve-helper': 1.1.3
+      archiver: 7.0.1
+      undici: 7.30.2
+      winston: 3.19.0
+      yaml: 2.9.1
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - react-native-b4a
+      - supports-color
+
+  '@platforma-sdk/package-builder-lib@1.7.0':
     dependencies:
       '@aws-sdk/client-s3': 3.1157.0
       '@aws-sdk/lib-storage': 3.1157.0(@aws-sdk/client-s3@3.1157.0)
